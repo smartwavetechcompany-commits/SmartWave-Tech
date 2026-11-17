@@ -34,7 +34,7 @@ import {
 } from 'date-fns';
 import { safeFormatDate } from '../utils/dateUtils';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { Pagination } from './Pagination';
@@ -253,7 +253,7 @@ export function DSSGuestReport() {
       r.address
     ]);
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       head: headers,
       body: data,
       startY: 32,

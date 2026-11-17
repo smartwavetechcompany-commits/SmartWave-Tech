@@ -1,5 +1,7 @@
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable, { applyPlugin } from 'jspdf-autotable';
+
+applyPlugin(jsPDF);
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -128,7 +130,7 @@ export function exportTableToPDF(options: PDFExportOptions): void {
   currentY += 4;
 
   // AutoTable configuration
-  (doc as any).autoTable({
+  autoTable(doc, {
     startY: currentY,
     head: [headers],
     body: rows,

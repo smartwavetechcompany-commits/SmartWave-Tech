@@ -3,7 +3,9 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, RoomBlocking, RoomType, OperationType, LedgerEntry } from '../types';
-import { cn, formatCurrency } from '../utils';
+import { cn, formatCurrency, exportToCSV } from '../utils';
+import { exportTableToPDF } from '../utils/pdfExport';
+import { printDocument } from '../utils/printUtils';
 import { 
   Users, 
   LogIn, 
@@ -34,7 +36,8 @@ import {
   XCircle,
   RotateCcw,
   GripVertical,
-  Tag
+  Tag,
+  Printer
 } from 'lucide-react';
 import { BreakfastList } from './BreakfastList';
 import { DSSGuestReport } from './DSSGuestReport';
@@ -747,6 +750,76 @@ export function OperationsDashboard() {
     },
   ];
 
+  const operationsPrintRef = useRef<HTMLDivElement>(null);
+
+  const buildOperationsExportRows = () => {
+    const quickStatsRows = [
+      {
+        Section: 'Quick Stats (Live Operations)',
+        Metric: 'Current Occupancy',
+        Value: `${quickStatsData.occupancyPct}% (${quickStatsData.occupiedCount} of ${quickStatsData.totalRooms} rooms)`,
+        Details: `Vacant / Ready: ${quickStatsData.vacantCount} | Total Rooms: ${quickStatsData.totalRooms}`
+      },
+      {
+        Section: 'Quick Stats (Live Operations)',
+        Metric: 'Arrival Count',
+        Value: `${quickStatsData.totalArrivals} Arrivals Today`,
+        Details: `Pending Check-in: ${quickStatsData.pendingArrivals} | Arrived: ${quickStatsData.completedCheckins}`
+      },
+      {
+        Section: 'Quick Stats (Live Operations)',
+        Metric: 'Departure Count',
+        Value: `${quickStatsData.totalDepartures} Departures Today`,
+        Details: `Due Departure: ${quickStatsData.pendingDepartures} | Departed: ${quickStatsData.completedCheckouts}`
+      }
+    ];
+
+    const summaryCardRows = stats.map(s => ({
+      Section: 'Daily Operations Summary',
+      Metric: s.label,
+      Value: String(s.count),
+      Details: s.sublabel
+    }));
+
+    return [...quickStatsRows, ...summaryCardRows];
+  };
+
+  const handleExportOperationsPDF = () => {
+    const todayLabel = format(new Date(), 'yyyy-MM-dd');
+    const cleanHotel = (hotel?.name || 'Hotel').replace(/[^a-zA-Z0-9]/g, '_');
+    const rows = buildOperationsExportRows().map(r => [r.Section, r.Metric, r.Value, r.Details]);
+
+    exportTableToPDF({
+      title: 'Quick Stats & Daily Operations Summary',
+      subtitle: `Live Operations Snapshot (${format(new Date(), 'EEEE, MMMM d, yyyy')})`,
+      hotelName: hotel?.name || 'Hotel Property Management',
+      hotelAddress: hotel?.branding?.address,
+      hotelPhone: hotel?.branding?.phone,
+      hotelEmail: hotel?.branding?.email,
+      generatedBy: profile?.displayName || profile?.name || profile?.email || 'Authorized Staff',
+      currency,
+      filename: `${cleanHotel}_quick_stats_operations_${todayLabel}.pdf`,
+      headers: ['Section', 'Metric', 'Value', 'Details'],
+      rows
+    });
+    toast.success('Quick Stats & Daily Operations exported as PDF');
+  };
+
+  const handleExportOperationsCSV = () => {
+    const todayLabel = format(new Date(), 'yyyy-MM-dd');
+    exportToCSV(buildOperationsExportRows(), `quick_stats_operations_${todayLabel}.csv`);
+    toast.success('Quick Stats & Daily Operations exported as CSV');
+  };
+
+  const handlePrintOperations = () => {
+    const cleanHotel = (hotel?.name || 'Hotel').replace(/[^a-zA-Z0-9]/g, '_');
+    printDocument(operationsPrintRef.current, {
+      title: `${cleanHotel}_Quick_Stats_Operations_${format(new Date(), 'yyyy-MM-dd')}`,
+      pageSize: 'A4 portrait',
+      pageMargin: '10mm'
+    });
+  };
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8 print:p-0 print:m-0 print:space-y-0">
       <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 print:hidden">
@@ -844,9 +917,38 @@ export function OperationsDashboard() {
               </p>
             </div>
           </div>
-          <div className="text-xs text-zinc-400 font-medium flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Today: <strong className="text-zinc-200">{format(new Date(), 'EEEE, MMMM d, yyyy')}</strong></span>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <div className="text-xs text-zinc-400 font-medium flex items-center gap-2 mr-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Today: <strong className="text-zinc-200">{format(new Date(), 'EEEE, MMMM d, yyyy')}</strong></span>
+            </div>
+            <button
+              type="button"
+              onClick={handleExportOperationsPDF}
+              className="px-2.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-black rounded-lg text-[11px] font-bold transition-all flex items-center gap-1.5"
+              title="Export Quick Stats & Daily Operations as PDF"
+            >
+              <FileText size={13} />
+              <span>Export PDF</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleExportOperationsCSV}
+              className="px-2.5 py-1.5 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1.5"
+              title="Export Quick Stats & Daily Operations as CSV"
+            >
+              <Download size={13} />
+              <span>CSV</span>
+            </button>
+            <button
+              type="button"
+              onClick={handlePrintOperations}
+              className="px-2.5 py-1.5 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1.5"
+              title="Print or Save as PDF"
+            >
+              <Printer size={13} />
+              <span>Print</span>
+            </button>
           </div>
         </div>
 
@@ -2155,6 +2257,120 @@ export function OperationsDashboard() {
           initialSelectedReservation={quickCheckInInitialRes}
         />
       )}
+      {/* Hidden Printable Quick Stats & Daily Operations Summary Sheet */}
+      <div
+        ref={operationsPrintRef}
+        id="operations-quick-stats-print-container"
+        className="hidden print:block bg-white text-zinc-900 p-8 font-sans"
+      >
+        <div className="border-b-2 border-zinc-900 pb-4 mb-6 flex justify-between items-start">
+          <div>
+            <h1 className="text-2xl font-black uppercase tracking-tight text-zinc-900">
+              {hotel?.name || 'Hotel Property Management'}
+            </h1>
+            {hotel?.branding?.address && (
+              <p className="text-xs text-zinc-600 mt-0.5">{hotel.branding.address}</p>
+            )}
+            {(hotel?.branding?.phone || hotel?.branding?.email) && (
+              <p className="text-xs text-zinc-600">
+                {[hotel?.branding?.phone, hotel?.branding?.email].filter(Boolean).join(' • ')}
+              </p>
+            )}
+            <p className="text-sm font-bold text-emerald-700 mt-2 uppercase tracking-wider">
+              Quick Stats &amp; Daily Operations Report
+            </p>
+          </div>
+          <div className="text-right text-xs text-zinc-600">
+            <p className="font-bold text-zinc-900">Date: {format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
+            <p>Generated: {format(new Date(), 'MMM d, yyyy HH:mm')}</p>
+            <p>Prepared by: {profile?.displayName || profile?.name || profile?.email || 'Authorized Staff'}</p>
+          </div>
+        </div>
+
+        <div className="mb-6">
+          <h2 className="text-xs font-black uppercase tracking-widest text-zinc-500 mb-3">Quick Stats — Live Operations</h2>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="border border-zinc-300 rounded-lg p-3 bg-zinc-50">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Current Occupancy</div>
+              <div className="text-xl font-black text-zinc-900 mt-1">
+                {quickStatsData.occupancyPct}%{' '}
+                <span className="text-xs font-medium text-zinc-600">({quickStatsData.occupiedCount} of {quickStatsData.totalRooms} rooms)</span>
+              </div>
+              <div className="text-[10px] text-zinc-600 mt-2 pt-1.5 border-t border-zinc-200 flex justify-between">
+                <span>Vacant / Ready: {quickStatsData.vacantCount}</span>
+                <span>Total Rooms: {quickStatsData.totalRooms}</span>
+              </div>
+            </div>
+
+            <div className="border border-zinc-300 rounded-lg p-3 bg-zinc-50">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Arrival Count</div>
+              <div className="text-xl font-black text-zinc-900 mt-1">
+                {quickStatsData.totalArrivals}{' '}
+                <span className="text-xs font-medium text-zinc-600">Arrivals Today</span>
+              </div>
+              <div className="text-[10px] text-zinc-600 mt-2 pt-1.5 border-t border-zinc-200 flex justify-between">
+                <span>Pending Check-in: {quickStatsData.pendingArrivals}</span>
+                <span>Arrived: {quickStatsData.completedCheckins}</span>
+              </div>
+            </div>
+
+            <div className="border border-zinc-300 rounded-lg p-3 bg-zinc-50">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Departure Count</div>
+              <div className="text-xl font-black text-zinc-900 mt-1">
+                {quickStatsData.totalDepartures}{' '}
+                <span className="text-xs font-medium text-zinc-600">Departures Today</span>
+              </div>
+              <div className="text-[10px] text-zinc-600 mt-2 pt-1.5 border-t border-zinc-200 flex justify-between">
+                <span>Due Departure: {quickStatsData.pendingDepartures}</span>
+                <span>Departed: {quickStatsData.completedCheckouts}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mb-6">
+          <h2 className="text-xs font-black uppercase tracking-widest text-zinc-500 mb-3">Daily Operations Summary</h2>
+          <div className="grid grid-cols-5 gap-2">
+            {stats.map((stat) => (
+              <div key={stat.tab} className="border border-zinc-300 rounded-lg p-3 bg-zinc-50">
+                <div className="text-xl font-black text-zinc-900">{stat.count}</div>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-700 mt-0.5">{stat.label}</div>
+                <div className="text-[9px] text-zinc-500 mt-0.5">{stat.sublabel}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {filteredData().length > 0 && (
+          <div>
+            <h2 className="text-xs font-black uppercase tracking-widest text-zinc-500 mb-2">
+              Current Operations List ({filteredData().length})
+            </h2>
+            <table className="w-full text-left border-collapse text-xs border border-zinc-300">
+              <thead>
+                <tr className="bg-zinc-100 border-b border-zinc-300">
+                  <th className="p-2 font-bold">Guest</th>
+                  <th className="p-2 font-bold">Room</th>
+                  <th className="p-2 font-bold">Check-In</th>
+                  <th className="p-2 font-bold">Check-Out</th>
+                  <th className="p-2 font-bold text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-200">
+                {filteredData().map((res) => (
+                  <tr key={res.id}>
+                    <td className="p-2 font-medium">{res.guestName}</td>
+                    <td className="p-2">Room {res.roomNumber}</td>
+                    <td className="p-2">{res.checkIn}</td>
+                    <td className="p-2">{res.checkOut}</td>
+                    <td className="p-2 text-right uppercase font-bold">{res.status.replace('_', ' ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -41,7 +41,7 @@ import {
 } from 'date-fns';
 import { safeFormatDate } from '../utils/dateUtils';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { Pagination } from './Pagination';
@@ -564,7 +564,7 @@ export function BreakfastList() {
         e.isServed ? 'Served [X]' : 'Pending [  ]'
       ]);
 
-      (doc as any).autoTable({
+      autoTable(doc, {
         head: headers,
         body: data,
         startY: 38,
@@ -586,7 +586,7 @@ export function BreakfastList() {
         `${s.servedRate}%`
       ]);
 
-      (doc as any).autoTable({
+      autoTable(doc, {
         head: summaryHeaders,
         body: summaryRows,
         startY: 38,
@@ -612,7 +612,7 @@ export function BreakfastList() {
         l.isServed ? 'SERVED' : 'UNCLAIMED'
       ]);
 
-      (doc as any).autoTable({
+      autoTable(doc, {
         head: ledgerHeaders,
         body: ledgerRows,
         startY: nextY + 16,

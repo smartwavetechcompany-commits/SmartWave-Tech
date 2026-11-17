@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { collection, collectionGroup, onSnapshot, query, where, limit, orderBy } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
@@ -30,7 +30,9 @@ import {
   Activity,
   Download,
   Receipt,
-  AlertTriangle
+  AlertTriangle,
+  Printer,
+  FileText
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { 
@@ -43,6 +45,8 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 import { exportToCSV } from '../utils';
+import { exportTableToPDF } from '../utils/pdfExport';
+import { printDocument } from '../utils/printUtils';
 import { format, isToday, isValid } from 'date-fns';
 import { toast } from 'sonner';
 import { GlobalErrorBoundary } from './GlobalErrorBoundary';
@@ -717,6 +721,8 @@ export function Dashboard() {
     }
   }, [hasRevenueShortfall, todayRevenue, dailyRevenueThreshold, revenueShortfall, hotel?.id, currency, exchangeRate]);
 
+  const dashboardPrintRef = useRef<HTMLDivElement>(null);
+
   const handleExportTransactions = () => {
     if (!canViewFinances) {
       toast.error('Permission denied: Financial records are restricted to Finance and Hotel Admin users.');
@@ -732,6 +738,71 @@ export function Dashboard() {
     }));
     exportToCSV(dataToExport, `transactions_${format(new Date(), 'yyyy-MM-dd')}.csv`);
     toast.success('Transactions exported successfully');
+  };
+
+  const getOverviewRoomBreakdown = () => [
+    { label: 'Vacant Clean', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'clean').length },
+    { label: 'Occupied', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length },
+    { label: 'Dirty', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'dirty').length },
+    { label: 'Maintenance', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'maintenance').length },
+  ];
+
+  const handleExportOverviewPDF = () => {
+    const todayLabel = format(new Date(), 'yyyy-MM-dd');
+    const cleanHotel = (hotel?.name || 'Hotel').replace(/[^a-zA-Z0-9]/g, '_');
+    const roomSummary = getOverviewRoomBreakdown();
+
+    const rows: (string | number)[][] = [
+      ...stats.map(s => ['Key Metrics', s.label, String(s.value).replace(/₦/g, 'NGN ')]),
+      ...(profile?.role === 'superAdmin' && !hotel?.id
+        ? []
+        : roomSummary.map(item => ['Room Status Summary', item.label, String(item.count)])),
+    ];
+
+    exportTableToPDF({
+      title: profile?.role === 'superAdmin' && !hotel?.id ? 'System-Wide Overview Summary' : 'Executive Overview & Live KPI Summary',
+      subtitle: 'Live Occupancy, Guest Activity & Financial Snapshot',
+      hotelName: hotel?.name || 'Hotel Property Management',
+      hotelAddress: hotel?.branding?.address,
+      hotelPhone: hotel?.branding?.phone,
+      hotelEmail: hotel?.branding?.email,
+      generatedBy: profile?.displayName || profile?.name || profile?.email || 'Authorized Staff',
+      currency,
+      filename: `${cleanHotel}_overview_summary_${todayLabel}.pdf`,
+      headers: ['Section', 'Metric', 'Value'],
+      rows,
+    });
+    toast.success('Overview summary exported as PDF');
+  };
+
+  const handleExportOverviewCSV = () => {
+    const todayLabel = format(new Date(), 'yyyy-MM-dd');
+    const roomSummary = getOverviewRoomBreakdown();
+    const csvRows = [
+      ...stats.map(s => ({
+        Section: 'Key Metrics',
+        Metric: s.label,
+        Value: s.value,
+      })),
+      ...(profile?.role === 'superAdmin' && !hotel?.id
+        ? []
+        : roomSummary.map(item => ({
+            Section: 'Room Status Summary',
+            Metric: item.label,
+            Value: item.count,
+          }))),
+    ];
+    exportToCSV(csvRows, `overview_summary_${todayLabel}.csv`);
+    toast.success('Overview summary exported as CSV');
+  };
+
+  const handlePrintOverview = () => {
+    const cleanHotel = (hotel?.name || 'Hotel').replace(/[^a-zA-Z0-9]/g, '_');
+    printDocument(dashboardPrintRef.current, {
+      title: `${cleanHotel}_Overview_Summary_${format(new Date(), 'yyyy-MM-dd')}`,
+      pageSize: 'A4 portrait',
+      pageMargin: '10mm',
+    });
   };
 
   if (!isSubscriptionActive && profile?.role !== 'superAdmin') {
@@ -753,21 +824,50 @@ export function Dashboard() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8">
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 print:hidden">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-zinc-50 tracking-tight">Overview</h1>
           <p className="text-sm text-zinc-400">
             {profile?.role === 'superAdmin' && !hotel?.id ? 'System-wide analytics and control' : `Welcome back to ${hotel?.name || 'Hotel'}`}
           </p>
         </div>
-        <button 
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="p-1.5 sm:p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50 self-start sm:self-center"
-          title="Refresh Data"
-        >
-          <RefreshCw size={18} className={refreshing ? "animate-spin text-emerald-500" : ""} />
-        </button>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+          <button
+            type="button"
+            onClick={handleExportOverviewPDF}
+            className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-black rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+            title="Export Overview Summary as PDF"
+          >
+            <FileText size={14} />
+            <span>Export PDF</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleExportOverviewCSV}
+            className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+            title="Export Overview Summary as CSV"
+          >
+            <Download size={14} />
+            <span>CSV</span>
+          </button>
+          <button
+            type="button"
+            onClick={handlePrintOverview}
+            className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+            title="Print or Save as PDF"
+          >
+            <Printer size={14} />
+            <span>Print</span>
+          </button>
+          <button 
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="p-1.5 sm:p-2 text-zinc-500 hover:text-zinc-50 hover:bg-zinc-800 rounded-lg transition-all disabled:opacity-50"
+            title="Refresh Data"
+          >
+            <RefreshCw size={18} className={refreshing ? "animate-spin text-emerald-500" : ""} />
+          </button>
+        </div>
       </header>
 
       {/* Proactive Daily Revenue Threshold Deficit Alert */}
@@ -1049,6 +1149,124 @@ export function Dashboard() {
             </div>
           )}
         </div>
+      </div>
+      {/* Hidden Printable Overview Summary Sheet */}
+      <div
+        ref={dashboardPrintRef}
+        id="dashboard-overview-print-container"
+        className="hidden print:block bg-white text-zinc-900 p-8 font-sans"
+      >
+        <div className="border-b-2 border-zinc-900 pb-4 mb-6 flex justify-between items-start">
+          <div>
+            <h1 className="text-2xl font-black uppercase tracking-tight text-zinc-900">
+              {hotel?.name || 'Hotel Property Management'}
+            </h1>
+            {hotel?.branding?.address && (
+              <p className="text-xs text-zinc-600 mt-0.5">{hotel.branding.address}</p>
+            )}
+            {(hotel?.branding?.phone || hotel?.branding?.email) && (
+              <p className="text-xs text-zinc-600">
+                {[hotel?.branding?.phone, hotel?.branding?.email].filter(Boolean).join(' • ')}
+              </p>
+            )}
+            <p className="text-sm font-bold text-emerald-700 mt-2 uppercase tracking-wider">
+              {profile?.role === 'superAdmin' && !hotel?.id ? 'System-Wide Overview Summary' : 'Executive Overview & Live KPI Summary'}
+            </p>
+          </div>
+          <div className="text-right text-xs text-zinc-600">
+            <p className="font-bold text-zinc-900">Generated: {format(new Date(), 'MMM d, yyyy HH:mm')}</p>
+            <p>Currency: {currency}</p>
+            <p>Prepared by: {profile?.displayName || profile?.name || profile?.email || 'Authorized Staff'}</p>
+          </div>
+        </div>
+
+        <div className="mb-6">
+          <h2 className="text-xs font-black uppercase tracking-widest text-zinc-500 mb-3">Live Key Performance Indicators</h2>
+          <div className="grid grid-cols-3 gap-3">
+            {stats.map((stat) => (
+              <div key={stat.label} className="border border-zinc-300 rounded-lg p-3 bg-zinc-50">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">{stat.label}</div>
+                <div className="text-lg font-black text-zinc-900 mt-1">{stat.value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {!(profile?.role === 'superAdmin' && !hotel?.id) && (
+          <div className="mb-6">
+            <h2 className="text-xs font-black uppercase tracking-widest text-zinc-500 mb-2">Room Status Summary</h2>
+            <table className="w-full text-left border-collapse text-xs border border-zinc-300">
+              <thead>
+                <tr className="bg-zinc-100 border-b border-zinc-300">
+                  <th className="p-2 font-bold">Room Status</th>
+                  <th className="p-2 font-bold text-right">Count</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-200">
+                {getOverviewRoomBreakdown().map((item) => (
+                  <tr key={item.label}>
+                    <td className="p-2 font-medium">{item.label}</td>
+                    <td className="p-2 text-right font-bold">{item.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {reservations.length > 0 && (
+          <div className="mb-6">
+            <h2 className="text-xs font-black uppercase tracking-widest text-zinc-500 mb-2">Recent Reservations</h2>
+            <table className="w-full text-left border-collapse text-xs border border-zinc-300">
+              <thead>
+                <tr className="bg-zinc-100 border-b border-zinc-300">
+                  <th className="p-2 font-bold">Guest</th>
+                  <th className="p-2 font-bold">Room</th>
+                  <th className="p-2 font-bold">Check-In</th>
+                  <th className="p-2 font-bold text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-200">
+                {reservations.slice(0, 5).map((res) => (
+                  <tr key={res.id}>
+                    <td className="p-2 font-medium">{res.guestName}</td>
+                    <td className="p-2">Room {res.roomNumber}</td>
+                    <td className="p-2">{res.checkIn}</td>
+                    <td className="p-2 text-right uppercase font-bold">{res.status.replace('_', ' ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {(profile?.role === 'superAdmin' || (canViewFinances && isModuleEnabled(hotel, 'finance'))) && recentTransactionsFeed.length > 0 && (
+          <div>
+            <h2 className="text-xs font-black uppercase tracking-widest text-zinc-500 mb-2">Recent Transactions</h2>
+            <table className="w-full text-left border-collapse text-xs border border-zinc-300">
+              <thead>
+                <tr className="bg-zinc-100 border-b border-zinc-300">
+                  <th className="p-2 font-bold">Description</th>
+                  <th className="p-2 font-bold">Category</th>
+                  <th className="p-2 font-bold">Date</th>
+                  <th className="p-2 font-bold text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-200">
+                {recentTransactionsFeed.slice(0, 5).map((record) => (
+                  <tr key={record.id}>
+                    <td className="p-2 font-medium">{record.description}</td>
+                    <td className="p-2">{record.category}</td>
+                    <td className="p-2">{safeFormatTimestamp(record.timestamp, 'MMM d, HH:mm')}</td>
+                    <td className="p-2 text-right font-bold">
+                      {record.type === 'income' ? '+' : '-'}{formatCurrency(record.amount, currency, exchangeRate)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 </div>
   );
