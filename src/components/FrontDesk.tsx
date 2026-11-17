@@ -1763,8 +1763,13 @@ export function FrontDesk() {
 
   const handleBulkCheckIn = async () => {
     if (!hotel?.id || !profile || selectedReservations.length === 0) return;
+
+    const eligibleReservations = reservations.filter(
+      r => selectedReservations.includes(r.id) && (r.status === 'pending' || r.status === 'confirmed')
+    );
+    if (eligibleReservations.length === 0) return;
     
-    const confirm = window.confirm(`Are you sure you want to check in ${selectedReservations.length} guests?`);
+    const confirm = window.confirm(`Are you sure you want to check in ${eligibleReservations.length} guest${eligibleReservations.length > 1 ? 's' : ''}?`);
     if (!confirm) return;
 
     try {
@@ -1772,21 +1777,18 @@ export function FrontDesk() {
       let checkedInCount = 0;
       let skippedCount = 0;
       
-      for (const resId of selectedReservations) {
-        const res = reservations.find(r => r.id === resId);
-        if (res && (res.status === 'pending' || res.status === 'confirmed')) {
-          const room = rooms.find(r => r.id === res.roomId);
-          const guest = guests.find(g => g.id === res.guestId);
-          const policy = canCheckIn(hotel, profile, res, room, guest, reservations, customRoles);
-          
-          if (!policy.allowed) {
-            skippedCount++;
-            continue;
-          }
-
-          await updateReservationStatus(res, 'checked_in');
-          checkedInCount++;
+      for (const res of eligibleReservations) {
+        const room = rooms.find(r => r.id === res.roomId);
+        const guest = guests.find(g => g.id === res.guestId);
+        const policy = canCheckIn(hotel, profile, res, room, guest, reservations, customRoles);
+        
+        if (!policy.allowed) {
+          skippedCount++;
+          continue;
         }
+
+        await updateReservationStatus(res, 'checked_in');
+        checkedInCount++;
       }
 
       if (checkedInCount > 0) {
@@ -1802,6 +1804,60 @@ export function FrontDesk() {
     } catch (err: any) {
       console.error("Bulk check-in error:", err.message || safeStringify(err));
       toast.error('Failed to perform bulk check-in');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBulkCheckOut = async () => {
+    if (!hotel?.id || !profile || selectedReservations.length === 0) return;
+
+    const eligibleReservations = reservations.filter(
+      r => selectedReservations.includes(r.id) && r.status === 'checked_in'
+    );
+    if (eligibleReservations.length === 0) return;
+
+    if (eligibleReservations.length === 1) {
+      const targetRes = eligibleReservations[0];
+      const policy = canCheckout(hotel, profile, targetRes, undefined, customRoles);
+      if (!policy.allowed) {
+        toast.error(policy.message || 'Check-out denied by hotel policy');
+        return;
+      }
+      setCheckoutPreviewRes(targetRes);
+      return;
+    }
+
+    const confirm = window.confirm(`Are you sure you want to check out ${eligibleReservations.length} guests?`);
+    if (!confirm) return;
+
+    try {
+      setLoading(true);
+      let checkedOutCount = 0;
+      let skippedCount = 0;
+
+      for (const res of eligibleReservations) {
+        const policy = canCheckout(hotel, profile, res, undefined, customRoles);
+        if (!policy.allowed) {
+          skippedCount++;
+          continue;
+        }
+
+        await updateReservationStatus(res, 'checked_out');
+        checkedOutCount++;
+      }
+
+      if (checkedOutCount > 0) {
+        if (skippedCount > 0) {
+          toast.success(`Processed check-out for ${checkedOutCount} guests (skipped ${skippedCount} due to policies).`);
+        }
+        setSelectedReservations([]);
+      } else if (skippedCount > 0) {
+        toast.error('Check-out failed for all selected guests due to hotel policies.');
+      }
+    } catch (err: any) {
+      console.error("Bulk check-out error:", err.message || safeStringify(err));
+      toast.error('Failed to perform bulk check-out');
     } finally {
       setLoading(false);
     }
@@ -4929,16 +4985,50 @@ export function FrontDesk() {
             </div>
             
             <div className="flex items-center gap-2">
-               {selectedReservations.length > 0 && (
-                <button
-                  onClick={handleBulkCheckIn}
-                  disabled={loading}
-                  className="bg-emerald-500 text-black px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-emerald-400 transition-all flex items-center gap-2"
-                >
-                  {loading ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-                  Check In ({selectedReservations.length})
-                </button>
-              )}
+               {selectedReservations.length > 0 && (() => {
+                const selectedResObjects = reservations.filter(r => selectedReservations.includes(r.id));
+                const checkInEligible = selectedResObjects.filter(r => r.status === 'pending' || r.status === 'confirmed');
+                const checkOutEligible = selectedResObjects.filter(r => r.status === 'checked_in');
+                const canCheckInPerm = hasPermission(profile, 'check_in_guests', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin';
+                const canCheckOutPerm = hasPermission(profile, 'check_out_guests', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin';
+
+                return (
+                  <>
+                    {checkInEligible.length > 0 && canCheckInPerm && (
+                      <button
+                        onClick={handleBulkCheckIn}
+                        disabled={loading}
+                        className="bg-emerald-500 text-black px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-emerald-400 transition-all flex items-center gap-2"
+                      >
+                        {loading ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                        Check In ({checkInEligible.length})
+                      </button>
+                    )}
+                    {checkOutEligible.length > 0 && canCheckOutPerm && (() => {
+                      const singlePolicy = checkOutEligible.length === 1
+                        ? canCheckout(hotel, profile, checkOutEligible[0], undefined, customRoles)
+                        : null;
+                      const isSingleBlocked = singlePolicy ? !singlePolicy.allowed : false;
+                      return (
+                        <button
+                          onClick={handleBulkCheckOut}
+                          disabled={loading || isSingleBlocked}
+                          title={isSingleBlocked ? (singlePolicy?.message || 'Checkout Blocked') : `Check Out (${checkOutEligible.length})`}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                            isSingleBlocked
+                              ? "bg-zinc-800 text-red-400/60 border border-red-500/20 cursor-not-allowed"
+                              : "bg-blue-500 text-white hover:bg-blue-400"
+                          )}
+                        >
+                          {loading ? <Loader2 size={12} className="animate-spin" /> : isSingleBlocked ? <Lock size={12} /> : <LogOut size={12} />}
+                          Check Out ({checkOutEligible.length})
+                        </button>
+                      );
+                    })()}
+                  </>
+                );
+              })()}
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
                 <input 
@@ -6678,6 +6768,7 @@ export function FrontDesk() {
                         onClick={async () => {
                           const resToCheckout = checkoutPreviewRes;
                           setCheckoutPreviewRes(null);
+                          setSelectedReservations(prev => prev.filter(id => id !== resToCheckout.id));
                           await updateReservationStatus(resToCheckout, 'checked_out');
                         }}
                         className="px-5 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed disabled:scale-100 text-zinc-50 rounded-xl text-xs font-black flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-95"
