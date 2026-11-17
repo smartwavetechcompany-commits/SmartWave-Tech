@@ -18,6 +18,13 @@ const getSafeStr = (val: any, fallback: string = ''): string => {
   return String(val || fallback);
 };
 
+const formatReceiptDescription = (val: any, fallback: string = ''): string => {
+  return getSafeStr(val, fallback)
+    .replace(/\s*[\[(]\s*(?:inclusive|exclusive|incl\.?|excl\.?)\s*[\])]/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+};
+
 export function processLedgerTaxes(
   entries: LedgerEntry[],
   taxes: Tax[] = [],
@@ -476,7 +483,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
             {ledgerEntries.filter(e => getSafeStr(e.category) === 'restaurant' && e.type === 'debit').map((e, idx) => (
               <div key={`${e.id || 'restaurant'}-${idx}`} className="flex justify-between items-start">
                 <div className="flex-1">
-                  <p className="text-sm font-bold">{getSafeStr(e.description)}</p>
+                  <p className="text-sm font-bold">{formatReceiptDescription(e.description)}</p>
                   <p className="text-[10px] text-zinc-400">{safeFormatDate(e.timestamp, 'MMM dd, HH:mm')}</p>
                 </div>
                 <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
@@ -500,7 +507,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                     renderedNights.push(
                       <div key={`${e.id || 'posted-room'}-${index}`} className="flex justify-between items-start py-0.5">
                         <div className="flex-1">
-                          <p className="text-sm font-bold">{e.description}</p>
+                          <p className="text-sm font-bold">{formatReceiptDescription(e.description)}</p>
                           <p className="text-[10px] text-zinc-500 font-medium">Posted Charge • Room {reservation?.roomNumber || 'N/A'}</p>
                         </div>
                         <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
@@ -602,7 +609,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                           <div key={`${e.id || 'incidental'}-${index}`} className="flex justify-between items-start py-1">
                             <div className="flex-1">
                               <p className="text-sm font-bold flex items-center gap-2 flex-wrap">
-                                {getSafeStr(e.description)}
+                                {formatReceiptDescription(e.description)}
                                 {e.billNumber && (
                                   <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-zinc-100 text-zinc-700 border border-zinc-200">
                                     Bill #{e.billNumber}
@@ -639,21 +646,6 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                         <div className="flex-1">
                           <p className="text-sm font-bold flex items-center gap-1.5 flex-wrap">
                             {tax.name} ({tax.percentage}%)
-                            {tax.isInclusive ? (
-                              <span className="px-1.5 py-0.5 bg-emerald-50 text-[8px] text-emerald-600 font-extrabold uppercase rounded border border-emerald-100 leading-none">
-                                Inclusive of Room Price
-                              </span>
-                            ) : (
-                              <span className="px-1.5 py-0.5 bg-amber-50 text-[8px] text-amber-600 font-extrabold uppercase rounded border border-amber-100 leading-none">
-                                Exclusive of Room Price
-                              </span>
-                            )}
-                          </p>
-                          <p className="text-[10px] text-zinc-500 mt-0.5">
-                            {tax.isInclusive 
-                              ? `Inclusive of room price: This ${tax.name} rate of ${tax.percentage}% is already included in the daily base rate.`
-                              : `Exclusive of room price: This ${tax.name} rate of ${tax.percentage}% is applied in addition to the daily base rate.`
-                            }
                           </p>
                         </div>
                         <span className="font-bold text-sm text-right">{formatCurrency(tax.amount, currency, exchangeRate)}</span>
@@ -823,7 +815,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
         {taxBreakdown.filter(t => t.showOnReceipt).map((tax, index) => (
           <div key={`${tax.id || tax.name || 'tax-summary'}-${index}`} className="flex justify-between items-center text-[10px]">
             <span className="text-zinc-500 uppercase tracking-widest font-bold">
-              {tax.name} ({tax.percentage}%) {tax.isInclusive ? '(Incl.)' : ''}
+              {tax.name} ({tax.percentage}%)
             </span>
             <span className="font-bold">{formatCurrency(tax.amount, currency, exchangeRate)}</span>
           </div>

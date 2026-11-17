@@ -3659,7 +3659,7 @@ export function FandB() {
                       ) : null}
                       {printingOrder.taxDetails?.map((tax, idx) => (
                         <div key={idx} className="flex justify-between text-[10px]">
-                          <span>{tax.name} ({tax.percentage}%) {tax.isInclusive ? '[Incl.]' : '[Excl.]'}</span>
+                          <span>{tax.name} ({tax.percentage}%)</span>
                           <span>{tax.isInclusive ? '' : '+'}{formatCurrency(tax.amount, currency, exchangeRate)}</span>
                         </div>
                       ))}
@@ -3749,7 +3749,7 @@ export function FandB() {
                       ) : null}
                       {printingOrder.taxDetails?.map((tax, idx) => (
                         <div key={idx} className="flex justify-between text-[10px]">
-                          <span>{tax.name} ({tax.percentage}%) {tax.isInclusive ? '[Incl.]' : '[Excl.]'}</span>
+                          <span>{tax.name} ({tax.percentage}%)</span>
                           <span>{tax.isInclusive ? '' : '+'}{formatCurrency(tax.amount, currency, exchangeRate)}</span>
                         </div>
                       ))}
