@@ -39,7 +39,8 @@ import {
   AlertTriangle,
   MoreVertical,
   TrendingUp,
-  Package
+  Package,
+  UtensilsCrossed
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
 import { canBlockRoom, canUnblockRoom, canCheckout } from '../utils/policyUtils';
@@ -53,6 +54,8 @@ import { addDays, subDays, startOfDay, endOfDay, isWithinInterval, parseISO, eac
 import { roomService } from '../services/roomService';
 import { getRoomDisplayStatus, getRoomDetailedReservationInfo, RoomReservationInfo } from '../utils/roomUtils';
 import { hasPermission } from '../utils/permissions';
+import { canManageRoomRestaurantPosting, isRoomRestaurantPostingBlocked } from '../utils/restaurantPostingGuard';
+import { RestaurantPostingControlModal } from './RestaurantPostingControlModal';
 import { useNavigate } from 'react-router-dom';
 import { AvailableRoomsModal } from './AvailableRoomsModal';
 import { Pagination } from './Pagination';
@@ -169,6 +172,7 @@ export function Rooms() {
   }, [searchQuery, statusFilter, typeFilter, capacityFilter, view]);
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   const [selectedRoomForBlocking, setSelectedRoomForBlocking] = useState<string | null>(null);
+  const [restaurantPostingRoomModal, setRestaurantPostingRoomModal] = useState<Room | null>(null);
   const [isAddingRoom, setIsAddingRoom] = useState(false);
   const [newRoom, setNewRoom] = useState({
     roomNumber: '',
@@ -2452,6 +2456,23 @@ export function Rooms() {
                               <Wrench size={12} />
                             </button>
                           )}
+                          {canManageRoomRestaurantPosting(profile, customRoles) && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRestaurantPostingRoomModal(room);
+                              }}
+                              className={cn(
+                                "p-1.5 rounded-lg transition-colors border",
+                                isRoomRestaurantPostingBlocked(room)
+                                  ? "bg-red-500/20 text-red-400 border-red-500/40 hover:bg-red-500/30"
+                                  : "bg-zinc-900/80 dark:bg-white/10 hover:bg-zinc-800 dark:hover:bg-white/20 text-zinc-200 border-zinc-700 dark:border-white/5"
+                              )}
+                              title={isRoomRestaurantPostingBlocked(room) ? "Unblock Restaurant Posting" : "Block Restaurant Posting"}
+                            >
+                              <UtensilsCrossed size={12} />
+                            </button>
+                          )}
                         </div>
                         
                         {canChangeRoomStatus && (
@@ -2493,6 +2514,14 @@ export function Rooms() {
                         {isRoomBlocked(room.id) && (
                           <div className="bg-red-500 text-white rounded px-1.5 py-0.5 text-[8px] font-black tracking-tighter flex items-center gap-1 shadow-lg animate-pulse" title="Room IS BLOCKED FOR MAINTENANCE">
                             <AlertCircle size={8} /> BLOCKED
+                          </div>
+                        )}
+                        {isRoomRestaurantPostingBlocked(room) && (
+                          <div
+                            className="bg-red-500/20 text-red-300 border border-red-500/40 rounded px-1.5 py-0.5 text-[8px] font-black tracking-tighter flex items-center gap-1"
+                            title={room.restaurantPostingRestriction ? `Restaurant Posting Blocked by ${room.restaurantPostingRestriction.updatedByName}: ${room.restaurantPostingRestriction.reason}` : 'Restaurant Posting Blocked'}
+                          >
+                            <UtensilsCrossed size={8} /> NO REST. POST
                           </div>
                         )}
                       </div>
@@ -2650,6 +2679,14 @@ export function Rooms() {
                             <XCircle size={8} /> BLOCKED
                           </div>
                         )}
+                        {isRoomRestaurantPostingBlocked(room) && (
+                          <div
+                            className="bg-red-500/10 text-red-400 border border-red-500/30 rounded px-1.5 py-0.5 text-[8px] font-bold flex items-center gap-1"
+                            title={room.restaurantPostingRestriction ? `Restaurant Posting Blocked by ${room.restaurantPostingRestriction.updatedByName}: ${room.restaurantPostingRestriction.reason}` : 'Restaurant Posting Blocked'}
+                          >
+                            <UtensilsCrossed size={8} /> NO REST. POST
+                          </div>
+                        )}
                       </div>
 
                       {/* Display reservation dates and next date of availability */}
@@ -2717,6 +2754,20 @@ export function Rooms() {
                           title="Block Room"
                         >
                           <XCircle size={16} />
+                        </button>
+                      )}
+                      {canManageRoomRestaurantPosting(profile, customRoles) && (
+                        <button
+                          onClick={() => setRestaurantPostingRoomModal(room)}
+                          className={cn(
+                            "p-1 rounded",
+                            isRoomRestaurantPostingBlocked(room)
+                              ? "text-red-400 bg-red-500/10 hover:bg-red-500/20"
+                              : "text-zinc-400 hover:text-amber-400 hover:bg-amber-500/10"
+                          )}
+                          title={isRoomRestaurantPostingBlocked(room) ? "Unblock Restaurant Posting" : "Block Restaurant Posting"}
+                        >
+                          <UtensilsCrossed size={16} />
                         </button>
                       )}
                       {(hasPermission(profile, 'delete_rooms', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
@@ -3393,6 +3444,17 @@ export function Rooms() {
             setShowAvailableRooms(false);
             navigate(`/front-desk?action=book&roomId=${room.id}&checkIn=${checkIn}&checkOut=${checkOut}`);
           }}
+        />
+      )}
+
+      {restaurantPostingRoomModal && hotel?.id && (
+        <RestaurantPostingControlModal
+          isOpen={true}
+          onClose={() => setRestaurantPostingRoomModal(null)}
+          room={rooms.find(r => r.id === restaurantPostingRoomModal.id) || restaurantPostingRoomModal}
+          hotelId={hotel.id}
+          profile={profile}
+          customRoles={customRoles}
         />
       )}
     </div>

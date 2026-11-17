@@ -3,8 +3,13 @@ import { collection, query, where, addDoc, doc, updateDoc, orderBy, getDoc, getD
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
-import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable, InventoryCategory } from '../types';
+import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable, InventoryCategory, Room } from '../types';
 import { postToLedger, voidLedgerEntry, recalculateReservationAccountFromLedger } from '../services/ledgerService';
+import {
+  findTargetRoomForOrder,
+  isRoomRestaurantPostingBlocked,
+  RESTAURANT_POSTING_BLOCKED_MESSAGE,
+} from '../utils/restaurantPostingGuard';
 import { createNotification } from './Notifications';
 import { printDocument } from '../utils/printUtils';
 import { 
@@ -55,6 +60,7 @@ export function FandB() {
   const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [categories, setCategories] = useState<InventoryCategory[]>([]);
@@ -244,6 +250,16 @@ export function FandB() {
       }
     );
 
+    const unsubRooms = onSnapshot(
+      collection(db, 'hotels', hotel.id, 'rooms'),
+      (snap) => {
+        setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+      },
+      (error: any) => {
+        handleFirestoreError(error, OperationType.LIST, `hotels/${hotel.id}/rooms`);
+      }
+    );
+
     return () => {
       unsubOrders();
       unsubReservations();
@@ -251,6 +267,7 @@ export function FandB() {
       unsubInventory();
       unsubCategories();
       unsubTables();
+      unsubRooms();
     };
   }, [hotel?.id, profile?.uid, hasPermissionError]);
 
@@ -323,6 +340,20 @@ export function FandB() {
     const hasRoomPayment = newOrder.payments.some(p => p.method === 'room');
     if (isRoomOrder && hasRoomPayment && !res) {
       toast.error(`No active checked-in guest found in Room ${newOrder.roomNumber} to charge.`);
+      return;
+    }
+
+    const targetRoom = isRoomOrder
+      ? findTargetRoomForOrder(rooms, {
+          roomId: res?.roomId,
+          roomNumber: newOrder.roomNumber,
+          reservation: res,
+        })
+      : undefined;
+    const isTargetRoomRestaurantBlocked = isRoomOrder && isRoomRestaurantPostingBlocked(targetRoom);
+
+    if (isRoomOrder && hasRoomPayment && isTargetRoomRestaurantBlocked) {
+      toast.error(RESTAURANT_POSTING_BLOCKED_MESSAGE);
       return;
     }
 
@@ -412,6 +443,11 @@ export function FandB() {
         const selectedOutlet = configuredOutlets.find(o => o.id === newOrder.outletId);
         if (selectedOutlet && selectedOutlet.allowRoomCharge === false) {
           toast.error(`Room charging is disabled for ${selectedOutlet.name}.`);
+          setIsSaving(false);
+          return;
+        }
+        if (isTargetRoomRestaurantBlocked) {
+          toast.error(RESTAURANT_POSTING_BLOCKED_MESSAGE);
           setIsSaving(false);
           return;
         }
@@ -521,7 +557,7 @@ export function FandB() {
 
       // POST TO GUEST FOLIO FOR ROOM GUESTS (Module 3 & Module 6)
       // Posts the full order charge debit and records any immediate outlet payment as a credit so it reflects on the folio and receipt!
-      if (isRoomOrder && res) {
+      if (isRoomOrder && res && !isTargetRoomRestaurantBlocked) {
         const ledgerDescription = `${newOrder.outletName || 'Restaurant'} — F&B Charge (Bill #${billNumber}): ${newOrder.items}`;
 
         const postedEntry = await postToLedger(hotel.id, effectiveGuestId, res.id, {
@@ -1000,6 +1036,15 @@ export function FandB() {
         toast.error(`Cannot charge to room: Guest in Room ${res.roomNumber} is not currently checked in (${res.status}).`);
         return;
       }
+      const targetRoom = findTargetRoomForOrder(rooms, {
+        roomId: res.roomId,
+        roomNumber: settleOrderModal.roomNumber,
+        reservation: res,
+      });
+      if (isRoomRestaurantPostingBlocked(targetRoom)) {
+        toast.error(RESTAURANT_POSTING_BLOCKED_MESSAGE);
+        return;
+      }
       setIsSettling(true);
       try {
         const billNo = settleOrderModal.billNumber || `FB-${settleOrderModal.id.slice(-6)}`;
@@ -1258,6 +1303,32 @@ export function FandB() {
     if (additionalCart.length === 0) {
       toast.error('Please select at least one item to add.');
       return;
+    }
+
+    const isRoomOrderPreCheck = Boolean(
+      addItemsOrderModal.roomNumber && addItemsOrderModal.roomNumber !== 'Walk-in'
+    );
+    const resPreCheck = isRoomOrderPreCheck
+      ? (reservations.find(r => r.roomNumber === addItemsOrderModal.roomNumber && r.status === 'checked_in') ||
+         (addItemsOrderModal.reservationId ? reservations.find(r => r.id === addItemsOrderModal.reservationId) : undefined) ||
+         reservations.find(r => r.id === addItemsOrderModal.guestId))
+      : undefined;
+    const isPostedToRoomOrder = Boolean(
+      addItemsOrderModal.paymentMethod === 'room' ||
+      addItemsOrderModal.financialStatus === 'posted_to_room' ||
+      (addItemsOrderModal.roomChargedAmount || 0) > 0 ||
+      (Array.isArray(addItemsOrderModal.payments) && addItemsOrderModal.payments.some(p => p.method === 'room'))
+    );
+    if (isRoomOrderPreCheck && resPreCheck && isPostedToRoomOrder) {
+      const targetRoom = findTargetRoomForOrder(rooms, {
+        roomId: resPreCheck.roomId,
+        roomNumber: addItemsOrderModal.roomNumber,
+        reservation: resPreCheck,
+      });
+      if (isRoomRestaurantPostingBlocked(targetRoom)) {
+        toast.error(RESTAURANT_POSTING_BLOCKED_MESSAGE);
+        return;
+      }
     }
 
     setIsAddingItems(true);
@@ -4108,25 +4179,33 @@ export function FandB() {
                       onChange={(e) => {
                         const roomNum = e.target.value;
                         const matchedRes = reservations.find(r => String(r.roomNumber).trim() === String(roomNum).trim() && r.status === 'checked_in') || reservations.find(r => String(r.roomNumber).trim() === String(roomNum).trim());
+                        const targetRoom = roomNum && roomNum !== 'Walk-in'
+                          ? findTargetRoomForOrder(rooms, { roomId: matchedRes?.roomId, roomNumber: roomNum, reservation: matchedRes })
+                          : undefined;
+                        const isBlocked = isRoomRestaurantPostingBlocked(targetRoom);
                         setNewOrder({ 
                           ...newOrder, 
                           roomNumber: roomNum, 
                           guestId: matchedRes?.guestId || matchedRes?.id || '',
                           reservationId: matchedRes?.id || '',
-                          payments: (roomNum && roomNum !== 'Walk-in' && matchedRes)
+                          payments: (roomNum && roomNum !== 'Walk-in' && matchedRes && !isBlocked)
                             ? [{ amount: 0, method: 'room', settlementSource: 'F&B Outlet' }]
-                            : newOrder.payments
+                            : [{ amount: 0, method: 'cash', settlementSource: 'F&B Outlet' }]
                         });
                       }}
                       className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                     >
                       <option value="">Select Room</option>
                       <option value="Walk-in">Walk-in Guest</option>
-                      {reservations.map(res => (
-                        <option key={res.id} value={res.roomNumber}>
-                          Room {res.roomNumber} ({res.guestName})
-                        </option>
-                      ))}
+                      {reservations.map(res => {
+                        const resRoom = findTargetRoomForOrder(rooms, { roomId: res.roomId, roomNumber: res.roomNumber, reservation: res });
+                        const isResBlocked = isRoomRestaurantPostingBlocked(resRoom);
+                        return (
+                          <option key={res.id} value={res.roomNumber}>
+                            Room {res.roomNumber} ({res.guestName}){isResBlocked ? ' [RESTAURANT BLOCKED]' : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
 
@@ -4135,10 +4214,15 @@ export function FandB() {
                     const verifiedRes = reservations.find(r => r.roomNumber === newOrder.roomNumber && r.status === 'checked_in');
                     const selectedOutlet = configuredOutlets.find(o => o.id === newOrder.outletId);
                     const allowRoomCharge = selectedOutlet?.allowRoomCharge !== false;
+                    const verifiedRoom = findTargetRoomForOrder(rooms, { roomId: verifiedRes?.roomId, roomNumber: newOrder.roomNumber, reservation: verifiedRes });
+                    const isRestBlocked = isRoomRestaurantPostingBlocked(verifiedRoom);
 
                     if (verifiedRes) {
                       return (
-                        <div className="p-3 bg-zinc-900/90 border border-zinc-800 rounded-xl space-y-1.5 text-xs">
+                        <div className={cn(
+                          "p-3 border rounded-xl space-y-1.5 text-xs",
+                          isRestBlocked ? "bg-red-500/10 border-red-500/30" : "bg-zinc-900/90 border-zinc-800"
+                        )}>
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] font-bold uppercase text-zinc-400">Verified In-House Guest</span>
                             <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -4148,7 +4232,11 @@ export function FandB() {
                           <div className="font-bold text-zinc-100">{verifiedRes.guestName}</div>
                           <div className="text-[10px] text-zinc-400 flex items-center justify-between pt-1 border-t border-zinc-800/60">
                             <span>Room {verifiedRes.roomNumber}</span>
-                            {allowRoomCharge ? (
+                            {isRestBlocked ? (
+                              <span className="text-red-400 font-bold flex items-center gap-1">
+                                <Lock size={11} /> Restaurant Posting Blocked
+                              </span>
+                            ) : allowRoomCharge ? (
                               <span className="text-emerald-400 font-semibold flex items-center gap-1">
                                 <CheckCircle2 size={11} /> Room Charge Allowed
                               </span>
@@ -4158,6 +4246,12 @@ export function FandB() {
                               </span>
                             )}
                           </div>
+                          {isRestBlocked && (
+                            <div className="pt-1.5 text-[11px] text-red-300 font-semibold flex items-start gap-1.5">
+                              <AlertCircle size={13} className="shrink-0 mt-0.5 text-red-400" />
+                              <span>{RESTAURANT_POSTING_BLOCKED_MESSAGE}</span>
+                            </div>
+                          )}
                         </div>
                       );
                     }
@@ -4170,7 +4264,12 @@ export function FandB() {
                     );
                   })()}
 
-                  {newOrder.roomNumber && (
+                  {newOrder.roomNumber && (() => {
+                    const activeRoomForPayment = newOrder.roomNumber !== 'Walk-in'
+                      ? findTargetRoomForOrder(rooms, { roomNumber: newOrder.roomNumber })
+                      : undefined;
+                    const isCurrentRoomBlocked = isRoomRestaurantPostingBlocked(activeRoomForPayment);
+                    return (
                     <div className="p-4 bg-zinc-950 rounded-2xl border border-zinc-800 space-y-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 text-emerald-500 font-bold text-xs uppercase tracking-wider">
@@ -4182,13 +4281,22 @@ export function FandB() {
                             <button
                               type="button"
                               onClick={() => {
+                                if (isCurrentRoomBlocked) {
+                                  toast.error(RESTAURANT_POSTING_BLOCKED_MESSAGE);
+                                  return;
+                                }
                                 setNewOrder({
                                   ...newOrder,
                                   payments: [{ amount: 0, method: 'room', settlementSource: 'F&B Outlet' }]
                                 });
                               }}
-                              className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold hover:bg-emerald-500/20 uppercase transition-colors"
-                              title="Set full order payment to Charge to Room"
+                              className={cn(
+                                "px-2 py-0.5 rounded border text-[10px] font-bold uppercase transition-colors",
+                                isCurrentRoomBlocked
+                                  ? "bg-red-500/10 text-red-400 border-red-500/30 cursor-not-allowed opacity-75"
+                                  : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+                              )}
+                              title={isCurrentRoomBlocked ? RESTAURANT_POSTING_BLOCKED_MESSAGE : "Set full order payment to Charge to Room"}
                             >
                               Charge to Room
                             </button>
@@ -4243,6 +4351,10 @@ export function FandB() {
                                 className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
                                 value={pay.method}
                                 onChange={(e) => {
+                                  if (e.target.value === 'room' && isCurrentRoomBlocked) {
+                                    toast.error(RESTAURANT_POSTING_BLOCKED_MESSAGE);
+                                    return;
+                                  }
                                   const updated = [...newOrder.payments];
                                   updated[index].method = e.target.value as any;
                                   setNewOrder({ ...newOrder, payments: updated });
@@ -4251,7 +4363,7 @@ export function FandB() {
                                 <option value="cash">Cash</option>
                                 <option value="card">Card</option>
                                 <option value="transfer">Transfer</option>
-                                <option value="room">Charge to Room</option>
+                                {!isCurrentRoomBlocked && <option value="room">Charge to Room</option>}
                               </select>
                             </div>
                           </div>
@@ -4335,7 +4447,8 @@ export function FandB() {
                         );
                       })()}
                     </div>
-                  )}
+                    );
+                  })()}
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
@@ -4601,30 +4714,54 @@ export function FandB() {
                     <label className="block text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2">
                       Payment Method
                     </label>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      {(settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in' 
-                        ? ['room', 'cash', 'card', 'transfer'] as const 
-                        : ['cash', 'card', 'transfer'] as const
-                      ).map((method) => (
-                        <button
-                          key={method}
-                          type="button"
-                          onClick={() => setSettleMethod(method)}
-                          className={cn(
-                            "py-2.5 px-3 rounded-xl border text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5",
-                            settleMethod === method
-                              ? "bg-emerald-500/10 border-emerald-500 text-emerald-400 ring-1 ring-emerald-500/30"
-                              : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                    {(() => {
+                      const settleTargetRoom = settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in'
+                        ? findTargetRoomForOrder(rooms, { roomNumber: settleOrderModal.roomNumber })
+                        : undefined;
+                      const isSettleRoomBlocked = isRoomRestaurantPostingBlocked(settleTargetRoom);
+                      return (
+                        <>
+                          {isSettleRoomBlocked && (
+                            <div className="mb-2.5 p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 font-semibold flex items-center gap-2">
+                              <Lock size={14} className="text-red-400 shrink-0" />
+                              <span>{RESTAURANT_POSTING_BLOCKED_MESSAGE}</span>
+                            </div>
                           )}
-                        >
-                          {method === 'room' && <BedDouble size={14} />}
-                          {method === 'cash' && <DollarSign size={14} />}
-                          {method === 'card' && <CreditCard size={14} />}
-                          {method === 'transfer' && <RefreshCw size={14} />}
-                          {method === 'room' ? 'Charge Room' : method}
-                        </button>
-                      ))}
-                    </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            {(settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in' 
+                              ? ['room', 'cash', 'card', 'transfer'] as const 
+                              : ['cash', 'card', 'transfer'] as const
+                            ).map((method) => (
+                              <button
+                                key={method}
+                                type="button"
+                                onClick={() => {
+                                  if (method === 'room' && isSettleRoomBlocked) {
+                                    toast.error(RESTAURANT_POSTING_BLOCKED_MESSAGE);
+                                    return;
+                                  }
+                                  setSettleMethod(method);
+                                }}
+                                className={cn(
+                                  "py-2.5 px-3 rounded-xl border text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5",
+                                  method === 'room' && isSettleRoomBlocked
+                                    ? "bg-red-500/10 border-red-500/30 text-red-400/70 cursor-not-allowed"
+                                    : settleMethod === method
+                                      ? "bg-emerald-500/10 border-emerald-500 text-emerald-400 ring-1 ring-emerald-500/30"
+                                      : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                                )}
+                              >
+                                {method === 'room' && (isSettleRoomBlocked ? <Lock size={14} /> : <BedDouble size={14} />)}
+                                {method === 'cash' && <DollarSign size={14} />}
+                                {method === 'card' && <CreditCard size={14} />}
+                                {method === 'transfer' && <RefreshCw size={14} />}
+                                {method === 'room' ? 'Charge Room' : method}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
 
                   {/* Settlement Source Selector */}

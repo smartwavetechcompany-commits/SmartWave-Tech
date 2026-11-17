@@ -18,6 +18,7 @@ import {
   InventoryItem,
   InventoryTransaction
 } from '../types';
+import { buildRoomRestaurantPostingUpdate } from '../utils/restaurantPostingGuard';
 
 export const roomService = {
   // Room Blocking
@@ -202,5 +203,37 @@ export const roomService = {
     }
     
     return config.baseRate;
+  },
+
+  async setRoomRestaurantPostingRestriction(params: {
+    hotelId: string;
+    room: Room;
+    block: boolean;
+    reason: string;
+    profile: any;
+    customRoles?: any[];
+  }) {
+    const { hotelId, room, block, reason, profile, customRoles = [] } = params;
+    if (!hotelId || !room?.id) {
+      throw new Error('Missing hotel or room information.');
+    }
+
+    const updatePayload = buildRoomRestaurantPostingUpdate({
+      room,
+      block,
+      reason,
+      profile,
+      customRoles,
+    });
+
+    const roomRef = doc(db, 'hotels', hotelId, 'rooms', room.id);
+    await database.safeUpdate(roomRef, updatePayload, {
+      hotelId,
+      module: 'Front Desk',
+      action: block ? 'BLOCK_ROOM_RESTAURANT_POSTING' : 'UNBLOCK_ROOM_RESTAURANT_POSTING',
+      details: `${block ? 'Blocked' : 'Unblocked'} restaurant posting for Room ${room.roomNumber}. Reason: ${updatePayload.restaurantPostingRestriction.reason}`,
+    });
+
+    return updatePayload;
   }
 };

@@ -12,6 +12,7 @@ import { ReceiptGenerator } from './ReceiptGenerator';
 import { GuestFolio } from './GuestFolio';
 import { DigitalKeyModal } from './DigitalKeyModal';
 import { ExtendGracePeriodModal } from './ExtendGracePeriodModal';
+import { RestaurantPostingControlModal } from './RestaurantPostingControlModal';
 import { printDocument } from '../utils/printUtils';
 import { QrCode, Key as SmartKeyIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -63,6 +64,7 @@ import { roomService } from '../services/roomService';
 import { validatePromotion, recordPromotionRedemption, subscribePromotions } from '../services/promotionService';
 import { hasPermission } from '../utils/permissions';
 import { canCheckout, canCheckIn, canEditReservation, canCancelReservation, canMarkNoShow, canApplyDiscount } from '../utils/policyUtils';
+import { canManageRoomRestaurantPosting, isRoomRestaurantPostingBlocked } from '../utils/restaurantPostingGuard';
 import { logActivity } from '../utils/activityLogger';
 import { getRoomDisplayStatus, isRoomAvailable, checkStayExtensionConflict } from '../utils/roomUtils';
 import { format, addDays, differenceInDays, parseISO, isBefore, isAfter, startOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isSameDay } from 'date-fns';
@@ -184,6 +186,7 @@ export function FrontDesk() {
   const [showChargeModal, setShowChargeModal] = useState<Reservation | null>(null);
   const [showFolioModal, setShowFolioModal] = useState<Reservation | null>(null);
   const [showDigitalKeyModal, setShowDigitalKeyModal] = useState<Reservation | null>(null);
+  const [restaurantPostingRoomModal, setRestaurantPostingRoomModal] = useState<{ room: Room; guestName?: string } | null>(null);
   const [showConfirmAction, setShowConfirmAction] = useState<{ res: Reservation; action: 'no_show' | 'cancelled' | 'delete' } | null>(null);
   const [showPostponeModal, setShowPostponeModal] = useState<Reservation | null>(null);
   const [postponeCorporateRates, setPostponeCorporateRates] = useState<CorporateRate[]>([]);
@@ -3152,9 +3155,9 @@ export function FrontDesk() {
         discountType: 'fixed'
       });
       toast.success('Charge posted successfully');
-    } catch (err) {
+    } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/ledger`);
-      toast.error('Failed to post charge');
+      toast.error(err?.message || 'Failed to post charge');
     } finally {
       setLoading(false);
     }
@@ -5358,6 +5361,24 @@ export function FrontDesk() {
                           </div>
                         );
                       })()}
+                      {(() => {
+                        const room = rooms.find(r => r.id === res.roomId || r.roomNumber === res.roomNumber);
+                        if (!isRoomRestaurantPostingBlocked(room)) return null;
+                        const info = room?.restaurantPostingRestriction;
+                        return (
+                          <span
+                            title={
+                              info
+                                ? `Restaurant Posting Blocked by ${info.updatedByName} (${safeFormatDate(info.updatedAt, 'MMM dd, HH:mm')}): ${info.reason}`
+                                : 'Restaurant posting is blocked for this room'
+                            }
+                            className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-red-500/15 text-red-400 border border-red-500/30 flex items-center gap-1"
+                          >
+                            <UtensilsCrossed size={9} />
+                            Rest. Blocked
+                          </span>
+                        );
+                      })()}
                     </div>
                   </td>
           <td className="px-6 py-4 text-xs text-zinc-400">
@@ -5693,6 +5714,26 @@ export function FrontDesk() {
                               >
                                 <QrCode size={18} />
                               </button>
+                              {canManageRoomRestaurantPosting(profile, customRoles) && (() => {
+                                const targetRoom = rooms.find(r => r.id === res.roomId || r.roomNumber === res.roomNumber);
+                                if (!targetRoom) return null;
+                                const isRestBlocked = isRoomRestaurantPostingBlocked(targetRoom);
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => setRestaurantPostingRoomModal({ room: targetRoom, guestName: res.guestName })}
+                                    className={cn(
+                                      "p-2 rounded-lg transition-all active:scale-90",
+                                      isRestBlocked
+                                        ? "bg-red-500/15 text-red-400 hover:bg-red-500/25 border border-red-500/30"
+                                        : "text-zinc-400 hover:text-amber-400 hover:bg-amber-500/10"
+                                    )}
+                                    title={isRestBlocked ? `Unblock Restaurant Posting (Blocked for Room ${targetRoom.roomNumber})` : `Block Restaurant Posting for Room ${targetRoom.roomNumber}`}
+                                  >
+                                    <UtensilsCrossed size={18} />
+                                  </button>
+                                );
+                              })()}
                               {(hasPermission(profile, 'check_out_guests', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (() => {
                                 const policy = canCheckout(hotel, profile, res, undefined, customRoles);
                                 const isBlocked = !policy.allowed;
@@ -7068,6 +7109,18 @@ export function FrontDesk() {
           initialCheckIn={format(new Date(), 'yyyy-MM-dd')}
           initialCheckOut={format(addDays(new Date(), 1), 'yyyy-MM-dd')}
           onSelectRoom={handleSelectAvailableRoom}
+        />
+      )}
+
+      {restaurantPostingRoomModal && hotel?.id && (
+        <RestaurantPostingControlModal
+          isOpen={true}
+          onClose={() => setRestaurantPostingRoomModal(null)}
+          room={rooms.find(r => r.id === restaurantPostingRoomModal.room.id) || restaurantPostingRoomModal.room}
+          hotelId={hotel.id}
+          profile={profile}
+          customRoles={customRoles}
+          guestName={restaurantPostingRoomModal.guestName}
         />
       )}
     </div>

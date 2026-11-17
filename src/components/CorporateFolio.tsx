@@ -23,7 +23,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, formatCurrency, escapeCsvCell } from '../utils';
+import { cn, formatCurrency, escapeCsvCell, downloadCsvContent } from '../utils';
 import { format } from 'date-fns';
 import { safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 import { increment, updateDoc, addDoc } from 'firebase/firestore';
@@ -712,14 +712,8 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                   escapeCsvCell(e.type === 'debit' ? e.amount : 0),
                   escapeCsvCell(e.type === 'credit' ? e.amount : 0)
                 ].join(','))
-              ].join('\n');
-              const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-              const link = document.createElement('a');
-              const url = URL.createObjectURL(blob);
-              link.href = url;
-              link.download = `corporate_folio_${currentAccount.name.replace(/\s+/g, '_')}.csv`;
-              link.click();
-              setTimeout(() => URL.revokeObjectURL(url), 10000);
+              ].join('\r\n');
+              downloadCsvContent(csvContent, `corporate_folio_${currentAccount.name.replace(/\s+/g, '_')}.csv`);
             }}
             className="flex items-center gap-2 px-6 py-3 bg-zinc-800 text-zinc-50 rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"
           >

@@ -8,6 +8,11 @@ import { calculateStayDuration, getGracePeriodInfo } from '../utils/dateUtils';
 import { getNightlyRateForStayIndex, computeOverstayNightAmount } from '../utils/rateSnapshot';
 
 import { validateLedgerTransaction, calculateGuestFinancialPosition } from './financialService';
+import {
+  isRestaurantCategory,
+  isRoomRestaurantPostingBlocked,
+  RESTAURANT_POSTING_BLOCKED_MESSAGE,
+} from '../utils/restaurantPostingGuard';
 
 /**
  * Distinguishes corporate account credits (corporate payments, bulk settlements, deposits, or adjustments)
@@ -161,6 +166,25 @@ export const postToLedger = async (
     resRef ? getDoc(resRef) : Promise.resolve(null),
     shouldFetchHotel ? getDoc(hotelRef) : Promise.resolve(null)
   ]);
+
+  // Room-Level Restaurant Posting Enforcement (Defense-in-depth before any ledger write)
+  if (entry.type === 'debit' && isRestaurantCategory(entry.category) && resSnap && resSnap.exists()) {
+    const resData = resSnap.data() as Reservation;
+    if (resData.roomId) {
+      const roomSnap = await getDoc(doc(db, 'hotels', hotelId, 'rooms', resData.roomId));
+      if (roomSnap.exists() && isRoomRestaurantPostingBlocked(roomSnap.data() as any)) {
+        throw new Error(RESTAURANT_POSTING_BLOCKED_MESSAGE);
+      }
+    } else if (resData.roomNumber) {
+      const roomQuerySnap = await getDocs(
+        query(collection(db, 'hotels', hotelId, 'rooms'), where('roomNumber', '==', resData.roomNumber))
+      );
+      const matchedRoom = roomQuerySnap.docs.find(d => isRoomRestaurantPostingBlocked(d.data() as any));
+      if (matchedRoom) {
+        throw new Error(RESTAURANT_POSTING_BLOCKED_MESSAGE);
+      }
+    }
+  }
 
   if (!finalCorporateId && resSnap && resSnap.exists()) {
     const resData = resSnap.data() as Reservation;

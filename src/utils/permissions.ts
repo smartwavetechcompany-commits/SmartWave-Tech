@@ -11,6 +11,7 @@ export type Permission =
   | 'edit_reservations'
   | 'cancel_reservations'
   | 'delete_reservations'
+  | 'block_restaurant_posting'
 
   // --- GUEST MANAGEMENT ---
   | 'view_guests'
@@ -173,6 +174,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { id: 'check_out_guests', label: 'Check-Out Guests', description: 'Process guest departures and balance settlement' },
       { id: 'override_checkout', label: 'Override Checkout', description: 'Bypass unpaid balance restrictions' },
       { id: 'extend_stay', label: 'Extend Stay', description: 'Add nights to existing in-house stays' },
+      { id: 'block_restaurant_posting', label: 'Block/Unblock Restaurant Posting for Rooms', description: 'Authorize staff to block or unblock restaurant charges on specific guest rooms' },
     ]
   },
   {
@@ -511,6 +513,7 @@ const PERMISSION_FIELD_PATH_MAP: Record<string, { modules: string[]; actions: st
   check_out_guests: { modules: ['reservations', 'frontDesk'], actions: ['checkOut', 'check_out', 'checkOutGuests'] },
   extend_stay: { modules: ['reservations', 'frontDesk'], actions: ['extend', 'extendStay'] },
   override_checkout: { modules: ['reservations', 'frontDesk'], actions: ['overrideCheckout', 'override_checkout'] },
+  block_restaurant_posting: { modules: ['reservations', 'frontDesk', 'rooms'], actions: ['blockRestaurantPosting', 'block_restaurant_posting'] },
 
   // Rooms
   view_rooms: { modules: ['rooms'], actions: ['view', 'viewRooms', 'read'] },
@@ -745,7 +748,8 @@ const MODULE_ACTION_PERMISSIONS: Record<string, Permission[]> = {
     'extend_stay', 
     'cancel_reservations', 
     'delete_reservations',
-    'override_checkout'
+    'override_checkout',
+    'block_restaurant_posting'
   ],
   frontDesk: [
     'view_reservations', 
@@ -755,7 +759,8 @@ const MODULE_ACTION_PERMISSIONS: Record<string, Permission[]> = {
     'check_in_guests', 
     'check_out_guests', 
     'extend_stay', 
-    'cancel_reservations'
+    'cancel_reservations',
+    'block_restaurant_posting'
   ],
   guests: [
     'view_guests', 

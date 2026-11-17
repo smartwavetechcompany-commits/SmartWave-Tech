@@ -83,6 +83,7 @@ export const PMS_MODULES: ModuleDefinition[] = [
       { id: 'cancel_reservations', name: 'Cancel Bookings', description: 'Cancel unconfirmed or confirmed bookings' },
       { id: 'delete_reservations', name: 'Delete Bookings', description: 'Permanently remove booking records' },
       { id: 'override_checkout', name: 'Override Checkout', description: 'Bypass balance requirements during departure' },
+      { id: 'block_restaurant_posting', name: 'Block/Unblock Restaurant Posting for Rooms', description: 'Restrict or re-enable restaurant/F&B charges to specific guest rooms' },
     ]
   },
   {

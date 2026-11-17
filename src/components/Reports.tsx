@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { BreakfastList } from './BreakfastList';
 import { DSSGuestReport } from './DSSGuestReport';
-import { cn, formatCurrency, safeStringify } from '../utils';
+import { cn, formatCurrency, safeStringify, sanitizeExportValue } from '../utils';
 import { printDocument } from '../utils/printUtils';
 import { isModuleEnabled } from '../utils/plans';
 import { hasPermission, hasFinancialVisibility } from '../utils/permissions';
@@ -992,14 +992,15 @@ export function Reports() {
     const worksheet = XLSX.utils.json_to_sheet(data.map(row => {
       const formattedRow: any = {};
       headers.forEach(header => {
-        formattedRow[header] = row[header] !== undefined ? row[header] : '';
+        formattedRow[header] = row[header] !== undefined ? sanitizeExportValue(row[header]) : '';
       });
       return formattedRow;
     }));
 
     const cleanHotel = (hotel?.name || 'Hotel').replace(/[^a-zA-Z0-9]/g, '_');
+    const safeSheetName = (reportLabel || 'Report').replace(/[:\\/?*\[\]]/g, ' ').trim().slice(0, 31) || 'Report';
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, reportLabel.slice(0, 31));
+    XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName);
     XLSX.writeFile(workbook, `${cleanHotel}_${activeReport}_report_${dateRange.start}_to_${dateRange.end}.xlsx`);
     toast.success("Excel exported successfully");
   };

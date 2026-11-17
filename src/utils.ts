@@ -194,15 +194,41 @@ export function convertCurrency(amount: number, to: 'NGN' | 'USD', exchangeRate:
   return amount;
 }
 
+export function sanitizeExportValue(val: unknown): unknown {
+  if (typeof val !== 'string') return val;
+  // Strip invalid XML/CSV control characters (preserving tab, LF, CR) and Unicode replacement glyph
+  return val.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\uFFFD]/g, '');
+}
+
 export function escapeCsvCell(val: unknown): string {
   if (val === null || val === undefined) return '""';
-  let str = String(val);
+  let str = String(sanitizeExportValue(val));
   // Neutralize CSV/Spreadsheet formula injection (=, +, -, @, tab, CR) while preserving genuine signed numbers like -5000
   const isSignedNumber = typeof val === 'number' || /^-\d+(\.\d+)?$/.test(str.trim());
   if (!isSignedNumber && /^[=+\-@\t\r]/.test(str)) {
     str = `'${str}`;
   }
   return `"${str.replace(/"/g, '""')}"`;
+}
+
+export function downloadCsvContent(csvContent: string, filename: string) {
+  const safeFilename = filename.toLowerCase().endsWith('.csv') ? filename : `${filename}.csv`;
+  // Prepend UTF-8 BOM so Microsoft Excel (Windows & Mac) recognizes UTF-8 characters (e.g., ₦, accents, symbols)
+  const bom = '\uFEFF';
+  const normalizedCsv = csvContent.startsWith(bom) ? csvContent : `${bom}${csvContent}`;
+  const blob = new Blob([normalizedCsv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  if (link.download !== undefined) {
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', safeFilename);
+    link.setAttribute('target', '_self');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
 }
 
 export function exportToCSV(data: any[], filename: string) {
@@ -213,18 +239,6 @@ export function exportToCSV(data: any[], filename: string) {
     return Object.values(obj).map(val => escapeCsvCell(val)).join(',');
   });
   
-  const csvContent = [headers, ...rows].join('\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  if (link.download !== undefined) {
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', filename);
-    link.setAttribute('target', '_self');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-  }
+  const csvContent = [headers, ...rows].join('\r\n');
+  downloadCsvContent(csvContent, filename);
 }

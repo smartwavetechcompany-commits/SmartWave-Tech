@@ -353,6 +353,38 @@ async function startServer() {
       const resData = resSnap.data();
       const finalCorporateId = corporateId || resData?.corporateId || null;
 
+      // Check room-level restaurant posting restriction if any item is a restaurant/F&B debit
+      const hasRestaurantDebit = items.some((it: any) => {
+        const itType = (it?.type || 'debit').toLowerCase().trim();
+        const itCat = (it?.category || '').toLowerCase().trim();
+        return (
+          itType === 'debit' &&
+          (itCat === 'f & b' || itCat === 'f&b' || itCat === 'restaurant' || itCat === 'food' || itCat === 'bar' || itCat === 'room_service')
+        );
+      });
+
+      if (hasRestaurantDebit) {
+        let blocked = false;
+        if (resData?.roomId) {
+          const roomSnap = await getDoc(doc(db, 'hotels', hotelId, 'rooms', resData.roomId));
+          if (roomSnap.exists()) {
+            const roomData = roomSnap.data();
+            blocked = Boolean(roomData?.restaurantPostingBlocked || roomData?.restaurantPostingRestriction?.isBlocked);
+          }
+        } else if (resData?.roomNumber) {
+          const roomSnap = await getDocs(
+            query(collection(db, 'hotels', hotelId, 'rooms'), where('roomNumber', '==', resData.roomNumber))
+          );
+          blocked = roomSnap.docs.some((d) => {
+            const roomData = d.data();
+            return Boolean(roomData?.restaurantPostingBlocked || roomData?.restaurantPostingRestriction?.isBlocked);
+          });
+        }
+        if (blocked) {
+          return res.status(403).json({ error: "Restaurant posting is blocked for this room. Please contact Front Desk." });
+        }
+      }
+
       // 3. Process, Calculate Taxes, & Validate inputs
       const batch = writeBatch(db);
       const timestamp = new Date().toISOString();

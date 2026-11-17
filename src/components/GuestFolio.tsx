@@ -47,7 +47,7 @@ import {
   Sparkles,
   Loader2
 } from 'lucide-react';
-import { cn, formatCurrency, safeStringify, escapeCsvCell } from '../utils';
+import { cn, formatCurrency, safeStringify, escapeCsvCell, downloadCsvContent } from '../utils';
 import { format, addDays, startOfDay, isAfter, parseISO, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
 import { calculateBilling, parseLocalDateTime, BillingEngine } from '../utils/billingEngine';
@@ -796,7 +796,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       setChargeDetails({ amount: 0, price: 0, quantity: 1, type: 'debit', category: 'restaurant', description: '', discount: 0, discountType: 'fixed' });
     } catch (err: any) {
       console.error("Post charge error:", err.message || safeStringify(err));
-      toast.error('Failed to post entry');
+      toast.error(err?.message || 'Failed to post entry');
     } finally {
       setIsSaving(false);
     }
@@ -3578,14 +3578,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   escapeCsvCell(e.type === 'debit' ? e.amount : 0),
                   escapeCsvCell(e.type === 'credit' ? e.amount : 0)
                 ].join(','))
-              ].join('\n');
-              const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-              const link = document.createElement('a');
-              const url = URL.createObjectURL(blob);
-              link.href = url;
-              link.download = `folio_${(currentReservation.id || '').slice(-6)}.csv`;
-              link.click();
-              setTimeout(() => URL.revokeObjectURL(url), 10000);
+              ].join('\r\n');
+              downloadCsvContent(csvContent, `folio_${(currentReservation.id || '').slice(-6)}.csv`);
             }}
             className="flex items-center gap-2 px-6 py-3 bg-zinc-800 text-zinc-50 rounded-xl font-bold hover:bg-zinc-700 transition-all active:scale-95"
           >

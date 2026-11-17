@@ -17,6 +17,16 @@ import {
   callerIsHotelStaff,
 } from './src/utils/serverSecurity.ts';
 import { escapeCsvCell } from './src/utils.ts';
+import { hasPermission, SYSTEM_ROLE_TEMPLATES, BASE_ROLE_PERMISSIONS } from './src/utils/permissions.ts';
+import {
+  RESTAURANT_POSTING_BLOCKED_MESSAGE,
+  buildRoomRestaurantPostingUpdate,
+  canManageRoomRestaurantPosting,
+  findTargetRoomForOrder,
+  isRestaurantCategory,
+  isRoomRestaurantPostingBlocked,
+} from './src/utils/restaurantPostingGuard.ts';
+import type { Room } from './src/types.ts';
 
 function runSecurityTests() {
   console.log('Running Security Hardening & Regression Test Suite...');
@@ -152,6 +162,161 @@ function runSecurityTests() {
   assert.equal(escapeCsvCell(-5000), '"-5000"');
   assert.equal(escapeCsvCell('-12500.50'), '"-12500.50"');
   assert.equal(escapeCsvCell('John Doe, Corp'), '"John Doe, Corp"');
+
+  // 11. Room-Level Restaurant Posting Restriction & RBAC Enforcement
+  // 11a. Must NOT be auto-granted to standard Front Desk or Kitchen roles
+  assert.equal(SYSTEM_ROLE_TEMPLATES.frontDeskAgent.permissions.includes('block_restaurant_posting'), false);
+  assert.equal(SYSTEM_ROLE_TEMPLATES.frontDeskSupervisor.permissions.includes('block_restaurant_posting'), false);
+  assert.equal(BASE_ROLE_PERMISSIONS.frontDesk.includes('block_restaurant_posting'), false);
+  assert.equal(BASE_ROLE_PERMISSIONS.receptionist.includes('block_restaurant_posting'), false);
+  assert.equal(BASE_ROLE_PERMISSIONS.kitchen.includes('block_restaurant_posting'), false);
+
+  const frontDeskNoPerm = {
+    uid: 'fd_1',
+    role: 'staff',
+    staffRole: 'frontDesk',
+    hotelId: 'hotel_A',
+    status: 'active',
+    permissions: ['view_reservations', 'check_in_guests', 'check_out_guests', 'view_rooms'],
+  };
+  const frontDeskLegacyNoPerm = {
+    uid: 'fd_2',
+    role: 'frontDesk',
+    hotelId: 'hotel_A',
+    status: 'active',
+  };
+  const frontDeskWithPerm = {
+    uid: 'fd_3',
+    displayName: 'Grace FrontDesk',
+    email: 'grace@hotel.com',
+    role: 'staff',
+    staffRole: 'frontDesk',
+    hotelId: 'hotel_A',
+    status: 'active',
+    permissions: ['view_reservations', 'block_restaurant_posting'],
+  };
+  const customRoles = [
+    {
+      id: 'role_fd_restricted',
+      status: 'active',
+      permissions: ['view_reservations', 'check_in_guests'],
+    },
+    {
+      id: 'role_fd_allowed',
+      status: 'active',
+      permissions: ['view_reservations', 'block_restaurant_posting'],
+    },
+  ];
+  const staffCustomRestricted = {
+    uid: 'fd_4',
+    role: 'staff',
+    customRoleId: 'role_fd_restricted',
+    hotelId: 'hotel_A',
+    status: 'active',
+  };
+  const staffCustomAllowed = {
+    uid: 'fd_5',
+    displayName: 'Supervisor Ada',
+    email: 'ada@hotel.com',
+    role: 'staff',
+    customRoleId: 'role_fd_allowed',
+    hotelId: 'hotel_A',
+    status: 'active',
+  };
+
+  assert.equal(canManageRoomRestaurantPosting(frontDeskNoPerm, customRoles), false);
+  assert.equal(canManageRoomRestaurantPosting(frontDeskLegacyNoPerm, customRoles), false);
+  assert.equal(canManageRoomRestaurantPosting(staffCustomRestricted, customRoles), false);
+  assert.equal(canManageRoomRestaurantPosting(frontDeskWithPerm, customRoles), true);
+  assert.equal(canManageRoomRestaurantPosting(staffCustomAllowed, customRoles), true);
+  assert.equal(hasPermission(hotelAdminA.profile, 'block_restaurant_posting', customRoles), true);
+  assert.equal(hasPermission(superAdmin.profile, 'block_restaurant_posting', customRoles), true);
+
+  let room101: Room = {
+    id: 'room_101',
+    roomNumber: '101',
+    type: 'Standard',
+    price: 50000,
+    status: 'occupied',
+    floor: '1',
+    capacity: 2,
+  };
+  const room102: Room = {
+    id: 'room_102',
+    roomNumber: '102',
+    type: 'Standard',
+    price: 50000,
+    status: 'occupied',
+    floor: '1',
+    capacity: 2,
+  };
+
+  // Unauthorized user attempting direct restriction update must be rejected
+  assert.throws(() => {
+    buildRoomRestaurantPostingUpdate({
+      room: room101,
+      block: true,
+      reason: 'Unauthorized try',
+      profile: frontDeskNoPerm,
+      customRoles,
+    });
+  }, /Unauthorized/);
+
+  // Empty reason must be rejected
+  assert.throws(() => {
+    buildRoomRestaurantPostingUpdate({
+      room: room101,
+      block: true,
+      reason: '   ',
+      profile: frontDeskWithPerm,
+      customRoles,
+    });
+  }, /reason is required/i);
+
+  // Authorized user blocks Room 101 with reason + audit metadata
+  const blockUpdate = buildRoomRestaurantPostingUpdate({
+    room: room101,
+    block: true,
+    reason: 'Guest requested no restaurant room charges',
+    profile: frontDeskWithPerm,
+    customRoles,
+    nowISO: '2026-11-17T10:00:00.000Z',
+  });
+  room101 = { ...room101, ...blockUpdate };
+
+  assert.equal(isRoomRestaurantPostingBlocked(room101), true);
+  assert.equal(isRoomRestaurantPostingBlocked(room102), false); // Room 102 stays unaffected
+  assert.equal(room101.restaurantPostingRestriction?.updatedByUid, 'fd_3');
+  assert.equal(room101.restaurantPostingRestriction?.updatedByName, 'Grace FrontDesk');
+  assert.equal(room101.restaurantPostingRestriction?.updatedAt, '2026-11-17T10:00:00.000Z');
+  assert.equal(room101.restaurantPostingRestriction?.reason, 'Guest requested no restaurant room charges');
+  assert.equal(room101.restaurantPostingHistory?.length, 1);
+
+  // Restaurant target lookup & category enforcement checks
+  const found101 = findTargetRoomForOrder([room101, room102], { roomNumber: '101' });
+  const found102 = findTargetRoomForOrder([room101, room102], { roomNumber: '102' });
+  assert.equal(isRoomRestaurantPostingBlocked(found101), true);
+  assert.equal(isRoomRestaurantPostingBlocked(found102), false);
+  assert.equal(RESTAURANT_POSTING_BLOCKED_MESSAGE, 'Restaurant posting is blocked for this room. Please contact Front Desk.');
+  assert.equal(isRestaurantCategory('F & B'), true);
+  assert.equal(isRestaurantCategory('restaurant'), true);
+  assert.equal(isRestaurantCategory('room'), false);
+  assert.equal(isRestaurantCategory('payment'), false);
+
+  // Authorized custom-role user unblocks Room 101; history & posting resume cleanly
+  const unblockUpdate = buildRoomRestaurantPostingUpdate({
+    room: room101,
+    block: false,
+    reason: 'Deposit topped up at Front Desk',
+    profile: staffCustomAllowed,
+    customRoles,
+    nowISO: '2026-11-17T12:30:00.000Z',
+  });
+  room101 = { ...room101, ...unblockUpdate };
+  assert.equal(isRoomRestaurantPostingBlocked(room101), false);
+  assert.equal(room101.restaurantPostingRestriction?.action, 'unblocked');
+  assert.equal(room101.restaurantPostingRestriction?.updatedByName, 'Supervisor Ada');
+  assert.equal(room101.restaurantPostingHistory?.length, 2);
 
   console.log('ALL SECURITY HARDENING UNIT TESTS PASSED!');
 }

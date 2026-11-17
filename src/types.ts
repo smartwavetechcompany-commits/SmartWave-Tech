@@ -511,6 +511,28 @@ export interface Room {
     status: string;
     reportedBy: string;
   }[];
+  restaurantPostingBlocked?: boolean;
+  restaurantPostingRestriction?: RoomRestaurantPostingRestriction;
+  restaurantPostingHistory?: RoomRestaurantPostingHistoryEntry[];
+}
+
+export interface RoomRestaurantPostingRestriction {
+  isBlocked: boolean;
+  reason: string;
+  updatedByUid: string;
+  updatedByName: string;
+  updatedByEmail?: string;
+  updatedAt: string;
+  action: 'blocked' | 'unblocked';
+}
+
+export interface RoomRestaurantPostingHistoryEntry {
+  action: 'blocked' | 'unblocked';
+  reason: string;
+  staffUid: string;
+  staffName: string;
+  staffEmail?: string;
+  timestamp: string;
 }
 
 export interface GracePeriodRequest {

@@ -63,7 +63,24 @@
         "amenities": { "type": "array", "items": { "type": "string" } },
         "description": { "type": "string" },
         "notes": { "type": "string" },
-        "assignedTo": { "type": "string" }
+        "assignedTo": { "type": "string" },
+        "restaurantPostingBlocked": { "type": "boolean" },
+        "restaurantPostingRestriction": {
+          "type": "object",
+          "properties": {
+            "isBlocked": { "type": "boolean" },
+            "reason": { "type": "string" },
+            "updatedByUid": { "type": "string" },
+            "updatedByName": { "type": "string" },
+            "updatedByEmail": { "type": "string" },
+            "updatedAt": { "type": "string", "format": "date-time" },
+            "action": { "type": "string", "enum": ["blocked", "unblocked"] }
+          }
+        },
+        "restaurantPostingHistory": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
       },
       "required": ["roomNumber", "type", "price", "status"]
     },

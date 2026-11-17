@@ -12,7 +12,7 @@ import {
   InventoryLocation, InventoryVendor, PurchaseOrder, InventoryAudit,
   OperationType
 } from '../types';
-import { formatCurrency, cn, escapeCsvCell } from '../utils';
+import { formatCurrency, cn, escapeCsvCell, downloadCsvContent } from '../utils';
 import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, handleFirestoreError } from '../firebase';
@@ -88,14 +88,8 @@ export function Inventory() {
       item.quantity <= item.minThreshold ? 'Low Stock' : 'In Stock',
       item.lastUpdated ? new Date(item.lastUpdated).toISOString() : ''
     ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `inventory_report_${format(new Date(), 'yyyy-MM-dd')}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\r\n');
+    downloadCsvContent(csvContent, `inventory_report_${format(new Date(), 'yyyy-MM-dd')}.csv`);
     toast.success('Inventory report exported');
   };
 

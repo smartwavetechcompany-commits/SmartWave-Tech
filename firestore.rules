@@ -99,6 +99,50 @@ service cloud.firestore {
       );
     }
 
+    function customRoleHasPermission(hotelId, customRoleId, perm) {
+      return customRoleId is string &&
+        customRoleId != '' &&
+        exists(/databases/$(database)/documents/hotels/$(hotelId)/customRoles/$(customRoleId)) &&
+        get(/databases/$(database)/documents/hotels/$(hotelId)/customRoles/$(customRoleId)).data.get('status', 'active') != 'disabled' &&
+        get(/databases/$(database)/documents/hotels/$(hotelId)/customRoles/$(customRoleId)).data.get('status', 'active') != 'archived' &&
+        get(/databases/$(database)/documents/hotels/$(hotelId)/customRoles/$(customRoleId)).data.get('permissions', []) is list &&
+        get(/databases/$(database)/documents/hotels/$(hotelId)/customRoles/$(customRoleId)).data.get('permissions', []).hasAny([perm, 'all']);
+    }
+
+    function canBlockRestaurantPosting(hotelId) {
+      let data = getUserData();
+      let roleId = data != null ? data.get('customRoleId', '') : '';
+      let hasCustomRoleDoc = roleId is string && roleId != '' && exists(/databases/$(database)/documents/hotels/$(hotelId)/customRoles/$(roleId));
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        (sameHotel(hotelId) && data != null && data.get('status', 'active') != "suspended" && data.get('status', 'active') != "inactive" && (
+          data.role == "hotelAdmin" ||
+          data.role == "admin" ||
+          data.role == "hotel_admin" ||
+          (hasCustomRoleDoc
+            ? customRoleHasPermission(hotelId, roleId, 'block_restaurant_posting')
+            : (data.get('permissions', []) is list && data.get('permissions', []).hasAny(['block_restaurant_posting', 'all'])))
+        ))
+      );
+    }
+
+    function roomHasPostingBlocked(hotelId, roomId) {
+      return roomId is string &&
+        roomId != '' &&
+        exists(/databases/$(database)/documents/hotels/$(hotelId)/rooms/$(roomId)) &&
+        get(/databases/$(database)/documents/hotels/$(hotelId)/rooms/$(roomId)).data.get('restaurantPostingBlocked', false) == true;
+    }
+
+    function isRoomRestaurantPostingAllowedForReservation(hotelId, reservationId) {
+      return !(reservationId is string) ||
+        reservationId == '' ||
+        !exists(/databases/$(database)/documents/hotels/$(hotelId)/reservations/$(reservationId)) ||
+        !roomHasPostingBlocked(
+          hotelId,
+          get(/databases/$(database)/documents/hotels/$(hotelId)/reservations/$(reservationId)).data.get('roomId', '')
+        );
+    }
+
     //////////////////////////////
     // TRACKING CODES
     //////////////////////////////
@@ -258,7 +302,13 @@ service cloud.firestore {
           request.resource.data.amount >= 0 &&
           request.resource.data.type in ['debit', 'credit'] &&
           request.resource.data.category is string &&
-          request.resource.data.timestamp != null
+          request.resource.data.timestamp != null &&
+          (
+            !(request.resource.data.type == 'debit' &&
+              request.resource.data.category in ['F & B', 'restaurant', 'F&B', 'food', 'bar', 'room_service'] &&
+              request.resource.data.get('reservationId', null) != null) ||
+            isRoomRestaurantPostingAllowedForReservation(hotelId, request.resource.data.get('reservationId', ''))
+          )
         );
         allow update: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin())) || isAuthenticated();
         allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin() || isStaffOf(hotelId))) || isAuthenticated();
@@ -300,10 +350,55 @@ service cloud.firestore {
 
       // Food & Beverage Kitchen Orders (Full live sync, creation, status update, settlement, and deletion)
       match /kitchen_orders/{orderId} {
-        allow read, write, create, update, delete: if true;
+        allow read, delete: if true;
+        allow create: if (
+          !(request.resource.data.get('roomChargedAmount', 0) > 0 || request.resource.data.get('financialStatus', '') == 'posted_to_room') ||
+          isRoomRestaurantPostingAllowedForReservation(hotelId, request.resource.data.get('reservationId', ''))
+        );
+        allow update: if (
+          !(
+            request.resource.data.get('roomChargedAmount', 0) > resource.data.get('roomChargedAmount', 0) ||
+            (request.resource.data.get('financialStatus', '') == 'posted_to_room' && resource.data.get('financialStatus', '') != 'posted_to_room')
+          ) ||
+          isRoomRestaurantPostingAllowedForReservation(hotelId, request.resource.data.get('reservationId', ''))
+        );
       }
 
-      // Recursive subcollections (Rooms, Reservations, Housekeeping, Staff, etc.)
+      // Rooms: Protect restaurant posting restriction fields with block_restaurant_posting RBAC
+      match /rooms/{roomId} {
+        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
+                       isAuthenticated() ||
+                       (resource != null && resource.data.hotelId == hotelId);
+        allow create: if (
+          isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
+          isAuthenticated() ||
+          (exists(/databases/$(database)/documents/hotels/$(hotelId)) &&
+           get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs != null &&
+           get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs is list &&
+           get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid]))
+        ) && (
+          !(request.resource.data.get('restaurantPostingBlocked', false) == true) ||
+          canBlockRestaurantPosting(hotelId)
+        );
+        allow update: if (
+          isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
+          isAuthenticated() ||
+          (exists(/databases/$(database)/documents/hotels/$(hotelId)) &&
+           get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs != null &&
+           get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs is list &&
+           get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid]))
+        ) && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'restaurantPostingBlocked',
+            'restaurantPostingRestriction',
+            'restaurantPostingHistory'
+          ]) ||
+          canBlockRestaurantPosting(hotelId)
+        );
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin() || isStaffOf(hotelId))) || isAuthenticated();
+      }
+
+      // Recursive subcollections (Reservations, Housekeeping, Staff, etc.)
       match /{allSubcollections=**} {
         allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
                        isAuthenticated() ||

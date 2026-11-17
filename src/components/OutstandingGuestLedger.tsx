@@ -26,7 +26,7 @@ import {
 import { collection, getDocs, query, where, doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { OutstandingDebt, OutstandingDebtAuditEntry, CorporateAccount, Guest, Reservation, LedgerEntry } from '../types';
-import { formatCurrency, escapeCsvCell } from '../utils';
+import { formatCurrency, escapeCsvCell, downloadCsvContent } from '../utils';
 import { 
   getOutstandingDebts, 
   subscribeOutstandingDebts,
@@ -432,11 +432,11 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
     const rows = filteredDebts.map(d => {
       const { isCorp, corpName } = getCorporateInfo(d);
       return [
-        `"${d.folioNumber || ''}"`,
-        `"${d.guestName || ''}"`,
-        `"${isCorp ? 'Corporate' : 'Individual'}"`,
-        `"${corpName || ''}"`,
-        `"Room ${d.roomNumber || 'N/A'}"`,
+        escapeCsvCell(d.folioNumber || ''),
+        escapeCsvCell(d.guestName || ''),
+        escapeCsvCell(isCorp ? 'Corporate' : 'Individual'),
+        escapeCsvCell(corpName || ''),
+        escapeCsvCell(`Room ${d.roomNumber || 'N/A'}`),
         escapeCsvCell(d.checkoutDate || ''),
         d.agingDays || 0,
         d.originalDebt || 0,
@@ -449,19 +449,13 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
       ];
     });
 
-    const csvContent = "data:text/csv;charset=utf-8," + 
-      [`# ${hotelDisplayName} - Outstanding Guest Ledger (AR) - Generated ${format(new Date(), 'yyyy-MM-dd HH:mm')}`,
-       headers.join(","),
-       ...rows.map(e => e.join(","))
-      ].join("\n");
+    const csvContent = [
+      escapeCsvCell(`# ${hotelDisplayName} - Outstanding Guest Ledger (AR) - Generated ${format(new Date(), 'yyyy-MM-dd HH:mm')}`),
+      headers.map(h => escapeCsvCell(h)).join(','),
+      ...rows.map(e => e.join(','))
+    ].join('\r\n');
 
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Outstanding_Guest_Ledger_${format(new Date(), 'yyyyMMdd')}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadCsvContent(csvContent, `Outstanding_Guest_Ledger_${format(new Date(), 'yyyyMMdd')}.csv`);
     toast.success("Accounts Receivable Ledger exported to CSV.");
   };
 

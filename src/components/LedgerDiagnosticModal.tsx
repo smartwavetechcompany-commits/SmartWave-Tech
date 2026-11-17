@@ -13,7 +13,7 @@ import {
   Download,
   FileSpreadsheet
 } from 'lucide-react';
-import { formatCurrency, escapeCsvCell } from '../utils';
+import { formatCurrency, escapeCsvCell, downloadCsvContent } from '../utils';
 import { Pagination } from './Pagination';
 import { DateFilterControl, DateFilterValue, getDefaultDateFilter, matchesDateFilter } from './DateFilterControl';
 
@@ -503,14 +503,8 @@ export const LedgerDiagnosticModal: React.FC<LedgerDiagnosticModalProps> = ({
       escapeCsvCell(e.userId),
       escapeCsvCell(e.id)
     ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Ledger_Audit_${reservation?.id || guestId || 'hotel'}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+    downloadCsvContent(csvContent, `Ledger_Audit_${reservation?.id || guestId || 'hotel'}.csv`);
   };
 
   // CRITICAL: Safe return only after ALL hooks have been invoked
