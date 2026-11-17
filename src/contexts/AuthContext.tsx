@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useLayoutEffect, useState, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useLayoutEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { onAuthStateChanged, User, signOut as fbSignOut } from 'firebase/auth';
 import { doc, onSnapshot, getDoc, collection, query, where, getDocs, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
@@ -77,6 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(() => {
     return typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('pms_session_id') : null;
   });
+  const isSigningOutRef = useRef(false);
   const [currency, setCurrencyState] = useState<'NGN' | 'USD'>(() => {
     return (typeof localStorage !== 'undefined' ? localStorage.getItem('pms_currency') as 'NGN' | 'USD' : null) || 'NGN';
   });
@@ -131,21 +132,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Sign out helper
   const signOut = useCallback(async () => {
+    if (isSigningOutRef.current) return;
+    isSigningOutRef.current = true;
+    const sessionIdToRevoke =
+      currentSessionId ||
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('pms_session_id') : null);
     try {
-      if (currentSessionId && profile?.hotelId && profile.hotelId !== 'system') {
-        const sessionRef = doc(db, 'hotels', profile.hotelId, 'sessions', currentSessionId);
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.removeItem('pms_session_id');
+      }
+      if (sessionIdToRevoke && profile?.hotelId && profile.hotelId !== 'system') {
+        const sessionRef = doc(db, 'hotels', profile.hotelId, 'sessions', sessionIdToRevoke);
         await updateDoc(sessionRef, {
           status: 'revoked',
           lastActivityAt: new Date().toISOString()
         }).catch(() => {});
       }
-      if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.removeItem('pms_session_id');
-      }
       queryClient.clear();
       await fbSignOut(auth);
     } catch (err) {
       console.error('Sign out error:', err);
+    } finally {
+      setCurrentSessionId(null);
+      isSigningOutRef.current = false;
     }
   }, [currentSessionId, profile?.hotelId]);
 
@@ -235,6 +244,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setAuthResolved(true);
           });
       } else {
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.removeItem('pms_session_id');
+        }
+        setCurrentSessionId(null);
         setUser(null);
         setProfile(null);
         setHotel(null);
@@ -506,58 +519,80 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const hotelId = profile?.hotelId;
     const userId = user?.uid;
-    if (!hotelId || hotelId === 'system' || !userId || !profile) return;
+    if (!hotelId || hotelId === 'system' || !userId || !profile || isSigningOutRef.current) return;
+
+    let isCancelled = false;
+    let unsubSession: (() => void) | null = null;
 
     let sessionId = currentSessionId;
     if (!sessionId) {
-      sessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-      sessionStorage.setItem('pms_session_id', sessionId);
+      sessionId =
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('pms_session_id') : null) ||
+        `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem('pms_session_id', sessionId);
+      }
       setCurrentSessionId(sessionId);
     }
 
     const sessionDocRef = doc(db, 'hotels', hotelId, 'sessions', sessionId);
     const info = getClientDeviceInfo();
 
-    // Register/update session
-    setDoc(sessionDocRef, {
-      id: sessionId,
-      userId,
-      userEmail: profile.email,
-      userName: profile.displayName || profile.email.split('@')[0],
-      userRole: profile.staffRole || profile.role,
-      hotelId,
-      device: info.device,
-      browser: info.browser,
-      os: info.os,
-      loginAt: new Date().toISOString(),
-      lastActivityAt: new Date().toISOString(),
-      status: 'active'
-    }, { merge: true }).catch((err) => {
-      console.warn("Session doc registration notice:", err);
-    });
-
-    // Listen to session document - if admin revokes it, logout immediately
-    const unsubSession = onSnapshot(sessionDocRef, (snap) => {
-      if (snap.exists()) {
-        const sessData = snap.data() as ActiveSession;
-        if (sessData.status === 'revoked') {
-          toast.error("Your session has been revoked by an administrator.");
-          fbSignOut(auth);
-        }
+    const initSession = async () => {
+      // Register/activate session before attaching revocation listener to avoid stale revoked snapshots
+      try {
+        await setDoc(sessionDocRef, {
+          id: sessionId,
+          userId,
+          userEmail: profile.email,
+          userName: profile.displayName || profile.email.split('@')[0],
+          userRole: profile.staffRole || profile.role,
+          hotelId,
+          device: info.device,
+          browser: info.browser,
+          os: info.os,
+          loginAt: new Date().toISOString(),
+          lastActivityAt: new Date().toISOString(),
+          status: 'active'
+        }, { merge: true });
+      } catch (err) {
+        console.warn("Session doc registration notice:", err);
       }
-    }, () => {});
+
+      if (isCancelled || isSigningOutRef.current || auth.currentUser?.uid !== userId) return;
+
+      // Listen to session document - if admin revokes it, logout immediately
+      unsubSession = onSnapshot(sessionDocRef, (snap) => {
+        if (isCancelled || isSigningOutRef.current || auth.currentUser?.uid !== userId) return;
+        if (snap.exists()) {
+          const sessData = snap.data() as ActiveSession;
+          if (sessData.status === 'revoked') {
+            if (typeof sessionStorage !== 'undefined') {
+              sessionStorage.removeItem('pms_session_id');
+            }
+            setCurrentSessionId(null);
+            toast.error("Your session has been revoked by an administrator.");
+            fbSignOut(auth);
+          }
+        }
+      }, () => {});
+    };
+
+    initSession();
 
     // Periodic heartbeat to refresh lastActivityAt (throttled to 5 minutes)
     const heartbeat = setInterval(() => {
+      if (isCancelled || isSigningOutRef.current) return;
       updateDoc(sessionDocRef, {
         lastActivityAt: new Date().toISOString()
       }).catch(() => {});
     }, 300000); // every 5 minutes
 
     return () => {
+      isCancelled = true;
       clearInterval(heartbeat);
       try {
-        unsubSession();
+        if (unsubSession) unsubSession();
       } catch (_) {}
     };
   }, [profile?.hotelId, user?.uid, currentSessionId]);

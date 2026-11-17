@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, doc, onSnapshot, getDocs } from 'firebase/firestore';
+import { collection, query, where, doc, onSnapshot, getDocs, getDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { ConfirmModal } from './ConfirmModal';
 import { useAuth } from '../contexts/AuthContext';
-import { UserProfile, StaffRole, OperationType, CustomRole, UserRole } from '../types';
+import { UserProfile, StaffRole, OperationType, CustomRole, UserRole, Hotel } from '../types';
 import { hasPermission, BASE_ROLE_PERMISSIONS } from '../utils/permissions';
 import { RoleBuilderModal } from './RoleBuilderModal';
 import { ModuleAssignmentMatrix, PMS_MODULES, getAssignedModulesFromPermissions } from './ModuleAssignmentMatrix';
@@ -94,10 +94,22 @@ const DEPARTMENTS = [
   'Security'
 ];
 
+export function isSuperAdminRegisteredHotelAdmin(
+  member: Pick<UserProfile, 'uid' | 'role' | 'activationEmailSentBy' | 'activationToken' | 'activationLink'>,
+  hotel?: Pick<Hotel, 'adminUIDs'> | null
+): boolean {
+  if (!member || member.role !== 'hotelAdmin') return false;
+  if (Array.isArray(hotel?.adminUIDs) && hotel.adminUIDs.length > 0) {
+    return hotel.adminUIDs[0] === member.uid;
+  }
+  return !member.activationEmailSentBy && !member.activationToken && !member.activationLink;
+}
+
 export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) {
   const { hotel: authHotel, profile, customRoles } = useAuth();
   const hotelId = propHotelId || authHotel?.id;
 
+  const [targetHotel, setTargetHotel] = useState<Hotel | null>(authHotel || null);
   const [activeTab, setActiveTab] = useState<'members' | 'roles' | 'sessions'>('members');
   const [staff, setStaff] = useState<UserProfile[]>([]);
   const [isAddingStaff, setIsAddingStaff] = useState(false);
@@ -148,6 +160,29 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
   useEffect(() => {
     setHasPermissionError(false);
   }, [hotelId, profile?.uid]);
+
+  // Keep targetHotel synced whether accessed directly or from SuperAdmin modal
+  useEffect(() => {
+    if (!hotelId) {
+      setTargetHotel(null);
+      return;
+    }
+    if (authHotel && authHotel.id === hotelId) {
+      setTargetHotel(authHotel);
+      return;
+    }
+    let isMounted = true;
+    getDoc(doc(db, 'hotels', hotelId))
+      .then((snap) => {
+        if (isMounted && snap.exists()) {
+          setTargetHotel({ id: snap.id, ...snap.data() } as Hotel);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, [hotelId, authHotel]);
 
   // Role-based permission check for staff password reset
   const canResetPasswords = profile && (
@@ -844,6 +879,7 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                   ) : (
                     paginatedStaff.map((member) => {
                       const isSuspended = member.status === 'suspended';
+                      const isPrimaryHotelAdmin = isSuperAdminRegisteredHotelAdmin(member, targetHotel);
                       const roleName = member.customRoleId 
                         ? (customRoles.find(r => r.id === member.customRoleId)?.name || 'Custom Role')
                         : (BASE_ROLES.find(r => r.id === (member.staffRole || member.role))?.label || member.role);
@@ -937,7 +973,10 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                             <div className="flex items-center justify-end gap-2">
                               {/* Manage Modules Button */}
                               <button
+                                type="button"
+                                disabled={isPrimaryHotelAdmin}
                                 onClick={() => {
+                                  if (isPrimaryHotelAdmin) return;
                                   const initialPerms = Array.isArray(member.permissions)
                                     ? member.permissions
                                     : Array.isArray(member.assignedModules) && member.assignedModules.length > 0
@@ -949,12 +988,26 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
                                   setEditingStaffRole((member.staffRole || member.role || 'frontDesk') as StaffRole);
                                   setEditingDepartment(member.department || 'Front Office');
                                 }}
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-emerald-500/20 text-zinc-200 hover:text-emerald-300 text-xs font-semibold border border-zinc-700/60 transition-all shadow-sm"
-                                title="Manage assigned modules and granular permissions for this staff member"
+                                className={cn(
+                                  "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all shadow-sm",
+                                  isPrimaryHotelAdmin
+                                    ? "bg-zinc-900/60 text-zinc-500 border-zinc-800 cursor-not-allowed opacity-50"
+                                    : "bg-zinc-800 hover:bg-emerald-500/20 text-zinc-200 hover:text-emerald-300 border-zinc-700/60"
+                                )}
+                                title={
+                                  isPrimaryHotelAdmin
+                                    ? "Manage Modules is disabled for the Hotel Admin registered on SuperAdmin"
+                                    : "Manage assigned modules and granular permissions for this staff member"
+                                }
                               >
-                                <Shield size={13} className="text-emerald-400" />
+                                <Shield size={13} className={isPrimaryHotelAdmin ? "text-zinc-500" : "text-emerald-400"} />
                                 <span>Manage Modules</span>
-                                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">
+                                <span className={cn(
+                                  "px-1.5 py-0.2 rounded-full text-[10px] border font-mono",
+                                  isPrimaryHotelAdmin
+                                    ? "bg-zinc-800/60 text-zinc-500 border-zinc-700/40"
+                                    : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                )}>
                                   {Array.isArray(member.assignedModules) ? member.assignedModules.length : (member.permissions?.length || 0)}
                                 </span>
                               </button>
