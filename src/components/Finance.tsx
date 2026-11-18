@@ -265,7 +265,9 @@ export function Finance() {
 
     const seenIds = new Set<string>();
     const seenInvoiceOrRefIds = new Set<string>();
-    const ledgerPaymentsList = validLedgerEntries.filter(e => isActualPaymentLedgerEntry(e));
+    const ledgerPaymentsList = validLedgerEntries.filter(
+      e => isActualPaymentLedgerEntry(e) && (e as any).paymentMethod !== 'deposit' && (e as any).fromGuestDeposit !== true
+    );
 
     // 1. From live ledger credits (actual payments collected, excluding AR city ledger transfers)
     ledgerPaymentsList

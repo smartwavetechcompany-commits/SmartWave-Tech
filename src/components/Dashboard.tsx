@@ -451,6 +451,7 @@ export function Dashboard() {
 
     return validLedgerEntries.filter(e => {
       if (!isActualPaymentLedgerEntry(e)) return false;
+      if ((e as any).paymentMethod === 'deposit' || (e as any).fromGuestDeposit === true) return false;
       if (e.id && financeRefIds.has(e.id)) return false;
       if (e.referenceId && (financeInvoiceIds.has(e.referenceId) || financeRefIds.has(e.referenceId))) return false;
 

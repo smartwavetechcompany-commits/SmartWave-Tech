@@ -21,6 +21,13 @@ import { PrincipalRoomManager } from './PrincipalRoomManager';
 import { GuestActivityTimeline } from './GuestActivityTimeline';
 import { GlobalErrorBoundary } from './GlobalErrorBoundary';
 import { ExtendGracePeriodModal } from './ExtendGracePeriodModal';
+import { GuestDepositModal } from './GuestDepositModal';
+import {
+  applyGuestDepositToGroup,
+  applyGuestDepositToReservation,
+  getAvailableGuestDeposit,
+  validateDepositApplication,
+} from '../services/guestDepositService';
 import { 
   Receipt, 
   User, 
@@ -45,7 +52,8 @@ import {
   ShieldAlert,
   X,
   Sparkles,
-  Loader2
+  Loader2,
+  Wallet
 } from 'lucide-react';
 import { cn, formatCurrency, safeStringify, escapeCsvCell, downloadCsvContent } from '../utils';
 import { format, addDays, startOfDay, isAfter, parseISO, differenceInDays } from 'date-fns';
@@ -134,8 +142,9 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
     discount: 0,
     discountType: 'fixed' as 'fixed' | 'percentage'
   });
+  const [showGuestDepositModal, setShowGuestDepositModal] = useState(false);
   const [settleData, setSettleData] = useState({ 
-    splits: [{ amount: 0, method: 'cash', referenceCode: '', proofUrl: '' }] as { amount: number; method: 'cash' | 'card' | 'transfer'; referenceCode?: string; proofUrl?: string }[], 
+    splits: [{ amount: 0, method: 'cash', referenceCode: '', proofUrl: '' }] as { amount: number; method: 'cash' | 'card' | 'transfer' | 'deposit'; referenceCode?: string; proofUrl?: string }[], 
     notes: '' 
   });
   const [refundDraft, setRefundDraft] = useState<{
@@ -578,42 +587,85 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       async () => {
         setIsSaving(true);
         const validSplits = settleData.splits.filter(s => s.amount > 0);
+        const depositSplits = validSplits.filter(s => s.method === 'deposit');
+        const standardSplits = validSplits.filter(s => s.method !== 'deposit');
+        const effectiveGuestId = guest?.id || currentReservation.guestId;
+        const staffContext = {
+          uid: profile.uid,
+          email: profile.email,
+          displayName: profile.displayName || (profile as any)?.name || profile.email || 'Staff',
+          role: profile.role || 'staff',
+        };
+
         if (isMasterWithLinks) {
-          await principalRoomService.postGroupPayment(
-            hotel.id,
-            currentReservation,
-            validSplits,
-            {
-              uid: profile.uid,
-              name: profile.displayName || (profile as any)?.name || profile.email || 'Staff',
-              role: profile.role || 'staff'
-            },
-            {
-              notes: settleData.notes,
-              isConsolidated: true,
-              linkedReservations: linkedGroupReservations.length > 0 ? linkedGroupReservations : undefined,
-              hotel
-            }
-          );
-        } else {
-          for (const split of validSplits) {
-            await settleLedger(
-              hotel.id, 
-              currentReservation.guestId || 'unknown', 
-              currentReservation.id, 
-              split.amount, 
-              split.method, 
-              profile.uid, 
-              currentReservation.corporateId || undefined,
-              (split as any).referenceCode,
-              (split as any).proofUrl,
+          if (standardSplits.length > 0) {
+            await principalRoomService.postGroupPayment(
+              hotel.id,
+              currentReservation,
+              standardSplits as { amount: number; method: 'cash' | 'card' | 'transfer'; referenceCode?: string; proofUrl?: string }[],
               {
-                uid: profile?.uid,
-                email: profile?.email,
-                role: profile?.role || 'staff',
-                displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+                uid: staffContext.uid,
+                name: staffContext.displayName,
+                role: staffContext.role,
+              },
+              {
+                notes: settleData.notes,
+                isConsolidated: true,
+                linkedReservations: linkedGroupReservations.length > 0 ? linkedGroupReservations : undefined,
+                hotel
               }
             );
+          }
+          if (depositSplits.length > 0) {
+            if (!effectiveGuestId) throw new Error('Guest profile is required to apply a guest account deposit.');
+            for (const split of depositSplits) {
+              await applyGuestDepositToGroup(
+                hotel.id,
+                effectiveGuestId,
+                currentReservation,
+                linkedGroupReservations,
+                split.amount,
+                hotel,
+                staffContext,
+                { referenceCode: split.referenceCode, notes: settleData.notes }
+              );
+            }
+          }
+        } else {
+          for (const split of validSplits) {
+            if (split.method === 'deposit') {
+              if (!effectiveGuestId) throw new Error('Guest profile is required to apply a guest account deposit.');
+              await applyGuestDepositToReservation(
+                hotel.id,
+                effectiveGuestId,
+                currentReservation.id,
+                split.amount,
+                staffContext,
+                {
+                  referenceCode: split.referenceCode,
+                  description: settleData.notes || undefined,
+                  settlementSource: 'Front Desk'
+                }
+              );
+            } else {
+              await settleLedger(
+                hotel.id, 
+                currentReservation.guestId || 'unknown', 
+                currentReservation.id, 
+                split.amount, 
+                split.method, 
+                profile.uid, 
+                currentReservation.corporateId || undefined,
+                (split as any).referenceCode,
+                (split as any).proofUrl,
+                {
+                  uid: profile?.uid,
+                  email: profile?.email,
+                  role: profile?.role || 'staff',
+                  displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+                }
+              );
+            }
           }
         }
 
@@ -647,6 +699,22 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
       return;
     }
 
+    // Validate guest account deposit balance when any split uses guest deposit
+    const totalDepositPayment = settleData.splits
+      .filter(s => s.method === 'deposit' && s.amount > 0)
+      .reduce((acc, s) => acc + s.amount, 0);
+    if (totalDepositPayment > 0) {
+      if (!(guest?.id || currentReservation.guestId)) {
+        toast.error('No linked guest profile found for Guest Account Deposit payment.');
+        return;
+      }
+      const depositValidation = validateDepositApplication(getAvailableGuestDeposit(guest), totalDepositPayment);
+      if (!depositValidation.isValid) {
+        toast.error(depositValidation.error || 'Insufficient Guest Account Deposit balance.');
+        return;
+      }
+    }
+
     // Enforce payment reference and proof upload settings
     const paymentSettings = hotel.settings?.payments;
     if (paymentSettings) {
@@ -672,7 +740,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
       for (let i = 0; i < settleData.splits.length; i++) {
         const split = settleData.splits[i];
-        if (split.method !== 'cash') {
+        if (split.method !== 'cash' && split.method !== 'deposit') {
           if (paymentSettings.requireTransactionReference && !split.referenceCode?.trim()) {
             toast.error(`For split #${i + 1} (${split.method.toUpperCase()}): A transaction reference number is required by hotel policy.`);
             return;
@@ -1398,6 +1466,17 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     <span>Individual Guest</span>
                   </span>
                 )}
+                {getAvailableGuestDeposit(guest) > 0.01 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowGuestDepositModal(true)}
+                    className="px-2.5 py-0.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-xs font-bold border border-emerald-500/35 flex items-center gap-1.5 shadow-sm transition-colors"
+                    title="View or apply Guest Account Deposit"
+                  >
+                    <Wallet size={12} className="text-emerald-400" />
+                    <span>Account Deposit: {formatCurrency(getAvailableGuestDeposit(guest), currency, exchangeRate)}</span>
+                  </button>
+                )}
               </div>
               <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-400">
                 <span className="font-semibold text-zinc-200">{currentReservation.guestName}</span>
@@ -1641,6 +1720,24 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
             <button
               type="button"
+              onClick={() => setShowGuestDepositModal(true)}
+              className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-emerald-500/10 border border-emerald-500/25 rounded-xl sm:rounded-2xl text-emerald-400 hover:bg-emerald-500 hover:text-black transition-all group active:scale-95"
+            >
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-emerald-500/20 rounded-lg sm:rounded-xl flex items-center justify-center group-hover:bg-black/20">
+                <Wallet size={16} className="sm:size-5" />
+              </div>
+              <div className="text-left min-w-0">
+                <p className="text-[10px] font-bold text-emerald-500/80 uppercase tracking-wider leading-tight truncate">
+                  {getAvailableGuestDeposit(guest) > 0.01
+                    ? formatCurrency(getAvailableGuestDeposit(guest), currency, exchangeRate)
+                    : 'Guest Wallet'}
+                </p>
+                <p className="text-xs sm:text-sm font-bold truncate">Deposit</p>
+              </div>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setShowTransferBalanceModal(true)}
               className="flex items-center justify-center gap-2 sm:gap-3 p-3 sm:p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl sm:rounded-2xl text-blue-500 hover:bg-blue-500 hover:text-white transition-all group active:scale-95"
             >
@@ -1858,6 +1955,26 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                       <Building2 size={14} />
                       Corporate Booking
                     </p>
+                  </div>
+                )}
+                {(guest || currentReservation.guestId) && (
+                  <div className="mt-3 pt-3 border-t border-zinc-800/70 flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[10px] font-bold text-zinc-500 uppercase">Guest Account Deposit</p>
+                      <p className={cn(
+                        "text-sm font-bold font-mono",
+                        getAvailableGuestDeposit(guest) > 0.01 ? "text-emerald-400" : "text-zinc-400"
+                      )}>
+                        {formatCurrency(getAvailableGuestDeposit(guest), currency, exchangeRate)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowGuestDepositModal(true)}
+                      className="px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 transition-colors"
+                    >
+                      <Wallet size={12} /> Wallet
+                    </button>
                   </div>
                 )}
               </div>
@@ -3041,6 +3158,43 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     </div>
 
                     <div className="space-y-4">
+                      {getAvailableGuestDeposit(guest) > 0.01 && (() => {
+                        const availableDep = getAvailableGuestDeposit(guest);
+                        const targetDue = Math.max(
+                          0,
+                          isMasterWithLinks && groupFinancialSummary ? groupFinancialSummary.groupNetBalance : balance
+                        );
+                        const suggestedAmt = targetDue > 0.01 ? Math.min(availableDep, targetDue) : availableDep;
+                        return (
+                          <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+                                <Wallet size={12} />
+                                <span>Guest Account Deposit Available</span>
+                              </div>
+                              <p className="text-sm font-black text-emerald-200 font-mono mt-0.5">
+                                {formatCurrency(availableDep, currency, exchangeRate)}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setSettleData({
+                                ...settleData,
+                                splits: [{
+                                  amount: Number(suggestedAmt.toFixed(2)),
+                                  method: 'deposit',
+                                  referenceCode: '',
+                                  proofUrl: ''
+                                }]
+                              })}
+                              className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-black rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shrink-0"
+                            >
+                              Use Deposit
+                            </button>
+                          </div>
+                        );
+                      })()}
+
                       <div className="flex items-center justify-between">
                         <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Payment Splits</label>
                         {(hotel?.settings?.payments?.allowSplitPayments ?? true) && (
@@ -3104,11 +3258,24 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                                   <option value="cash">Cash</option>
                                   <option value="card">Card</option>
                                   <option value="transfer">Bank Transfer</option>
+                                  <option value="deposit" disabled={getAvailableGuestDeposit(guest) <= 0.01}>
+                                    Guest Account Deposit ({formatCurrency(getAvailableGuestDeposit(guest), currency, exchangeRate)})
+                                  </option>
                                 </select>
                               </div>
                             </div>
 
-                            {split.method !== 'cash' && (
+                            {split.method === 'deposit' ? (
+                              <div className="px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-[11px] text-emerald-300 flex items-center justify-between">
+                                <span className="flex items-center gap-1.5 font-semibold">
+                                  <Wallet size={12} className="text-emerald-400" />
+                                  Deducts from Guest Account Deposit Wallet
+                                </span>
+                                <span className="font-mono font-bold">
+                                  Avail: {formatCurrency(getAvailableGuestDeposit(guest), currency, exchangeRate)}
+                                </span>
+                              </div>
+                            ) : split.method !== 'cash' && (
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
                                 <div className="space-y-1">
                                   <label className="text-[10px] font-bold text-zinc-500 uppercase flex items-center justify-between">
@@ -3949,6 +4116,20 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         type="danger"
         isLoading={isDeleting}
       />
+
+      {showGuestDepositModal && (guest || currentReservation.guestId) && (
+        <GuestDepositModal
+          guest={guest || ({
+            id: currentReservation.guestId!,
+            name: currentReservation.guestName,
+            email: currentReservation.guestEmail || '',
+            phone: currentReservation.guestPhone || '',
+            depositBalance: 0
+          } as Guest)}
+          defaultReservationId={currentReservation.id}
+          onClose={() => setShowGuestDepositModal(false)}
+        />
+      )}
     </div>
   );
 }

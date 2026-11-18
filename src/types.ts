@@ -1087,6 +1087,31 @@ export interface Guest {
   preferredBookingSource?: string;
   createdAt?: string;
   feedbackNotes?: GuestFeedbackNote[];
+  depositBalance?: number;
+  totalDeposited?: number;
+  totalDepositUsed?: number;
+  totalDepositRefunded?: number;
+  lastDepositAt?: string;
+}
+
+export interface GuestDepositTransaction {
+  id: string;
+  hotelId: string;
+  guestId: string;
+  guestName: string;
+  type: 'deposit' | 'charge_deduction' | 'refund' | 'adjustment';
+  amount: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  paymentMethod?: 'cash' | 'card' | 'transfer' | 'deposit';
+  reservationId?: string;
+  roomNumber?: string;
+  kitchenOrderId?: string;
+  referenceCode?: string;
+  description: string;
+  timestamp: string;
+  postedBy: string;
+  postedByName: string;
 }
 
 export interface GuestFeedbackNote {
@@ -1112,7 +1137,8 @@ export interface LedgerEntry {
   referenceId?: string; // e.g. Reservation ID, Kitchen Order ID
   category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer' | 'corporate' | 'refund' | 'discount' | 'F & B' | 'city_ledger' | 'laundry' | 'tax' | 'other';
   postedBy: string;
-  paymentMethod?: 'cash' | 'card' | 'transfer';
+  paymentMethod?: 'cash' | 'card' | 'transfer' | 'deposit';
+  fromGuestDeposit?: boolean;
   quantity?: number;
   price?: number;
   idempotencyKey?: string;

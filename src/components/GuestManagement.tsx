@@ -39,7 +39,8 @@ import {
   MessageSquare,
   Send,
   ThumbsUp,
-  Sparkles
+  Sparkles,
+  Wallet
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
@@ -58,6 +59,7 @@ import { SafeModalBoundary } from './SafeModalBoundary';
 import { toast } from 'sonner';
 import { ConfirmModal } from './ConfirmModal';
 import { DigitalKeyModal } from './DigitalKeyModal';
+import { GuestDepositModal } from './GuestDepositModal';
 import { QrCode, Key as LucideKey } from 'lucide-react';
 import { transferToCityLedger } from '../services/ledgerService';
 import { Pagination } from './Pagination';
@@ -192,6 +194,7 @@ export function GuestManagement() {
   const [feedbackCategory, setFeedbackCategory] = useState<'feedback' | 'preference' | 'complaint' | 'praise' | 'general'>('feedback');
   const [feedbackRating, setFeedbackRating] = useState<number>(5);
   const [isSavingFeedback, setIsSavingFeedback] = useState(false);
+  const [depositModalGuest, setDepositModalGuest] = useState<Guest | null>(null);
 
   const allExistingTags = useMemo(() => {
     const tags = new Set<string>();
@@ -1305,6 +1308,14 @@ export function GuestManagement() {
                         )}
                         <button 
                           type="button"
+                          onClick={() => setDepositModalGuest(guest)}
+                          className="p-1.5 text-zinc-500 hover:text-emerald-400 rounded-lg transition-all"
+                          title="Guest Account Deposit / Wallet"
+                        >
+                          <Wallet size={14} />
+                        </button>
+                        <button 
+                          type="button"
                           onClick={() => {
                             if (hotel?.settings?.guests?.allowHistoryViewing === false && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
                               toast.error('Past stay history access is restricted to administrators.');
@@ -1401,6 +1412,21 @@ export function GuestManagement() {
                           {formatCurrency(Math.abs(getGuestLiveBalance(guest)), currency, exchangeRate)}
                         </span>
                       </div>
+                    )}
+                    {(guest.depositBalance || 0) > 0.01 && (
+                      <button
+                        type="button"
+                        onClick={() => setDepositModalGuest(guest)}
+                        className="w-full mb-3 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 flex items-center justify-between text-xs font-bold text-emerald-300 transition-colors"
+                      >
+                        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-extrabold">
+                          <Wallet size={12} className="shrink-0 text-emerald-400" />
+                          <span>Account Deposit</span>
+                        </div>
+                        <span className="text-xs font-extrabold text-emerald-200 font-mono">
+                          {formatCurrency(guest.depositBalance || 0, currency, exchangeRate)}
+                        </span>
+                      </button>
                     )}
 
                     <div className="grid grid-cols-2 gap-2">
@@ -1697,8 +1723,20 @@ export function GuestManagement() {
                   </div>
                 </div>
 
-                {/* Edit profile shortcut */}
-                <div className="flex items-center gap-2 self-start lg:self-center">
+                {/* Edit profile & Account Deposit wallet shortcuts */}
+                <div className="flex items-center gap-2 self-start lg:self-center flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setDepositModalGuest(selectedHistoryGuest)}
+                    className="px-3 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 rounded-xl text-xs font-bold flex items-center gap-1.5 border border-emerald-500/35 transition-colors"
+                  >
+                    <Wallet size={12} />
+                    <span>
+                      Account Deposit{(selectedHistoryGuest.depositBalance || 0) > 0.01
+                        ? ` (${formatCurrency(selectedHistoryGuest.depositBalance || 0, currency, exchangeRate)})`
+                        : ' / Wallet'}
+                    </span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -2849,6 +2887,15 @@ export function GuestManagement() {
         confirmText="Delete"
         type="danger"
       />
+
+      {depositModalGuest && (
+        <SafeModalBoundary onClose={() => setDepositModalGuest(null)}>
+          <GuestDepositModal
+            guest={guests.find(g => g.id === depositModalGuest.id) || depositModalGuest}
+            onClose={() => setDepositModalGuest(null)}
+          />
+        </SafeModalBoundary>
+      )}
     </div>
   );
 }

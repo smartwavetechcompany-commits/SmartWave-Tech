@@ -13,6 +13,12 @@ import { GuestFolio } from './GuestFolio';
 import { DigitalKeyModal } from './DigitalKeyModal';
 import { ExtendGracePeriodModal } from './ExtendGracePeriodModal';
 import { RestaurantPostingControlModal } from './RestaurantPostingControlModal';
+import { GuestDepositModal } from './GuestDepositModal';
+import {
+  applyGuestDepositToReservation,
+  getAvailableGuestDeposit,
+  validateDepositApplication,
+} from '../services/guestDepositService';
 import { printDocument } from '../utils/printUtils';
 import { QrCode, Key as SmartKeyIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -55,7 +61,8 @@ import {
   History,
   UserCheck,
   ChevronDown,
-  Check
+  Check,
+  Wallet
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { database } from '../utils/database';
@@ -96,6 +103,7 @@ export function FrontDesk() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
+  const [depositModalGuest, setDepositModalGuest] = useState<Guest | null>(null);
   const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
   const [activeCorporateRates, setActiveCorporateRates] = useState<CorporateRate[]>([]);
   const [roomBlockings, setRoomBlockings] = useState<RoomBlocking[]>([]);
@@ -293,7 +301,7 @@ export function FrontDesk() {
     taxDetails: [] as { name: string; percentage: number; amount: number; isInclusive: boolean }[],
     initialPayment: 0,
     paymentMethod: 'cash' as 'cash' | 'card' | 'transfer',
-    payments: [{ amount: 0, method: 'cash' as 'cash' | 'card' | 'transfer' }],
+    payments: [{ amount: 0, method: 'cash' as 'cash' | 'card' | 'transfer' | 'deposit' }],
     autoNightDeduction: true, // Mandatory toggle for automatic nightly charges
     numberOfGuests: 1,
     mealPlan: 'Bed & Breakfast',
@@ -1210,6 +1218,23 @@ export function FrontDesk() {
       }
     }
 
+    // Validate Guest Account Deposit payment splits if any
+    const totalDepositPay = (newBooking.payments || [])
+      .filter((p: any) => p.method === 'deposit' && (Number(p.amount) || 0) > 0)
+      .reduce((acc: number, p: any) => acc + (Number(p.amount) || 0), 0);
+    if (totalDepositPay > 0) {
+      if (!newBooking.guestId) {
+        toast.error('Please select the returning guest profile to pay from Guest Account Deposit.');
+        return;
+      }
+      const selectedBookingGuest = guests.find(g => g.id === newBooking.guestId);
+      const depValidation = validateDepositApplication(getAvailableGuestDeposit(selectedBookingGuest), totalDepositPay);
+      if (!depValidation.isValid) {
+        toast.error(depValidation.error || 'Insufficient Guest Account Deposit balance.');
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       const batch = writeBatch(db);
@@ -1494,12 +1519,32 @@ export function FrontDesk() {
       }
 
       const totalPayment = newBooking.payments.reduce((acc: number, p: any) => acc + (p.amount || 0), 0);
+      const bookingStaffCtx = {
+        uid: profile.uid,
+        email: profile.email,
+        displayName: profile.displayName || (profile as any).name || profile.email || 'Staff',
+        role: profile.role || 'staff',
+      };
       if (totalPayment > 0 && stayTargets.length > 0) {
         if (stayTargets.length === 1) {
           const singleStay = stayTargets[0].stay;
           for (const pay of newBooking.payments) {
             if (pay.amount > 0) {
-              await settleLedger(hotel.id, singleStay.guestId, singleStay.resId, pay.amount, pay.method, profile.uid, singleStay.corporateId);
+              if ((pay as any).method === 'deposit') {
+                await applyGuestDepositToReservation(
+                  hotel.id,
+                  singleStay.guestId,
+                  singleStay.resId,
+                  pay.amount,
+                  bookingStaffCtx,
+                  {
+                    description: `Paid from Guest Account Deposit at Booking (Room ${singleStay.roomNumber})`,
+                    settlementSource: 'Front Desk'
+                  }
+                );
+              } else {
+                await settleLedger(hotel.id, singleStay.guestId, singleStay.resId, pay.amount, pay.method as any, profile.uid, singleStay.corporateId);
+              }
             }
           }
         } else {
@@ -1516,56 +1561,92 @@ export function FrontDesk() {
               if (allocAmt <= 0.01) continue;
 
               const isLinkedChild = target.stay.resId !== masterStay.resId;
-              await settleLedger(
-                hotel.id,
-                target.stay.guestId,
-                target.stay.resId,
-                allocAmt,
-                pay.method,
-                profile.uid,
-                target.stay.corporateId,
-                undefined,
-                undefined,
-                undefined,
-                'Front Desk',
-                isLinkedChild
-                  ? {
-                      description: `Payment via ${String(pay.method).toUpperCase()} (Allocated from Master Room ${masterStay.roomNumber})`,
-                      masterReservationId: masterStay.resId,
-                      sourceRoomNumber: target.stay.roomNumber,
-                      sourceReservationId: target.stay.resId
-                    }
-                  : {
-                      masterReservationId: masterStay.resId,
-                      sourceRoomNumber: masterStay.roomNumber,
-                      sourceReservationId: masterStay.resId
-                    }
-              );
+              if ((pay as any).method === 'deposit') {
+                await applyGuestDepositToReservation(
+                  hotel.id,
+                  target.stay.guestId,
+                  target.stay.resId,
+                  allocAmt,
+                  bookingStaffCtx,
+                  {
+                    description: isLinkedChild
+                      ? `Paid from Guest Account Deposit (Allocated from Master Room ${masterStay.roomNumber})`
+                      : `Paid from Guest Account Deposit (Master Room ${masterStay.roomNumber})`,
+                    settlementSource: 'Front Desk',
+                    masterReservationId: masterStay.resId,
+                    sourceRoomNumber: target.stay.roomNumber,
+                    sourceReservationId: target.stay.resId
+                  }
+                );
+              } else {
+                await settleLedger(
+                  hotel.id,
+                  target.stay.guestId,
+                  target.stay.resId,
+                  allocAmt,
+                  pay.method as any,
+                  profile.uid,
+                  target.stay.corporateId,
+                  undefined,
+                  undefined,
+                  undefined,
+                  'Front Desk',
+                  isLinkedChild
+                    ? {
+                        description: `Payment via ${String(pay.method).toUpperCase()} (Allocated from Master Room ${masterStay.roomNumber})`,
+                        masterReservationId: masterStay.resId,
+                        sourceRoomNumber: target.stay.roomNumber,
+                        sourceReservationId: target.stay.resId
+                      }
+                    : {
+                        masterReservationId: masterStay.resId,
+                        sourceRoomNumber: masterStay.roomNumber,
+                        sourceReservationId: masterStay.resId
+                      }
+                );
+              }
 
               target.remainingOwed = Number((target.remainingOwed - allocAmt).toFixed(2));
               remainingPay = Number((remainingPay - allocAmt).toFixed(2));
             }
 
             if (remainingPay > 0.01) {
-              await settleLedger(
-                hotel.id,
-                masterStay.guestId,
-                masterStay.resId,
-                remainingPay,
-                pay.method,
-                profile.uid,
-                masterStay.corporateId,
-                undefined,
-                undefined,
-                undefined,
-                'Front Desk',
-                {
-                  description: `Group Overpayment / Credit via ${String(pay.method).toUpperCase()} (Master Room ${masterStay.roomNumber})`,
-                  masterReservationId: masterStay.resId,
-                  sourceRoomNumber: masterStay.roomNumber,
-                  sourceReservationId: masterStay.resId
-                }
-              );
+              if ((pay as any).method === 'deposit') {
+                await applyGuestDepositToReservation(
+                  hotel.id,
+                  masterStay.guestId,
+                  masterStay.resId,
+                  remainingPay,
+                  bookingStaffCtx,
+                  {
+                    description: `Group Overpayment / Deposit Applied (Master Room ${masterStay.roomNumber})`,
+                    settlementSource: 'Front Desk',
+                    masterReservationId: masterStay.resId,
+                    sourceRoomNumber: masterStay.roomNumber,
+                    sourceReservationId: masterStay.resId
+                  }
+                );
+              } else {
+                await settleLedger(
+                  hotel.id,
+                  masterStay.guestId,
+                  masterStay.resId,
+                  remainingPay,
+                  pay.method as any,
+                  profile.uid,
+                  masterStay.corporateId,
+                  undefined,
+                  undefined,
+                  undefined,
+                  'Front Desk',
+                  {
+                    description: `Group Overpayment / Credit via ${String(pay.method).toUpperCase()} (Master Room ${masterStay.roomNumber})`,
+                    masterReservationId: masterStay.resId,
+                    sourceRoomNumber: masterStay.roomNumber,
+                    sourceReservationId: masterStay.resId
+                  }
+                );
+              }
             }
           }
         }
@@ -3764,16 +3845,63 @@ export function FrontDesk() {
                   })}
                 </select>
                 {newBooking.guestId && (() => {
-                  const guestBal = guests.find(g => g.id === newBooking.guestId)?.ledgerBalance || 0;
-                  if (guestBal === 0) return null;
-                  const isDebit = guestBal > 0.01;
+                  const selectedG = guests.find(g => g.id === newBooking.guestId);
+                  const guestBal = selectedG?.ledgerBalance || 0;
+                  const depositAvail = getAvailableGuestDeposit(selectedG);
+                  const netDueEstimate = Math.max(
+                    0,
+                    (newBooking.totalAmount || 0) -
+                      (newBooking.discountType === 'percentage'
+                        ? ((newBooking.totalAmount || 0) * (newBooking.discountAmount || 0)) / 100
+                        : (newBooking.discountAmount || 0))
+                  );
                   return (
-                    <div className={cn(
-                      "mt-2 p-2 rounded border flex items-center gap-2 text-[10px]",
-                      isDebit ? "bg-red-500/10 border-red-500/20 text-red-500" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-500"
-                    )}>
-                      <AlertCircle size={12} />
-                      Guest has an {isDebit ? 'outstanding balance' : 'overpayment credit'} of {formatCurrency(Math.abs(guestBal), currency, exchangeRate)}
+                    <div className="space-y-2 mt-2">
+                      {guestBal !== 0 && (() => {
+                        const isDebit = guestBal > 0.01;
+                        return (
+                          <div className={cn(
+                            "p-2 rounded border flex items-center gap-2 text-[10px]",
+                            isDebit ? "bg-red-500/10 border-red-500/20 text-red-500" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-500"
+                          )}>
+                            <AlertCircle size={12} />
+                            Guest has an {isDebit ? 'outstanding balance' : 'overpayment credit'} of {formatCurrency(Math.abs(guestBal), currency, exchangeRate)}
+                          </div>
+                        );
+                      })()}
+                      {depositAvail > 0.01 && selectedG && (
+                        <div className="p-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/35 flex flex-wrap items-center justify-between gap-2 text-[11px] text-emerald-300">
+                          <div className="flex items-center gap-1.5 font-bold">
+                            <Wallet size={13} className="text-emerald-400 shrink-0" />
+                            <span>Account Deposit Available: {formatCurrency(depositAvail, currency, exchangeRate)}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {netDueEstimate > 0.01 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const applyAmt = Number(Math.min(depositAvail, netDueEstimate).toFixed(2));
+                                  setNewBooking({
+                                    ...newBooking,
+                                    payments: [{ amount: applyAmt, method: 'deposit' }]
+                                  });
+                                  toast.success(`Applied ${formatCurrency(applyAmt, currency, exchangeRate)} from Guest Account Deposit`);
+                                }}
+                                className="px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-black font-black text-[10px] uppercase tracking-wide"
+                              >
+                                Use Deposit
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setDepositModalGuest(selectedG)}
+                              className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-emerald-300 border border-emerald-500/30 font-bold text-[10px] uppercase tracking-wide"
+                            >
+                              Wallet
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -3849,6 +3977,12 @@ export function FrontDesk() {
                         <p className="text-zinc-400 mt-0.5">
                           We found an existing profile for <span className="text-zinc-50 font-medium">{match.name}</span> ({match.email || match.phone || 'No contact'}). Match level is high.
                         </p>
+                        {getAvailableGuestDeposit(match) > 0.01 && (
+                          <p className="text-emerald-400 font-bold mt-1 flex items-center gap-1">
+                            <Wallet size={11} />
+                            <span>Available Account Deposit: {formatCurrency(getAvailableGuestDeposit(match), currency, exchangeRate)}</span>
+                          </p>
+                        )}
                       </div>
                     </div>
                     <button
@@ -4491,53 +4625,60 @@ export function FrontDesk() {
                 </div>
 
                 <div className="space-y-3">
-                  {newBooking.payments.map((pay: any, index: number) => (
-                    <div key={index} className="grid grid-cols-2 gap-3 p-3 bg-zinc-900 border border-zinc-800 rounded-xl relative group">
-                      {newBooking.payments.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const updated = [...newBooking.payments];
-                            updated.splice(index, 1);
-                            setNewBooking({ ...newBooking, payments: updated });
-                          }}
-                          className="absolute -top-1 -right-1 w-5 h-5 bg-zinc-800 text-zinc-500 hover:text-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all border border-zinc-700"
-                        >
-                          <X size={10} />
-                        </button>
-                      )}
-                      <div>
-                        <label className="block text-[9px] font-semibold text-zinc-500 uppercase mb-1">Amount</label>
-                        <input 
-                          type="number" 
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
-                          value={currency === 'USD' ? (pay.amount / exchangeRate) || '' : pay.amount || ''}
-                          onChange={(e) => {
-                            const val = Number(e.target.value);
-                            const updated = [...newBooking.payments];
-                            updated[index].amount = currency === 'USD' ? val * exchangeRate : val;
-                            setNewBooking({ ...newBooking, payments: updated });
-                          }}
-                        />
+                  {(() => {
+                    const selectedG = newBooking.guestId ? guests.find(g => g.id === newBooking.guestId) : undefined;
+                    const availDep = getAvailableGuestDeposit(selectedG);
+                    return newBooking.payments.map((pay: any, index: number) => (
+                      <div key={index} className="grid grid-cols-2 gap-3 p-3 bg-zinc-900 border border-zinc-800 rounded-xl relative group">
+                        {newBooking.payments.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = [...newBooking.payments];
+                              updated.splice(index, 1);
+                              setNewBooking({ ...newBooking, payments: updated });
+                            }}
+                            className="absolute -top-1 -right-1 w-5 h-5 bg-zinc-800 text-zinc-500 hover:text-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all border border-zinc-700"
+                          >
+                            <X size={10} />
+                          </button>
+                        )}
+                        <div>
+                          <label className="block text-[9px] font-semibold text-zinc-500 uppercase mb-1">Amount</label>
+                          <input 
+                            type="number" 
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            value={currency === 'USD' ? (pay.amount / exchangeRate) || '' : pay.amount || ''}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              const updated = [...newBooking.payments];
+                              updated[index].amount = currency === 'USD' ? val * exchangeRate : val;
+                              setNewBooking({ ...newBooking, payments: updated });
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-semibold text-zinc-500 uppercase mb-1">Method</label>
+                          <select 
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
+                            value={pay.method}
+                            onChange={(e) => {
+                              const updated = [...newBooking.payments];
+                              updated[index].method = e.target.value as any;
+                              setNewBooking({ ...newBooking, payments: updated });
+                            }}
+                          >
+                            <option value="cash">Cash</option>
+                            <option value="card">Card</option>
+                            <option value="transfer">Transfer</option>
+                            <option value="deposit" disabled={availDep <= 0.01}>
+                              Guest Deposit ({formatCurrency(availDep, currency, exchangeRate)})
+                            </option>
+                          </select>
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-[9px] font-semibold text-zinc-500 uppercase mb-1">Method</label>
-                        <select 
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-50 focus:border-emerald-500 outline-none"
-                          value={pay.method}
-                          onChange={(e) => {
-                            const updated = [...newBooking.payments];
-                            updated[index].method = e.target.value as any;
-                            setNewBooking({ ...newBooking, payments: updated });
-                          }}
-                        >
-                          <option value="cash">Cash</option>
-                          <option value="card">Card</option>
-                          <option value="transfer">Transfer</option>
-                        </select>
-                      </div>
-                    </div>
-                  ))}
+                    ));
+                  })()}
                 </div>
               </div>
 
@@ -5362,6 +5503,22 @@ export function FrontDesk() {
                                 <div className="text-zinc-400 font-normal">Ref: {res.corporateReference}</div>
                               )}
                             </div>
+                          );
+                        })()}
+                        {(() => {
+                          const linkedGuest = guests.find(g => g.id === res.guestId);
+                          const depositBal = getAvailableGuestDeposit(linkedGuest);
+                          if (!linkedGuest || depositBal <= 0.01) return null;
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => setDepositModalGuest(linkedGuest)}
+                              className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-[9px] font-bold transition-colors"
+                              title="Open Guest Account Deposit Wallet"
+                            >
+                              <Wallet size={9} className="text-emerald-400" />
+                              <span>Deposit: {formatCurrency(depositBal, currency, exchangeRate)}</span>
+                            </button>
                           );
                         })()}
                       </div>
@@ -7169,6 +7326,13 @@ export function FrontDesk() {
           profile={profile}
           customRoles={customRoles}
           guestName={restaurantPostingRoomModal.guestName}
+        />
+      )}
+
+      {depositModalGuest && (
+        <GuestDepositModal
+          guest={guests.find(g => g.id === depositModalGuest.id) || depositModalGuest}
+          onClose={() => setDepositModalGuest(null)}
         />
       )}
     </div>

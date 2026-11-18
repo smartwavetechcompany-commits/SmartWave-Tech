@@ -6,6 +6,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { KitchenOrder, OperationType, Reservation, Guest, InventoryItem, BarTable, InventoryCategory, Room } from '../types';
 import { postToLedger, voidLedgerEntry, recalculateReservationAccountFromLedger } from '../services/ledgerService';
 import {
+  chargeGuestDepositForOrder,
+  getAvailableGuestDeposit,
+  validateDepositApplication,
+} from '../services/guestDepositService';
+import {
   findTargetRoomForOrder,
   isRoomRestaurantPostingBlocked,
   RESTAURANT_POSTING_BLOCKED_MESSAGE,
@@ -46,7 +51,8 @@ import {
   CreditCard,
   Building2,
   FileText,
-  BedDouble
+  BedDouble,
+  Wallet
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
@@ -144,7 +150,7 @@ export function FandB() {
     notes: '',
     category: 'all' as string,
     price: 0,
-    payments: [{ amount: 0, method: 'cash', settlementSource: 'F&B Outlet' }] as { amount: number; method: 'cash' | 'card' | 'transfer' | 'room'; settlementSource?: 'Front Desk' | 'F&B Outlet'; date?: string; reference?: string }[],
+    payments: [{ amount: 0, method: 'cash', settlementSource: 'F&B Outlet' }] as { amount: number; method: 'cash' | 'card' | 'transfer' | 'room' | 'deposit'; settlementSource?: 'Front Desk' | 'F&B Outlet'; date?: string; reference?: string }[],
     discount: 0,
     discountType: 'fixed' as 'fixed' | 'percentage',
     discountReason: '',
@@ -162,7 +168,7 @@ export function FandB() {
   // Direct Settlement in F&B State
   const [settleOrderModal, setSettleOrderModal] = useState<KitchenOrder | null>(null);
   const [settleAmount, setSettleAmount] = useState<number>(0);
-  const [settleMethod, setSettleMethod] = useState<'cash' | 'card' | 'transfer' | 'room'>('cash');
+  const [settleMethod, setSettleMethod] = useState<'cash' | 'card' | 'transfer' | 'room' | 'deposit'>('cash');
   const [settleSource, setSettleSource] = useState<'F&B Outlet' | 'Front Desk'>('F&B Outlet');
   const [settleNotes, setSettleNotes] = useState<string>('');
   const [isSettling, setIsSettling] = useState(false);
@@ -355,6 +361,24 @@ export function FandB() {
     if (isRoomOrder && hasRoomPayment && isTargetRoomRestaurantBlocked) {
       toast.error(RESTAURANT_POSTING_BLOCKED_MESSAGE);
       return;
+    }
+
+    // Validate Guest Account Deposit payment splits before creating order
+    const resolvedOrderGuestId = res?.guestId || newOrder.guestId || '';
+    const resolvedOrderGuest = resolvedOrderGuestId ? guests.find(g => g.id === resolvedOrderGuestId) : undefined;
+    const totalOrderDepositPay = newOrder.payments
+      .filter(p => p.method === 'deposit' && (Number(p.amount) || 0) > 0)
+      .reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+    if (totalOrderDepositPay > 0) {
+      if (!resolvedOrderGuest) {
+        toast.error('Please select a guest profile with an Account Deposit wallet to pay via Guest Deposit.');
+        return;
+      }
+      const depValidation = validateDepositApplication(getAvailableGuestDeposit(resolvedOrderGuest), totalOrderDepositPay);
+      if (!depValidation.isValid) {
+        toast.error(depValidation.error || 'Insufficient Guest Account Deposit balance.');
+        return;
+      }
     }
 
     setIsSaving(true);
@@ -587,26 +611,54 @@ export function FandB() {
           displayName: profile?.displayName || (profile as any)?.name || 'Staff'
         });
 
-        // If customer paid part or all directly at the outlet (e.g. 1k cash paid immediately), post the credit to the folio!
+        // If customer paid part or all directly at the outlet (e.g. 1k cash or Guest Account Deposit), post the credit to the folio!
         if (directPaid > 0) {
-          const directPayMethod = nonRoomPayments[0]?.method || 'cash';
-          await postToLedger(hotel.id, effectiveGuestId, res.id, {
-            amount: directPaid,
-            type: 'credit',
-            category: 'payment',
-            description: `F & B Direct Payment [F&B Outlet] (${String(directPayMethod).toUpperCase()}): Bill #${billNumber}`,
-            referenceId: `${orderRef.id}_DIRECT_PAY`,
-            idempotencyKey: `FB_PAY_${orderRef.id}`,
-            postedBy: profile.uid,
-            paymentMethod: directPayMethod as any,
-            settlementSource: 'F&B Outlet',
-            skipFinanceMirror: true
-          }, profile.uid, res.corporateId || undefined, directPayMethod as any, {
-            uid: profile?.uid,
-            email: profile?.email,
-            role: profile?.role || 'staff',
-            displayName: profile?.displayName || (profile as any)?.name || 'Staff'
-          });
+          if (nonRoomPayments.length > 0) {
+            for (let pIdx = 0; pIdx < nonRoomPayments.length; pIdx++) {
+              const directPay = nonRoomPayments[pIdx];
+              const payAmt = Number(directPay.amount) || 0;
+              if (payAmt <= 0) continue;
+              const isGuestDep = directPay.method === 'deposit';
+              await postToLedger(hotel.id, effectiveGuestId, res.id, {
+                amount: payAmt,
+                type: 'credit',
+                category: 'payment',
+                description: isGuestDep
+                  ? `F & B Payment from Guest Account Deposit [F&B Outlet]: Bill #${billNumber}`
+                  : `F & B Direct Payment [F&B Outlet] (${String(directPay.method).toUpperCase()}): Bill #${billNumber}`,
+                referenceId: `${orderRef.id}_DIRECT_PAY_${pIdx}`,
+                idempotencyKey: `FB_PAY_${orderRef.id}_${pIdx}`,
+                postedBy: profile.uid,
+                paymentMethod: directPay.method as any,
+                fromGuestDeposit: isGuestDep,
+                settlementSource: 'F&B Outlet',
+                skipFinanceMirror: true
+              }, profile.uid, res.corporateId || undefined, directPay.method as any, {
+                uid: profile?.uid,
+                email: profile?.email,
+                role: profile?.role || 'staff',
+                displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+              });
+            }
+          } else {
+            await postToLedger(hotel.id, effectiveGuestId, res.id, {
+              amount: directPaid,
+              type: 'credit',
+              category: 'payment',
+              description: `F & B Direct Payment [F&B Outlet] (CASH): Bill #${billNumber}`,
+              referenceId: `${orderRef.id}_DIRECT_PAY`,
+              idempotencyKey: `FB_PAY_${orderRef.id}`,
+              postedBy: profile.uid,
+              paymentMethod: 'cash',
+              settlementSource: 'F&B Outlet',
+              skipFinanceMirror: true
+            }, profile.uid, res.corporateId || undefined, 'cash', {
+              uid: profile?.uid,
+              email: profile?.email,
+              role: profile?.role || 'staff',
+              displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+            });
+          }
         }
 
         if (postedEntry?.id) {
@@ -626,10 +678,33 @@ export function FandB() {
         await recalculateReservationAccountFromLedger(hotel.id, res.id).catch(() => {});
       }
 
-      // Record direct payments in Finance as income (Module 2 & Module 6)
-      // DO NOT post to room ledger!
+      // Deduct from Guest Account Deposit wallet if paid via 'deposit'
       for (const pay of resolvedPayments) {
-        if (pay.amount > 0 && pay.method !== 'room') {
+        if (pay.amount > 0 && pay.method === 'deposit' && resolvedOrderGuest) {
+          await chargeGuestDepositForOrder(
+            hotel.id,
+            resolvedOrderGuest.id,
+            orderRef.id,
+            pay.amount,
+            {
+              uid: profile.uid,
+              email: profile.email,
+              displayName: profile.displayName || (profile as any)?.name || 'Staff',
+              role: profile.role || 'staff'
+            },
+            {
+              roomNumber: newOrder.roomNumber || 'Walk-in',
+              billNumber,
+              description: `${newOrder.outletName || 'F&B Outlet'} Bill #${billNumber} (${newOrder.roomNumber || 'Walk-in'}): ${newOrder.items}`
+            }
+          );
+        }
+      }
+
+      // Record direct payments in Finance as income (Module 2 & Module 6)
+      // DO NOT record finance income for 'room' (AR) or 'deposit' (already recorded at deposit time)!
+      for (const pay of resolvedPayments) {
+        if (pay.amount > 0 && pay.method !== 'room' && pay.method !== 'deposit') {
           const source = pay.settlementSource || 'F&B Outlet';
           await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
             type: 'income',
@@ -1113,13 +1188,48 @@ export function FandB() {
       return;
     }
 
+    const settleGuestObj = guestId && guestId !== 'unknown' ? guests.find(g => g.id === guestId) : undefined;
+    if (settleMethod === 'deposit') {
+      if (!settleGuestObj) {
+        toast.error('No linked guest profile found to pay from Guest Account Deposit.');
+        return;
+      }
+      const depValidation = validateDepositApplication(getAvailableGuestDeposit(settleGuestObj), settleAmount);
+      if (!depValidation.isValid) {
+        toast.error(depValidation.error || 'Insufficient Guest Account Deposit balance.');
+        return;
+      }
+    }
+
     setIsSettling(true);
     try {
+      if (settleMethod === 'deposit' && settleGuestObj) {
+        await chargeGuestDepositForOrder(
+          hotel.id,
+          settleGuestObj.id,
+          settleOrderModal.id,
+          settleAmount,
+          {
+            uid: profile.uid,
+            email: profile.email,
+            displayName: profile.displayName || (profile as any)?.name || 'Staff',
+            role: profile.role || 'staff'
+          },
+          {
+            roomNumber: settleOrderModal.roomNumber || 'Walk-in',
+            billNumber: settleOrderModal.billNumber || settleOrderModal.id.slice(-6),
+            description: `${settleOrderModal.outletName || settleSource} Order Settlement (${settleOrderModal.roomNumber || 'Walk-in'}): ${settleOrderModal.items}`
+          }
+        );
+      }
+
       const newPaymentRecord = {
         amount: settleAmount,
         method: settleMethod,
         date: new Date().toISOString(),
-        reference: settleNotes || `F&B Direct Settlement [${settleSource}] (${settleMethod.toUpperCase()})`,
+        reference: settleNotes || (settleMethod === 'deposit'
+          ? `Paid from Guest Account Deposit [${settleSource}]`
+          : `F&B Direct Settlement [${settleSource}] (${settleMethod.toUpperCase()})`),
         settlementSource: settleSource,
         processedBy: {
           uid: profile.uid,
@@ -1161,30 +1271,32 @@ export function FandB() {
         details: `Settled ${formatCurrency(settleAmount, currency, exchangeRate)} [${settleSource}] via ${settleMethod} for Order ${settleOrderModal.id}`
       });
 
-      // 2. Post to Hotel Finance Collection as Income
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
-        type: 'income',
-        amount: settleAmount,
-        category: 'F & B Revenue',
-        description: `F & B Direct Payment [${settleSource}] (${settleMethod.toUpperCase()}) - Room ${settleOrderModal.roomNumber || 'Walk-in'} (Order ${settleOrderModal.id.slice(-6)})${settleNotes ? `: ${settleNotes}` : ''}`,
-        timestamp: new Date().toISOString(),
-        paymentMethod: settleMethod,
-        settlementSource: settleSource,
-        referenceId: settleOrderModal.id,
-        reservationId: res?.id || null,
-        guestId: guestId !== 'unknown' ? guestId : null,
-        postedBy: profile.uid,
-        processedBy: {
-          uid: profile.uid,
-          name: profile.displayName || (profile as any)?.name || 'Staff',
-          role: profile.role || 'staff'
-        }
-      }, {
-        hotelId: hotel.id,
-        module: 'Finance',
-        action: 'F&B_INCOME_RECORD',
-        details: `Recorded F&B direct payment of ${settleAmount} [${settleSource}]`
-      });
+      // 2. Post to Hotel Finance Collection as Income (skip when paid from Guest Account Deposit since cash was recorded at deposit time)
+      if (settleMethod !== 'deposit') {
+        await database.safeAdd(collection(db, 'hotels', hotel.id, 'finance'), {
+          type: 'income',
+          amount: settleAmount,
+          category: 'F & B Revenue',
+          description: `F & B Direct Payment [${settleSource}] (${settleMethod.toUpperCase()}) - Room ${settleOrderModal.roomNumber || 'Walk-in'} (Order ${settleOrderModal.id.slice(-6)})${settleNotes ? `: ${settleNotes}` : ''}`,
+          timestamp: new Date().toISOString(),
+          paymentMethod: settleMethod,
+          settlementSource: settleSource,
+          referenceId: settleOrderModal.id,
+          reservationId: res?.id || null,
+          guestId: guestId !== 'unknown' ? guestId : null,
+          postedBy: profile.uid,
+          processedBy: {
+            uid: profile.uid,
+            name: profile.displayName || (profile as any)?.name || 'Staff',
+            role: profile.role || 'staff'
+          }
+        }, {
+          hotelId: hotel.id,
+          module: 'Finance',
+          action: 'F&B_INCOME_RECORD',
+          details: `Recorded F&B direct payment of ${settleAmount} [${settleSource}]`
+        });
+      }
 
       // 3. If linked to an in-house room reservation and this order was previously charged to the room,
       // credit the guest ledger so room folio stays synchronized without creating unearned credits
@@ -1199,10 +1311,13 @@ export function FandB() {
           amount: settleAmount,
           type: 'credit',
           category: 'payment',
-          description: `F & B Direct Payment [${settleSource}] (${settleMethod.toUpperCase()}): ${settleOrderModal.items}${settleNotes ? ` - ${settleNotes}` : ''}`,
+          description: settleMethod === 'deposit'
+            ? `F & B Payment from Guest Account Deposit [${settleSource}]: ${settleOrderModal.items}${settleNotes ? ` - ${settleNotes}` : ''}`
+            : `F & B Direct Payment [${settleSource}] (${settleMethod.toUpperCase()}): ${settleOrderModal.items}${settleNotes ? ` - ${settleNotes}` : ''}`,
           referenceId: `${settleOrderModal.id}_PAY_${Date.now()}`,
           postedBy: profile.uid,
           paymentMethod: settleMethod as any,
+          fromGuestDeposit: settleMethod === 'deposit',
           settlementSource: settleSource,
           skipFinanceMirror: true
         }, profile.uid, res.corporateId || undefined, settleMethod as any, {
@@ -4209,6 +4324,30 @@ export function FandB() {
                     </select>
                   </div>
 
+                  {/* Walk-in Guest Account Selector (allows returning guests without active room to use Account Deposit) */}
+                  {newOrder.roomNumber === 'Walk-in' && (
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Walk-in Guest Profile (Optional / For Deposit Wallet)</label>
+                      <select
+                        value={newOrder.guestId}
+                        onChange={(e) => setNewOrder({ ...newOrder, guestId: e.target.value })}
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                      >
+                        <option value="">Anonymous Walk-in</option>
+                        {[...guests]
+                          .sort((a, b) => (b.depositBalance || 0) - (a.depositBalance || 0))
+                          .map(g => {
+                            const dep = getAvailableGuestDeposit(g);
+                            return (
+                              <option key={g.id} value={g.id}>
+                                {g.name}{g.phone ? ` (${g.phone})` : ''}{dep > 0.01 ? ` — Deposit: ${formatCurrency(dep, currency, exchangeRate)}` : ''}
+                              </option>
+                            );
+                          })}
+                      </select>
+                    </div>
+                  )}
+
                   {/* Room & Guest Verification Card */}
                   {newOrder.roomNumber && newOrder.roomNumber !== 'Walk-in' && (() => {
                     const verifiedRes = reservations.find(r => r.roomNumber === newOrder.roomNumber && r.status === 'checked_in');
@@ -4269,14 +4408,33 @@ export function FandB() {
                       ? findTargetRoomForOrder(rooms, { roomNumber: newOrder.roomNumber })
                       : undefined;
                     const isCurrentRoomBlocked = isRoomRestaurantPostingBlocked(activeRoomForPayment);
+                    const matchedRoomRes = newOrder.roomNumber !== 'Walk-in'
+                      ? (reservations.find(r => String(r.roomNumber).trim() === String(newOrder.roomNumber).trim() && r.status === 'checked_in') || reservations.find(r => String(r.roomNumber).trim() === String(newOrder.roomNumber).trim()))
+                      : undefined;
+                    const orderGuest = guests.find(g => g.id === (matchedRoomRes?.guestId || newOrder.guestId));
+                    const availOrderDeposit = getAvailableGuestDeposit(orderGuest);
                     return (
                     <div className="p-4 bg-zinc-950 rounded-2xl border border-zinc-800 space-y-4">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
                         <div className="flex items-center gap-2 text-emerald-500 font-bold text-xs uppercase tracking-wider">
                           <DollarSign size={14} />
                           Payments
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {availOrderDeposit > 0.01 && (
+                            <button
+                              type="button"
+                              onClick={() => setNewOrder({
+                                ...newOrder,
+                                payments: [{ amount: Number(Math.min(availOrderDeposit, newOrder.price || availOrderDeposit).toFixed(2)), method: 'deposit', settlementSource: 'F&B Outlet' }]
+                              })}
+                              className="px-2 py-0.5 rounded border text-[10px] font-bold uppercase transition-colors bg-emerald-500/15 text-emerald-300 border-emerald-500/35 hover:bg-emerald-500/25 flex items-center gap-1"
+                              title="Pay from Guest Account Deposit"
+                            >
+                              <Wallet size={10} />
+                              Use Deposit ({formatCurrency(availOrderDeposit, currency, exchangeRate)})
+                            </button>
+                          )}
                           {newOrder.roomNumber !== 'Walk-in' && (
                             <button
                               type="button"
@@ -4363,6 +4521,9 @@ export function FandB() {
                                 <option value="cash">Cash</option>
                                 <option value="card">Card</option>
                                 <option value="transfer">Transfer</option>
+                                <option value="deposit" disabled={availOrderDeposit <= 0.01}>
+                                  Guest Deposit ({formatCurrency(availOrderDeposit, currency, exchangeRate)})
+                                </option>
                                 {!isCurrentRoomBlocked && <option value="room">Charge to Room</option>}
                               </select>
                             </div>
@@ -4719,19 +4880,37 @@ export function FandB() {
                         ? findTargetRoomForOrder(rooms, { roomNumber: settleOrderModal.roomNumber })
                         : undefined;
                       const isSettleRoomBlocked = isRoomRestaurantPostingBlocked(settleTargetRoom);
+                      const settleRes = settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in'
+                        ? (reservations.find(r => String(r.roomNumber).trim().toLowerCase() === String(settleOrderModal.roomNumber).trim().toLowerCase() && r.status === 'checked_in') ||
+                           (settleOrderModal.reservationId ? reservations.find(r => r.id === settleOrderModal.reservationId) : undefined))
+                        : undefined;
+                      const settleGuest = guests.find(g => g.id === (settleRes?.guestId || settleOrderModal.guestId));
+                      const settleAvailDeposit = getAvailableGuestDeposit(settleGuest);
+                      const settleMethodOptions: Array<'room' | 'cash' | 'card' | 'transfer' | 'deposit'> =
+                        settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in'
+                          ? ['room', 'cash', 'card', 'transfer', ...(settleAvailDeposit > 0.01 ? (['deposit'] as const) : [])]
+                          : ['cash', 'card', 'transfer', ...(settleAvailDeposit > 0.01 ? (['deposit'] as const) : [])];
                       return (
                         <>
+                          {settleAvailDeposit > 0.01 && (
+                            <div className="mb-2.5 p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-xs text-emerald-300 font-semibold flex items-center justify-between gap-2">
+                              <span className="flex items-center gap-1.5">
+                                <Wallet size={14} className="text-emerald-400 shrink-0" />
+                                <span>Guest Deposit Wallet Available</span>
+                              </span>
+                              <span className="font-mono font-bold text-emerald-200">
+                                {formatCurrency(settleAvailDeposit, currency, exchangeRate)}
+                              </span>
+                            </div>
+                          )}
                           {isSettleRoomBlocked && (
                             <div className="mb-2.5 p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 font-semibold flex items-center gap-2">
                               <Lock size={14} className="text-red-400 shrink-0" />
                               <span>{RESTAURANT_POSTING_BLOCKED_MESSAGE}</span>
                             </div>
                           )}
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                            {(settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in' 
-                              ? ['room', 'cash', 'card', 'transfer'] as const 
-                              : ['cash', 'card', 'transfer'] as const
-                            ).map((method) => (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {settleMethodOptions.map((method) => (
                               <button
                                 key={method}
                                 type="button"
@@ -4755,7 +4934,8 @@ export function FandB() {
                                 {method === 'cash' && <DollarSign size={14} />}
                                 {method === 'card' && <CreditCard size={14} />}
                                 {method === 'transfer' && <RefreshCw size={14} />}
-                                {method === 'room' ? 'Charge Room' : method}
+                                {method === 'deposit' && <Wallet size={14} />}
+                                {method === 'room' ? 'Charge Room' : method === 'deposit' ? 'Guest Deposit' : method}
                               </button>
                             ))}
                           </div>

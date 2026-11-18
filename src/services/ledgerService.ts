@@ -49,7 +49,7 @@ export const postToLedger = async (
   entry: Omit<LedgerEntry, 'id' | 'timestamp' | 'hotelId' | 'guestId' | 'reservationId'> & { timestamp?: string },
   postedBy: string,
   corporateId?: string,
-  paymentMethod: 'cash' | 'card' | 'transfer' = 'cash',
+  paymentMethod: 'cash' | 'card' | 'transfer' | 'deposit' = 'cash',
   userContext?: { uid?: string; email?: string; role?: string; displayName?: string }
 ) => {
   // STRICT FINANCIAL INTEGRITY CHECK: Reject any attempt to post projections, forecasts, previews, or virtual entries to live ledger
@@ -815,7 +815,7 @@ export const syncKitchenOrdersForReservation = async (
   hotelId: string,
   reservationId: string,
   amount?: number,
-  paymentMethod: 'cash' | 'card' | 'transfer' = 'cash',
+  paymentMethod: 'cash' | 'card' | 'transfer' | 'deposit' = 'cash',
   postedBy: string = 'system',
   referenceCode?: string,
   userContext?: { uid?: string; email?: string; role?: string; displayName?: string },
@@ -926,7 +926,7 @@ export const settleLedger = async (
   guestId: string,
   reservationId: string,
   amount: number,
-  paymentMethod: 'cash' | 'card' | 'transfer',
+  paymentMethod: 'cash' | 'card' | 'transfer' | 'deposit',
   postedBy: string,
   corporateId?: string,
   referenceCode?: string,
