@@ -297,7 +297,7 @@ async function startServer() {
     const caller = await requireAuth(req, res);
     if (!caller) return;
 
-    const { hotelId, guestId, reservationId, items, postedBy, corporateId, idempotencyKey } = req.body;
+    const { hotelId, guestId, reservationId, items, postedBy, postedByName, corporateId, idempotencyKey } = req.body;
 
     if (!hotelId || !guestId || !reservationId || !items || !Array.isArray(items) || items.length === 0 || !idempotencyKey) {
       return res.status(400).json({ error: "Missing required parameters or empty items list." });
@@ -352,6 +352,25 @@ async function startServer() {
       }
       const resData = resSnap.data();
       const finalCorporateId = corporateId || resData?.corporateId || null;
+
+      let effectivePostedByName = typeof postedByName === 'string' && postedByName.trim() && postedByName.trim() !== 'Staff'
+        ? postedByName.trim()
+        : '';
+      if (!effectivePostedByName) {
+        try {
+          const staffUidToLookup = typeof postedBy === 'string' && postedBy && postedBy !== 'system' ? postedBy : caller.uid;
+          if (staffUidToLookup) {
+            const staffSnap = await getDoc(doc(db, 'users', staffUidToLookup));
+            if (staffSnap.exists()) {
+              const sData = staffSnap.data();
+              effectivePostedByName = sData?.displayName || sData?.name || sData?.email || '';
+            }
+          }
+        } catch (_) {}
+      }
+      if (!effectivePostedByName) {
+        effectivePostedByName = caller.email || (typeof effectivePostedBy === 'string' && effectivePostedBy.includes('@') ? effectivePostedBy : '');
+      }
 
       // Check room-level restaurant posting restriction if any item is a restaurant/F&B debit
       const hasRestaurantDebit = items.some((it: any) => {
@@ -422,6 +441,7 @@ async function startServer() {
           description: description || `${type === 'debit' ? 'Charge' : 'Adjustment'}: ${category}`,
           referenceId: reservationId,
           postedBy: effectivePostedBy,
+          ...(effectivePostedByName ? { postedByName: effectivePostedByName } : {}),
           quantity: numQty,
           price: numPrice,
           discount: numDiscount,
@@ -475,6 +495,7 @@ async function startServer() {
               description: `${tax.name} (${tax.percentage}%) ${tax.isInclusive ? '[Inclusive]' : ''} for ${mainEntry.description}`,
               category: 'tax',
               postedBy: effectivePostedBy,
+              ...(effectivePostedByName ? { postedByName: effectivePostedByName } : {}),
               idempotencyKey,
               isImmutable: true
             };

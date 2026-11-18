@@ -1477,8 +1477,14 @@ export function FrontDesk() {
             category: 'discount',
             description: `Booking Discount (${stay.discountType === 'percentage' ? stay.discountAmount + '%' : formatCurrency(stay.discountAmount, currency, exchangeRate)}): ${stay.discountReason || 'New Booking Discount'}`,
             referenceId: stay.resId,
-            postedBy: profile.uid
-          }, profile.uid, stay.corporateId);
+            postedBy: profile.uid,
+            postedByName: profile.displayName || (profile as any).name || profile.email
+          }, profile.uid, stay.corporateId, 'cash', {
+            uid: profile.uid,
+            email: profile.email,
+            role: profile.role || 'staff',
+            displayName: profile.displayName || (profile as any).name || profile.email || 'Staff'
+          });
         }
 
         stayTargets.push({
@@ -2028,6 +2034,7 @@ export function FrontDesk() {
                 description: `Nightly Room Charge [Extension]: ${res.roomNumber} (Night of ${format(nightStart, 'MMM dd, yyyy')}) (Night ${nightIndex} of ${newBookedNights})`,
                 referenceId: nightRefId,
                 postedBy: profile?.uid || 'system',
+                postedByName: profile?.displayName || (profile as any)?.name || profile?.email,
                 chargePeriodStart: nightStart.toISOString(),
                 chargePeriodEnd: nightEnd.toISOString(),
                 chargeType: 'room_rate',
@@ -2035,7 +2042,12 @@ export function FrontDesk() {
                 rateSource: extRateInfo.rateSource,
                 appliedNightlyRate: extensionNightlyRate,
                 effectiveDate: res.checkOut
-              } as any, profile?.uid || 'system', res.corporateId);
+              } as any, profile?.uid || 'system', res.corporateId, 'cash', profile ? {
+                uid: profile.uid,
+                email: profile.email,
+                role: profile.role || 'staff',
+                displayName: profile.displayName || (profile as any).name || profile.email || 'Staff'
+              } : undefined);
             }
           }
         }
@@ -2207,8 +2219,14 @@ export function FrontDesk() {
         category: 'discount',
         description: discountDesc,
         referenceId: res.id,
-        postedBy: profile.uid
-      }, profile.uid, res.corporateId);
+        postedBy: profile.uid,
+        postedByName: profile.displayName || (profile as any).name || profile.email
+      }, profile.uid, res.corporateId, 'cash', {
+        uid: profile.uid,
+        email: profile.email,
+        role: profile.role || 'staff',
+        displayName: profile.displayName || (profile as any).name || profile.email || 'Staff'
+      });
 
       // Record promotion redemption & update reservation if promo code was used
       if (modalAppliedPromo) {
@@ -2639,6 +2657,7 @@ export function FrontDesk() {
               description: `Room Charge: Room ${res.roomNumber} (Night of ${format(Start, 'MMM dd, yyyy')})`,
               referenceId: `${res.id}_NIGHT_1`,
               postedBy: profile.uid,
+              postedByName: profile.displayName || (profile as any).name || profile.email,
               chargePeriodStart: startStr,
               chargePeriodEnd: endStr,
               chargeType: 'room_rate',
@@ -2646,7 +2665,12 @@ export function FrontDesk() {
               rateSource: night1Info.rateSource,
               appliedNightlyRate: rate,
               effectiveDate: night1Info.effectiveDate
-            } as any, profile.uid, res.corporateId);
+            } as any, profile.uid, res.corporateId, 'cash', {
+              uid: profile.uid,
+              email: profile.email,
+              role: profile.role || 'staff',
+              displayName: profile.displayName || (profile as any).name || profile.email || 'Staff'
+            });
           } else {
             console.log(`[CheckIn] Skipped room charge for reservation ${res.id} because one already exists.`);
           }
@@ -3142,8 +3166,14 @@ export function FrontDesk() {
         category: chargeDetails.category,
         description: `${chargeDetails.description}${discountAmount > 0 ? ` (Discounted from ${formatCurrency(chargeDetails.amount, currency, exchangeRate)})` : ''}`,
         referenceId: res.id,
-        postedBy: profile.uid
-      }, profile.uid, res.corporateId);
+        postedBy: profile.uid,
+        postedByName: profile.displayName || (profile as any).name || profile.email
+      }, profile.uid, res.corporateId, 'cash', {
+        uid: profile.uid,
+        email: profile.email,
+        role: profile.role || 'staff',
+        displayName: profile.displayName || (profile as any).name || profile.email || 'Staff'
+      });
 
       // 2. Log action is handled by postToLedger internals
       setShowChargeModal(null);

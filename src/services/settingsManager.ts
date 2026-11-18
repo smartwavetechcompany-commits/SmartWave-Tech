@@ -131,7 +131,11 @@ class CentralSettingsManager {
    * Starts listening to Firestore for real-time hotel configuration, taxes, and pricing adjustments.
    */
   initialize(hotelId: string) {
-    if (this.currentHotelId === hotelId) return;
+    if (!hotelId || !auth.currentUser) {
+      this.cleanup();
+      return;
+    }
+    if (this.currentHotelId === hotelId && this.unsubscribeHotel && this.unsubscribeRates) return;
 
     this.currentHotelId = hotelId;
     this.cleanupListeners();
@@ -295,6 +299,10 @@ class CentralSettingsManager {
         this.publish('reservations.bookingSources', this.currentBookingSources);
       }
     }, (error) => {
+      if (!auth.currentUser) {
+        this.cleanup();
+        return;
+      }
       console.error("CentralSettingsManager Hotel document listener error:", error);
     });
 
@@ -359,6 +367,10 @@ class CentralSettingsManager {
       this.publish('room_pricing', rates);
       this.publish('rate_configurations', rates);
     }, (error) => {
+      if (!auth.currentUser) {
+        this.cleanup();
+        return;
+      }
       console.error("CentralSettingsManager Rate configurations listener error:", error);
     });
   }
@@ -374,9 +386,18 @@ class CentralSettingsManager {
     }
   }
 
-  destroy() {
+  cleanup() {
     this.cleanupListeners();
     this.currentHotelId = null;
+    this.lastSettings = null;
+    this.lastTaxes = null;
+    this.lastHotelDetails = null;
+    this.lastRateConfigs = null;
+    this.clientInitiatedUpdate = false;
+  }
+
+  destroy() {
+    this.cleanup();
     this.currentHotelDetails = null;
     this.subscribers.clear();
     this.eventListeners.clear();

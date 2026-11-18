@@ -141,6 +141,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (typeof sessionStorage !== 'undefined') {
         sessionStorage.removeItem('pms_session_id');
       }
+      settingsManager.cleanup();
       if (sessionIdToRevoke && profile?.hotelId && profile.hotelId !== 'system') {
         const sessionRef = doc(db, 'hotels', profile.hotelId, 'sessions', sessionIdToRevoke);
         await updateDoc(sessionRef, {
@@ -244,6 +245,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setAuthResolved(true);
           });
       } else {
+        settingsManager.cleanup();
         if (typeof sessionStorage !== 'undefined') {
           sessionStorage.removeItem('pms_session_id');
         }
@@ -421,12 +423,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (!hotelId || (hotelId === 'system' && role !== 'superAdmin') || hasHotelError) {
+      settingsManager.cleanup();
       setHotel(null);
       setHotelResolved(true);
       return;
     }
 
     if (hotelId === 'system' && role === 'superAdmin' && !selectedHotelId) {
+      settingsManager.cleanup();
       setHotel(null);
       setHotelResolved(true);
       return;

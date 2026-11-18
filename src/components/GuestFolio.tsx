@@ -172,14 +172,36 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   });
   const [discountingEntry, setDiscountingEntry] = useState<LedgerEntry | null>(null);
   const [showExtendGraceModal, setShowExtendGraceModal] = useState(false);
+  const [staffNameMap, setStaffNameMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!hotel?.id) return;
     const unsubPromo = subscribePromotions(hotel.id, (promos) => {
       setAvailablePromotions(promos.filter(p => p.status === 'active'));
     });
+    const unsubStaff = onSnapshot(
+      query(collection(db, 'users'), where('hotelId', '==', hotel.id)),
+      (snap) => {
+        const nextMap: Record<string, string> = {};
+        snap.docs.forEach((d) => {
+          const u = d.data() as any;
+          const label = u.displayName || u.name || u.email;
+          if (!label) return;
+          if (d.id) nextMap[d.id] = label;
+          if (u.uid) nextMap[u.uid] = label;
+          if (u.firebase_uid) nextMap[u.firebase_uid] = label;
+          if (typeof u.email === 'string' && u.email) {
+            nextMap[u.email] = label;
+            nextMap[u.email.toLowerCase()] = label;
+          }
+        });
+        setStaffNameMap(nextMap);
+      },
+      () => {}
+    );
     return () => {
       try { unsubPromo(); } catch (e) {}
+      try { unsubStaff(); } catch (e) {}
     };
   }, [hotel?.id]);
 
@@ -366,12 +388,13 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
         category: 'discount',
         description: discountDesc,
         referenceId: res.id,
-        postedBy: profile.uid
+        postedBy: profile.uid,
+        postedByName: profile.displayName || (profile as any).name || profile.email
       }, profile.uid, res.corporateId, 'cash', {
         uid: profile?.uid,
         email: profile?.email,
         role: profile?.role || 'staff',
-        displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+        displayName: profile?.displayName || (profile as any)?.name || profile?.email || 'Staff'
       });
 
       // Record promotion redemption & update reservation if promo code was used
@@ -748,6 +771,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             reservationId: currentReservation.id,
             items: finalItems,
             postedBy: profile.uid,
+            postedByName: profile.displayName || (profile as any)?.name || profile.email,
             corporateId: currentReservation.corporateId || undefined,
             idempotencyKey
           })
@@ -777,6 +801,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             description: item.description || `${item.type === 'debit' ? 'Charge' : 'Adjustment'}: ${item.category}`,
             referenceId: currentReservation.id,
             postedBy: profile.uid,
+            postedByName: profile.displayName || (profile as any)?.name || profile.email,
             quantity: item.quantity,
             price: item.price,
             idempotencyKey
@@ -784,7 +809,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             uid: profile?.uid,
             email: profile?.email,
             role: profile?.role || 'staff',
-            displayName: profile?.displayName || (profile as any)?.name || 'Staff'
+            displayName: profile?.displayName || (profile as any)?.name || profile?.email || 'Staff'
           });
         }
         
@@ -3282,7 +3307,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     {refundRecords.map((rf, idx) => {
                       const methodLabel = (rf.paymentMethod || rf.description?.match(/Refund\s*\(([^)]+)\)/i)?.[1] || 'cash').toUpperCase();
-                      const staffLabel = (rf as any).postedByName || (rf as any).processedBy?.name || 'Staff';
+                      const rawRefundStaff = (rf as any).postedByName || (rf as any).processedBy?.name;
+                      const staffLabel = (rawRefundStaff && rawRefundStaff !== 'Staff' ? rawRefundStaff : undefined) ||
+                        (rf.postedBy ? (staffNameMap[rf.postedBy] || staffNameMap[rf.postedBy.toLowerCase()]) : undefined) ||
+                        rawRefundStaff ||
+                        'Staff';
                       return (
                         <div key={rf.id || (rf as any).firestoreId || `rf-${idx}`} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-zinc-900/80 border border-rose-500/20 text-xs">
                           <div className="min-w-0">
@@ -3404,13 +3433,22 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                                 {entry.isVirtual ? 'Virtual Forecast Reference' : `Ref: ${String((entry as any).referenceCode || entry.id || (entry as any).firestoreId || '').slice(-10).toUpperCase()}`}
                               </span>
                               {(() => {
-                                const postedName = (entry as any).postedByName;
+                                const rawPostedName = (entry as any).postedByName || (entry as any).processedByName || (entry as any).processedBy?.name || (entry as any).createdByName;
+                                const postedName = rawPostedName && rawPostedName !== 'Staff' ? rawPostedName : undefined;
                                 const rawP = entry.postedBy;
                                 const pByStr = typeof rawP === 'string' 
                                   ? rawP 
-                                  : (rawP && typeof rawP === 'object' ? String((rawP as any).displayName || (rawP as any).uid || 'system') : '');
-                                if (!pByStr && !postedName) return null;
-                                const displayStaff = postedName || (pByStr === 'system' ? 'System' : (pByStr === profile?.uid ? (profile?.displayName || 'You') : (pByStr.includes('@') ? pByStr : `Staff (${pByStr.slice(-6).toUpperCase()})`)));
+                                  : (rawP && typeof rawP === 'object' ? String((rawP as any).displayName || (rawP as any).name || (rawP as any).email || (rawP as any).uid || 'system') : '');
+                                const resolvedFromStaff = pByStr ? (staffNameMap[pByStr] || staffNameMap[pByStr.toLowerCase()]) : undefined;
+                                if (!pByStr && !postedName && !resolvedFromStaff) return null;
+                                const displayStaff =
+                                  postedName ||
+                                  resolvedFromStaff ||
+                                  (pByStr === 'system' || pByStr === 'System'
+                                    ? 'System'
+                                    : (pByStr === profile?.uid
+                                        ? (profile?.displayName || (profile as any)?.name || profile?.email || 'Staff')
+                                        : (pByStr.includes('@') ? pByStr : `Staff (${pByStr.slice(-6).toUpperCase()})`)));
                                 return (
                                   <span className="text-[9px] text-zinc-400 font-medium">
                                     • Posted by: <strong className="text-zinc-300 font-semibold">{displayStaff}</strong>

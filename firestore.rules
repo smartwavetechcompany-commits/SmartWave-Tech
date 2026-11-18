@@ -398,6 +398,21 @@ service cloud.firestore {
         allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin() || isStaffOf(hotelId))) || isAuthenticated();
       }
 
+      // Rate Configurations (Room Pricing & Seasonal Rates)
+      match /rate_configurations/{configId} {
+        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
+                       isAuthenticated() ||
+                       (resource != null && resource.data.hotelId == hotelId);
+        allow create, update: if isSuperAdmin() ||
+                                 (sameHotel(hotelId) && (isHotelAdmin() || isAdmin() || isStaffOf(hotelId))) ||
+                                 isAuthenticated() ||
+                                 (exists(/databases/$(database)/documents/hotels/$(hotelId)) &&
+                                  get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs != null &&
+                                  get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs is list &&
+                                  get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid]));
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin() || isStaffOf(hotelId))) || isAuthenticated();
+      }
+
       // Recursive subcollections (Reservations, Housekeeping, Staff, etc.)
       match /{allSubcollections=**} {
         allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||

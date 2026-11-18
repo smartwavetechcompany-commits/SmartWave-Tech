@@ -1,4 +1,4 @@
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { doc, increment, collection, getDoc, query, where, getDocs, deleteDoc, writeBatch, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { LedgerEntry, Reservation, FinanceRecord, Hotel, CorporateAccount } from '../types';
 import { database, createAuditLog } from '../utils/database';
@@ -216,6 +216,17 @@ export const postToLedger = async (
   // 1. Prepare entries list
   const entries: Omit<LedgerEntry, 'id'>[] = [];
   
+  const rawContextName = userContext?.displayName && userContext.displayName !== 'Staff' ? userContext.displayName : undefined;
+  const rawEntryName = (entry as any).postedByName && (entry as any).postedByName !== 'Staff' ? (entry as any).postedByName : undefined;
+  const resolvedPostedByName =
+    rawContextName ||
+    rawEntryName ||
+    userContext?.email ||
+    (postedBy && postedBy !== 'system' && auth?.currentUser?.uid === postedBy
+      ? (auth.currentUser.displayName || auth.currentUser.email || undefined)
+      : undefined) ||
+    (typeof postedBy === 'string' && postedBy.includes('@') ? postedBy : undefined);
+
   const mainEntry: Omit<LedgerEntry, 'id'> = {
     ...entry,
     timestamp,
@@ -227,7 +238,7 @@ export const postToLedger = async (
     ...(entry.category === 'payment' || entry.category === 'refund'
       ? { paymentMethod: entry.paymentMethod || paymentMethod }
       : {}),
-    postedByName: userContext?.displayName || (entry as any).postedByName || userContext?.email || (typeof postedBy === 'string' && postedBy.includes('@') ? postedBy : undefined)
+    postedByName: resolvedPostedByName
   };
   entries.push(mainEntry);
 
@@ -294,7 +305,8 @@ export const postToLedger = async (
           amount: taxAmount,
           description: `${tax.name} (${tax.percentage}%) [Inclusive] for ${initialDescription}`,
           category: 'tax',
-          postedBy
+          postedBy,
+          ...(resolvedPostedByName ? { postedByName: resolvedPostedByName } : {})
         };
         inclusiveTaxEntries.push(taxEntry);
       } else {
@@ -308,7 +320,8 @@ export const postToLedger = async (
           amount: taxAmount,
           description: `${tax.name} (${tax.percentage}%) for ${initialDescription}`,
           category: 'tax',
-          postedBy
+          postedBy,
+          ...(resolvedPostedByName ? { postedByName: resolvedPostedByName } : {})
         };
         entries.push(taxEntry);
       }
