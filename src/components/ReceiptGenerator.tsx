@@ -388,12 +388,14 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       id="active-hotel-receipt"
       data-printable="true"
       className={cn(
-        "bg-white text-zinc-900 mx-auto font-sans shadow-2xl border border-zinc-200 print:shadow-none print:border-none print:p-0 print:m-0",
-        (type === 'comprehensive' || type === 'corporate') ? "w-[210mm] min-h-[297mm] print:min-h-0 pt-8 px-12 pb-12 receipt-container" : "w-[80mm] p-4 docket-container"
+        "bg-white text-zinc-900 mx-auto font-sans shadow-2xl border border-zinc-200 print:shadow-none print:border-0 print:m-0 box-border",
+        (type === 'comprehensive' || type === 'corporate')
+          ? "w-full max-w-[210mm] min-h-[297mm] print:min-h-0 print:w-full print:max-w-full pt-7 px-8 sm:px-10 pb-8 print:px-5 print:py-4 receipt-container"
+          : "w-[80mm] p-4 print:p-2 docket-container"
       )}
     >
       {/* Hotel Header */}
-      <div className="text-center border-b-2 border-zinc-900 pb-6 mb-6">
+      <div className="text-center border-b-2 border-zinc-900 pb-5 mb-5 print:pb-4 print:mb-4">
         {(branding.showLogoOnReceipt ?? true) && (
           branding.logoUrl ? (
             <img src={branding.logoUrl} alt={hotel.name} className="h-20 mx-auto mb-4 object-contain max-w-[240px]" referrerPolicy="no-referrer" />
@@ -452,18 +454,18 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       </div>
 
       {/* Receipt Info Grid */}
-      <div className="grid grid-cols-2 gap-x-8 gap-y-6 mb-8 text-sm">
-        <div>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-4 mb-6 print:mb-4 text-sm">
+        <div className="min-w-0">
           <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1 flex items-center gap-1">
             <User size={10} /> {type === 'corporate' ? 'Account Details' : 'Guest Details'}
           </p>
-          <p className="font-bold text-base">{type === 'corporate' ? account?.name : reservation?.guestName}</p>
-          <p className="text-zinc-500 text-xs">{type === 'corporate' ? account?.email : reservation?.guestEmail}</p>
+          <p className="font-bold text-base break-words">{type === 'corporate' ? account?.name : reservation?.guestName}</p>
+          <p className="text-zinc-500 text-xs break-all">{type === 'corporate' ? account?.email : reservation?.guestEmail}</p>
           {type === 'corporate' && account?.taxId && <p className="text-zinc-400 text-[10px] mt-0.5">Tax ID: {account.taxId}</p>}
         </div>
-        <div className="text-right">
+        <div className="text-right min-w-0">
           <p className="text-zinc-400 font-bold uppercase tracking-widest text-[9px] mb-1 flex items-center justify-end gap-1">
-            <Receipt size={10} /> {branding.customReceiptTitle || (type === 'corporate' ? 'OFFICIAL CORPORATE RECEIPT' : (folioType === 'company' ? 'CORPORATE FOLIO STATEMENT' : (folioType === 'all' ? 'CONSOLIDATED GUEST FOLIO STATEMENT' : 'OFFICIAL GUEST RECEIPT')))}
+            <Receipt size={10} className="shrink-0" /> {branding.customReceiptTitle || (type === 'corporate' ? 'OFFICIAL CORPORATE RECEIPT' : (folioType === 'company' ? 'CORPORATE FOLIO STATEMENT' : (folioType === 'all' ? 'CONSOLIDATED GUEST FOLIO STATEMENT' : 'OFFICIAL GUEST RECEIPT')))}
           </p>
           <p className="font-bold text-base">#{type === 'corporate' ? (account?.id || '').slice(-8).toUpperCase() : (reservation?.id || '').slice(-8).toUpperCase()}</p>
           <p className="text-zinc-500 text-xs">{format(new Date(), 'MMMM dd, yyyy HH:mm')}</p>
@@ -506,35 +508,35 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
         ) : null}
       </div>
 
-      <div className="border-t border-zinc-100 my-6" />
+      <div className="border-t border-zinc-100 my-4 print:my-3" />
 
       {/* Charges Section */}
-      <div className="mt-8 space-y-6">
-        <div className="flex justify-between text-[10px] font-black text-zinc-400 uppercase tracking-widest border-b border-zinc-200 pb-2">
+      <div className="mt-5 space-y-4 print:mt-4 print:space-y-3">
+        <div className="flex justify-between gap-4 text-[10px] font-black text-zinc-400 uppercase tracking-widest border-b border-zinc-200 pb-2">
           <span>Charges / Description</span>
-          <span className="text-right">Amount</span>
+          <span className="text-right shrink-0">Amount</span>
         </div>
         
         {type === 'restaurant' ? (
           <div className="space-y-3">
             {ledgerEntries.filter(e => getSafeStr(e.category) === 'restaurant' && e.type === 'debit').map((e, idx) => (
-              <div key={`${e.id || 'restaurant'}-${idx}`} className="flex justify-between items-start">
-                <div className="flex-1">
+              <div key={`${e.id || 'restaurant'}-${idx}`} className="flex justify-between items-start gap-4">
+                <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold">{formatReceiptDescription(e.description)}</p>
                   <p className="text-[10px] text-zinc-400">{safeFormatDate(e.timestamp, 'MMM dd, HH:mm')}</p>
                 </div>
-                <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
+                <span className="font-bold text-sm text-right shrink-0 whitespace-nowrap">{formatCurrency(e.amount, currency, exchangeRate)}</span>
               </div>
             ))}
           </div>
         ) : (
-          <div className="space-y-6">
+          <div className="space-y-5 print:space-y-4">
             {/* 1. ACCOMMODATION & DAILY BASE RATES BREAKDOWN */}
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               <div className="border-l-2 border-zinc-900 pl-2.5">
                 <span className="text-[10px] uppercase font-black tracking-widest text-zinc-400">1. Accommodation & Nightly Rates</span>
               </div>
-              <div className="pl-3 space-y-3">
+              <div className="pl-3 space-y-2.5">
                 {(() => {
                   const roomDebits = debits.filter(e => e.category?.toLowerCase() === 'room');
                   const renderedNights: React.ReactNode[] = [];
@@ -542,12 +544,12 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                   // Render already posted room charges from the ledger
                   roomDebits.forEach((e, index) => {
                     renderedNights.push(
-                      <div key={`${e.id || 'posted-room'}-${index}`} className="flex justify-between items-start py-0.5">
-                        <div className="flex-1">
+                      <div key={`${e.id || 'posted-room'}-${index}`} className="flex justify-between items-start gap-4 py-0.5">
+                        <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold">{formatReceiptDescription(e.description)}</p>
                           <p className="text-[10px] text-zinc-500 font-medium">Posted Charge • Room {reservation?.roomNumber || 'N/A'}</p>
                         </div>
-                        <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
+                        <span className="font-bold text-sm text-right shrink-0 whitespace-nowrap">{formatCurrency(e.amount, currency, exchangeRate)}</span>
                       </div>
                     );
                   });
@@ -588,15 +590,15 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                         }
 
                         renderedNights.push(
-                          <div key={`projected-room-${nightIndex}-${i}`} className="flex justify-between items-start py-0.5 text-zinc-600">
-                            <div className="flex-1">
+                          <div key={`projected-room-${nightIndex}-${i}`} className="flex justify-between items-start gap-4 py-0.5 text-zinc-600">
+                            <div className="flex-1 min-w-0">
                               <p className="text-sm font-bold flex items-center gap-1.5 flex-wrap">
                                 {title}
                                 <span className="px-1.5 py-0.5 bg-zinc-100 text-[8px] text-zinc-500 font-bold uppercase rounded leading-none">Unposted</span>
                               </p>
                               <p className="text-[10px] text-zinc-400">Night {nightIndex + 1} of stay • Rate: {formatCurrency(rateForThisNight, currency, exchangeRate)} / night</p>
                             </div>
-                            <span className="font-bold text-sm text-right">{formatCurrency(rateForThisNight, currency, exchangeRate)}</span>
+                            <span className="font-bold text-sm text-right shrink-0 whitespace-nowrap">{formatCurrency(rateForThisNight, currency, exchangeRate)}</span>
                           </div>
                         );
                       }
@@ -632,29 +634,29 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                               : `Projected Room Charge: ${corpRes.guestName} • Room ${corpRes.roomNumber} (Night of ${dateFormatted})`;
 
                           renderedNights.push(
-                            <div key={`corp-projected-room-${corpRes.id}-${nightIndex}-${i}`} className="flex justify-between items-start py-0.5 text-zinc-600">
-                              <div className="flex-1">
+                            <div key={`corp-projected-room-${corpRes.id}-${nightIndex}-${i}`} className="flex justify-between items-start gap-4 py-0.5 text-zinc-600">
+                              <div className="flex-1 min-w-0">
                                 <p className="text-sm font-bold flex items-center gap-1.5 flex-wrap">
                                   {title}
                                   <span className="px-1.5 py-0.5 bg-zinc-100 text-[8px] text-zinc-500 font-bold uppercase rounded leading-none">Unposted</span>
                                 </p>
                                 <p className="text-[10px] text-zinc-400">Night {nightIndex + 1} of stay • Rate: {formatCurrency(rateForThisNight, currency, exchangeRate)} / night</p>
                               </div>
-                              <span className="font-bold text-sm text-right">{formatCurrency(rateForThisNight, currency, exchangeRate)}</span>
+                              <span className="font-bold text-sm text-right shrink-0 whitespace-nowrap">{formatCurrency(rateForThisNight, currency, exchangeRate)}</span>
                             </div>
                           );
                         }
                       } else {
                         renderedNights.push(
-                          <div key={`corp-projected-bal-${corpRes.id}`} className="flex justify-between items-start py-0.5 text-zinc-600">
-                            <div className="flex-1">
+                          <div key={`corp-projected-bal-${corpRes.id}`} className="flex justify-between items-start gap-4 py-0.5 text-zinc-600">
+                            <div className="flex-1 min-w-0">
                               <p className="text-sm font-bold flex items-center gap-1.5 flex-wrap">
                                 Projected Room Stay Charge: {corpRes.guestName} • Room {corpRes.roomNumber}
                                 <span className="px-1.5 py-0.5 bg-zinc-100 text-[8px] text-zinc-500 font-bold uppercase rounded leading-none">Unposted</span>
                               </p>
                               <p className="text-[10px] text-zinc-400">Active stay balance</p>
                             </div>
-                            <span className="font-bold text-sm text-right">{formatCurrency(breakdown.unpostedRoomBase, currency, exchangeRate)}</span>
+                            <span className="font-bold text-sm text-right shrink-0 whitespace-nowrap">{formatCurrency(breakdown.unpostedRoomBase, currency, exchangeRate)}</span>
                           </div>
                         );
                       }
@@ -701,8 +703,8 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                         }
 
                         return (
-                          <div key={`${e.id || 'incidental'}-${index}`} className="flex justify-between items-start py-1">
-                            <div className="flex-1">
+                          <div key={`${e.id || 'incidental'}-${index}`} className="flex justify-between items-start gap-4 py-1">
+                            <div className="flex-1 min-w-0">
                               <p className="text-sm font-bold flex items-center gap-2 flex-wrap">
                                 {formatReceiptDescription(e.description)}
                                 {e.billNumber && (
@@ -716,7 +718,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                                 {e.directPaidAmount && e.directPaidAmount > 0 ? ` • Outlet Paid: ${formatCurrency(e.directPaidAmount, currency, exchangeRate)}` : ''}
                               </p>
                             </div>
-                            <span className="font-bold text-sm text-right">{formatCurrency(e.amount, currency, exchangeRate)}</span>
+                            <span className="font-bold text-sm text-right shrink-0 whitespace-nowrap">{formatCurrency(e.amount, currency, exchangeRate)}</span>
                           </div>
                         );
                       })}
@@ -727,35 +729,35 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
             </div>
 
             {/* 3. TAXES & LEVIES BREAKDOWN */}
-            <div className="space-y-3 mt-4">
+            <div className="space-y-2.5 mt-4">
               <div className="border-l-2 border-zinc-900 pl-2.5">
                 <span className="text-[10px] uppercase font-black tracking-widest text-zinc-400">3. Taxes & Hotel Levies</span>
               </div>
-              <div className="pl-3 space-y-3">
+              <div className="pl-3 space-y-2.5">
                 {(() => {
                   const items: React.ReactNode[] = [];
                   
                   taxBreakdown.filter(t => t.showOnReceipt).forEach((tax, index) => {
                     items.push(
-                      <div key={`${tax.id || tax.name || 'tax'}-${index}`} className="flex justify-between items-start py-1.5">
-                        <div className="flex-1">
+                      <div key={`${tax.id || tax.name || 'tax'}-${index}`} className="flex justify-between items-start gap-4 py-1">
+                        <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold flex items-center gap-1.5 flex-wrap">
                             {tax.name} ({tax.percentage}%)
                           </p>
                         </div>
-                        <span className="font-bold text-sm text-right">{formatCurrency(tax.amount, currency, exchangeRate)}</span>
+                        <span className="font-bold text-sm text-right shrink-0 whitespace-nowrap">{formatCurrency(tax.amount, currency, exchangeRate)}</span>
                       </div>
                     );
                   });
 
                   if (otherTaxAmount > 0.01) {
                     items.push(
-                      <div key="other-tax" className="flex justify-between items-start py-0.5">
-                        <div className="flex-1">
+                      <div key="other-tax" className="flex justify-between items-start gap-4 py-0.5">
+                        <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold">Other Posted / Transferred Taxes</p>
                           <p className="text-[10px] text-zinc-500">Additional taxes posted directly through guest folio</p>
                         </div>
-                        <span className="font-bold text-sm text-right">{formatCurrency(otherTaxAmount, currency, exchangeRate)}</span>
+                        <span className="font-bold text-sm text-right shrink-0 whitespace-nowrap">{formatCurrency(otherTaxAmount, currency, exchangeRate)}</span>
                       </div>
                     );
                   }
@@ -774,20 +776,20 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
 
       {/* Payments Section */}
       {(type === 'comprehensive' || type === 'corporate') && (credits.length > 0 || (type !== 'corporate' && reservation && !hasPaymentInLedger && reservation.paidAmount > 0)) && (
-        <div className="space-y-4 mb-8">
-          <div className="flex justify-between text-[10px] font-bold text-emerald-600 uppercase tracking-widest border-b border-emerald-100 pb-2">
+        <div className="space-y-3 mt-5 mb-6 print:mt-4 print:mb-4">
+          <div className="flex justify-between gap-4 text-[10px] font-bold text-emerald-600 uppercase tracking-widest border-b border-emerald-100 pb-2">
             <span>Payments / Credits</span>
-            <span className="text-right">Amount</span>
+            <span className="text-right shrink-0">Amount</span>
           </div>
           
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {type !== 'corporate' && reservation && !hasPaymentInLedger && reservation.paidAmount > 0 && (
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
+              <div className="flex justify-between items-start gap-4">
+                <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold text-emerald-600">Initial Payment</p>
                   <p className="text-[10px] text-zinc-400">Recorded at booking</p>
                 </div>
-                <span className="font-bold text-sm text-right text-emerald-600">-{formatCurrency(reservation.paidAmount, currency, exchangeRate)}</span>
+                <span className="font-bold text-sm text-right text-emerald-600 shrink-0 whitespace-nowrap">-{formatCurrency(reservation.paidAmount, currency, exchangeRate)}</span>
               </div>
             )}
             {credits.map((e, index) => {
@@ -811,15 +813,15 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               }
 
               return (
-                <div key={`${e.id || 'credit'}-${index}`} className="flex justify-between items-start">
-                  <div className="flex-1">
+                <div key={`${e.id || 'credit'}-${index}`} className="flex justify-between items-start gap-4">
+                  <div className="flex-1 min-w-0">
                     <p className={cn("text-sm font-bold", textCol)}>{cleanLedgerDescription(getSafeStr(e.description))}</p>
                     <p className="text-[10px] text-zinc-400">
                       <span className="font-medium text-zinc-600">{typeLabel}</span> • {safeFormatDate(e.timestamp, 'MMM dd, yyyy HH:mm')}
                       {(e as any).referenceCode ? ` • Ref: ${(e as any).referenceCode}` : ''}
                     </p>
                   </div>
-                  <span className={cn("font-bold text-sm text-right", textCol)}>
+                  <span className={cn("font-bold text-sm text-right shrink-0 whitespace-nowrap", textCol)}>
                     -{formatCurrency(e.amount, currency, exchangeRate)}
                   </span>
                 </div>

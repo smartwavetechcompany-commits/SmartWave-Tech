@@ -98,19 +98,28 @@ function isolateElementForPrint(
     }
   });
 
-  // Clean shadow, borders, and margins for clean print output
-  cloned.classList.remove('shadow-2xl', 'shadow-xl', 'shadow-lg', 'shadow-md', 'shadow-sm');
+  // Clean shadow, borders, rounded corners, and margins for clean borderless print output
+  cloned.classList.remove(
+    'shadow-2xl', 'shadow-xl', 'shadow-lg', 'shadow-md', 'shadow-sm',
+    'border', 'border-zinc-200', 'border-zinc-300', 'rounded-xl', 'rounded-2xl'
+  );
   cloned.style.boxShadow = 'none';
+  cloned.style.border = 'none';
+  cloned.style.borderRadius = '0';
+  cloned.style.boxSizing = 'border-box';
   cloned.style.margin = '0 auto';
 
-  // If thermal docket, ensure width constraint
+  // If thermal docket, ensure 80mm width constraint; otherwise fit cleanly inside A4 printable area
   const isDocket = cloned.classList.contains('docket-container') || cloned.classList.contains('fandb-docket');
   if (isDocket) {
     cloned.style.width = '80mm';
     cloned.style.maxWidth = '80mm';
   } else {
     cloned.style.width = '100%';
-    cloned.style.maxWidth = options?.landscape ? '100%' : '210mm';
+    cloned.style.maxWidth = '100%';
+    if (cloned.classList.contains('receipt-container')) {
+      cloned.style.minHeight = '0';
+    }
   }
 
   // Clear previous print content and append cloned document
@@ -123,7 +132,7 @@ function isolateElementForPrint(
     document.title = options.title;
   }
 
-  // Inject dynamic print style override for @page
+  // Inject dynamic print style override for @page and light canvas
   const styleId = 'dynamic-print-override-style';
   let styleEl = document.getElementById(styleId) as HTMLStyleElement | null;
   if (!styleEl) {
@@ -152,6 +161,12 @@ function isolateElementForPrint(
       @page {
         size: ${safePageSize};
         margin: ${safeMargin};
+        background: #ffffff;
+      }
+      :root, :root.dark, html, html.dark, body, body.dark {
+        color-scheme: light !important;
+        background: #ffffff !important;
+        background-color: #ffffff !important;
       }
     }
   `;

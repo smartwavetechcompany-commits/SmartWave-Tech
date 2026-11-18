@@ -268,6 +268,18 @@ export async function generatePdfExport(
       allowTaint: true,
       backgroundColor,
       logging: false,
+      onclone: (clonedDoc: Document, clonedEl: HTMLElement) => {
+        clonedDoc.documentElement.classList.remove('dark');
+        clonedDoc.documentElement.style.colorScheme = 'light';
+        clonedDoc.body.style.backgroundColor = '#ffffff';
+        clonedEl.style.border = 'none';
+        clonedEl.style.boxShadow = 'none';
+        clonedEl.style.borderRadius = '0';
+        clonedEl.style.minHeight = '0';
+        clonedEl.style.margin = '0';
+        clonedEl.style.boxSizing = 'border-box';
+        clonedEl.style.backgroundColor = '#ffffff';
+      },
       ignoreElements: (element: Element) => {
         const classNames = element.className || '';
         const isStringClass = typeof classNames === 'string';

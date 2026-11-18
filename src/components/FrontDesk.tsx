@@ -6435,7 +6435,7 @@ export function FrontDesk() {
                 Close
               </button>
             </div>
-            <div className="bg-white rounded-2xl overflow-hidden print:rounded-none print:shadow-none print:w-full">
+            <div className="bg-white rounded-2xl overflow-hidden print:rounded-none print:shadow-none print:border-0 print:overflow-visible print:w-full">
               <ReceiptGenerator 
                 hotel={hotel} 
                 reservation={showReceipt.res} 

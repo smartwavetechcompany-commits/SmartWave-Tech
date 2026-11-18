@@ -2545,8 +2545,11 @@ export function GuestManagement() {
 
       {/* Receipt Modal */}
       {showReceipt && hotel && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-start justify-center p-4 overflow-y-auto">
-          <div className="relative w-full max-w-lg my-8">
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[60] flex items-start justify-center p-4 overflow-y-auto print:p-0 print:bg-transparent print:backdrop-blur-none print:static">
+          <div className={cn(
+            "relative w-full my-8 print:my-0 print:w-full print:static",
+            showReceipt.type === 'restaurant' ? "max-w-[80mm]" : "max-w-[210mm]"
+          )}>
             <button 
               onClick={() => setShowReceipt(null)}
               className="absolute -top-12 right-0 text-zinc-50 hover:text-emerald-500 transition-colors flex items-center gap-2 font-bold uppercase text-xs print:hidden"
@@ -2554,7 +2557,7 @@ export function GuestManagement() {
               <XCircle size={20} />
               Close
             </button>
-            <div className="bg-white rounded-2xl overflow-hidden">
+            <div className="bg-white rounded-2xl overflow-hidden print:rounded-none print:shadow-none print:border-0 print:overflow-visible print:w-full">
               <ReceiptGenerator 
                 hotel={hotel} 
                 reservation={showReceipt.res} 

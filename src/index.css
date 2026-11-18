@@ -370,6 +370,36 @@
 
 @media print {
   /* ================================================================ */
+  /* FORCE PURE WHITE PAPER CANVAS & LIGHT COLOR SCHEME FOR PRINT/PDF */
+  /* Overrides .dark color-scheme: dark (which causes Chrome Skia PDF */
+  /* to paint #121212 dark outer borders around @page margins).        */
+  /* ================================================================ */
+  :root,
+  :root.dark,
+  html,
+  html.dark,
+  body,
+  body.dark {
+    color-scheme: light !important;
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    --bg-color: #ffffff !important;
+    --text-color: #000000 !important;
+    --zinc-50: #fafafa !important;
+    --zinc-100: #f4f4f5 !important;
+    --zinc-200: #e4e4e7 !important;
+    --zinc-300: #d4d4d8 !important;
+    --zinc-400: #a1a1aa !important;
+    --zinc-500: #71717a !important;
+    --zinc-600: #52525b !important;
+    --zinc-700: #3f3f46 !important;
+    --zinc-800: #27272a !important;
+    --zinc-900: #18181b !important;
+    --zinc-950: #09090b !important;
+  }
+
+  /* ================================================================ */
   /* ISOLATED DOCUMENT PRINTING MODE                                  */
   /* When is-printing-active is set or #print-root contains children  */
   /* HIDE #root entirely and display ONLY #print-root.                */
@@ -378,7 +408,9 @@
   body.is-printing-active,
   body:has(#print-root:not(:empty)),
   body:has(#print-root > *) {
+    color-scheme: light !important;
     background: #ffffff !important;
+    background-color: #ffffff !important;
     color: #000000 !important;
     margin: 0 !important;
     padding: 0 !important;
@@ -413,9 +445,12 @@
     margin: 0 !important;
     padding: 0 !important;
     background: #ffffff !important;
+    background-color: #ffffff !important;
     color: #000000 !important;
     overflow: visible !important;
     opacity: 1 !important;
+    border: none !important;
+    box-shadow: none !important;
   }
 
   body.is-printing-active #print-root *,
@@ -493,28 +528,49 @@
     display: none !important;
   }
 
-  /* Unconstrain modals and overlays so printed documents flow naturally */
+  /* Unconstrain modals and overlays so printed documents flow naturally without dark backdrops */
   .fixed.inset-0,
+  .fixed.inset-0[class*="bg-"]:not(#print-root),
+  .fixed.inset-0[class*="backdrop-"]:not(#print-root),
   div[class*="fixed inset-0"] {
     position: static !important;
-    background: transparent !important;
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    background-image: none !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     padding: 0 !important;
     margin: 0 !important;
     box-shadow: none !important;
+    border: none !important;
     display: block !important;
     overflow: visible !important;
     width: 100% !important;
     height: auto !important;
     min-height: 0 !important;
+    max-height: none !important;
     animation: none !important;
   }
 
   .fixed.inset-0::before,
+  .fixed.inset-0[class*="bg-"]:not(#print-root)::before,
+  .fixed.inset-0[class*="backdrop-"]:not(#print-root)::before,
   div[class*="fixed inset-0"]::before {
     display: none !important;
     content: none !important;
+  }
+
+  .fixed.inset-0:not(#print-root) > div,
+  .fixed.inset-0:not(#print-root) > [class*="motion"],
+  .fixed.inset-0:not(#print-root) .min-h-full > div {
+    max-height: none !important;
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    background: #ffffff !important;
   }
 
   /* Reset layout constraints so printed documents flow naturally across pages */
@@ -526,6 +582,7 @@
   div[class*="overflow-hidden"],
   div[class*="overflow-y-auto"] {
     background: #ffffff !important;
+    background-color: #ffffff !important;
     color: #000000 !important;
     height: auto !important;
     min-height: 0 !important;
@@ -535,6 +592,7 @@
     margin: 0 !important;
     padding: 0 !important;
     box-shadow: none !important;
+    border: none !important;
     transform: none !important;
   }
 
@@ -548,22 +606,41 @@
 
   @page {
     margin: 10mm 12mm;
-    size: auto;
+    size: A4 portrait;
+    background: #ffffff;
   }
 
   /* Standardized paper layout container */
   #standard-print-document,
-  .receipt-container,
   .print-container {
     display: block !important;
     width: 100% !important;
     max-width: 100% !important;
+    box-sizing: border-box !important;
     background: #ffffff !important;
     color: #000000 !important;
     box-shadow: none !important;
     border: none !important;
     padding: 0 !important;
     margin: 0 !important;
+  }
+
+  /* Official Receipt A4 container: borderless white sheet with clean internal margins */
+  #active-hotel-receipt.receipt-container,
+  .receipt-container {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: 0 !important;
+    box-sizing: border-box !important;
+    background: #ffffff !important;
+    color: #18181b !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 4mm 6mm !important;
+    margin: 0 auto !important;
+    overflow: visible !important;
   }
 
   /* Prevent page-break splitting inside key document blocks */
