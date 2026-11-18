@@ -1,5 +1,5 @@
-import { BillingEngine, calculateBilling } from './src/utils/billingEngine';
-import { calculateReservationAccount } from './src/utils/financialUtils';
+import { BillingEngine, calculateBilling, getReservationLiveBalance } from './src/utils/billingEngine';
+import { calculateReservationAccount, calculateCorporateUnpostedStayCharge } from './src/utils/financialUtils';
 import { calculateStayDuration } from './src/utils/dateUtils';
 import {
   resolveApplicableRoomRate,
@@ -465,6 +465,210 @@ async function runTests() {
 
   const billingWrapper = calculateBilling(extendedRes, hotelAfterExtension, simulatedMultiRateLedger);
   assertEqual(billingWrapper.nightlyRate, 50000, 'calculateBilling exposes original confirmed nightlyRate 50,000');
+
+  // ---------------------------------------------------------------------------
+  // SCENARIO 8: Corporate Stay Extension Unposted Charge Sync
+  // ---------------------------------------------------------------------------
+  console.log('\n8. Corporate Stay Extension & Inclusive/Exclusive Tax Sync');
+  const corpCheckInTime = new Date(2026, 10, 18, 9, 35, 0, 0); // Nov 18, 2026 09:35
+  const corpSnapshot1 = buildInitialRateSnapshot({
+    checkIn: '2026-11-18',
+    nights: 1,
+    nightlyRate: 70000,
+    rateSource: 'corporate_rate',
+    effectiveDate: '2026-11-18'
+  });
+  const corpSnapshotExtended = appendExtensionToRateSnapshot({
+    res: {
+      id: 'res_corp_margret',
+      hotelId: baseHotel.id,
+      guestId: 'guest_margret',
+      guestName: 'Margret',
+      roomId: room101.id,
+      roomNumber: '105',
+      checkIn: '2026-11-18',
+      checkOut: '2026-11-19',
+      nights: 1,
+      status: 'checked_in',
+      corporateId: 'corp_smartwave',
+      nightlyRate: 70000,
+      originalNightlyRate: 70000,
+      rateSnapshot: corpSnapshot1,
+      totalAmount: 95000,
+      paidAmount: 95000,
+      paymentStatus: 'paid',
+      autoNightDeduction: true,
+      createdAt: '2026-11-18T09:35:00Z'
+    },
+    previousCheckOut: '2026-11-19',
+    newCheckOut: '2026-11-21',
+    extraNights: 2,
+    extensionRate: 70000,
+    extensionRateSource: 'corporate_rate',
+    hotel: baseHotel,
+    ledgerEntries: []
+  });
+
+  const extendedCorpRes: Reservation = {
+    id: 'res_corp_margret',
+    hotelId: baseHotel.id,
+    guestId: 'guest_margret',
+    guestName: 'Margret',
+    roomId: room101.id,
+    roomNumber: '105',
+    checkIn: '2026-11-18',
+    checkOut: '2026-11-21',
+    nights: 3,
+    status: 'checked_in',
+    corporateId: 'corp_smartwave',
+    nightlyRate: 70000,
+    originalNightlyRate: 70000,
+    rateSnapshot: corpSnapshotExtended,
+    totalAmount: 235000,
+    paidAmount: 95000,
+    ledgerBalance: 0, // stale DB field overwritten by reconcileAndRepairReservationFinancials
+    paymentStatus: 'paid',
+    autoNightDeduction: true,
+    createdAt: '2026-11-18T09:35:00Z'
+  };
+
+  const corpNight1Ledger: LedgerEntry[] = [
+    {
+      id: 'c_n1',
+      hotelId: baseHotel.id,
+      guestId: 'guest_margret',
+      reservationId: extendedCorpRes.id,
+      corporateId: 'corp_smartwave',
+      type: 'debit',
+      category: 'room',
+      chargeType: 'room_rate',
+      referenceId: `${extendedCorpRes.id}_NIGHT_1`,
+      amount: 70000,
+      description: 'Room Charge: Room 105 (Night of Nov 18, 2026)',
+      timestamp: '2026-11-18T09:35:00Z',
+      postedBy: 'staff'
+    },
+    {
+      id: 'c_svc',
+      hotelId: baseHotel.id,
+      guestId: 'guest_margret',
+      reservationId: extendedCorpRes.id,
+      corporateId: 'corp_smartwave',
+      type: 'debit',
+      category: 'service',
+      amount: 25000,
+      description: 'ironing',
+      timestamp: '2026-11-18T09:36:00Z',
+      postedBy: 'staff'
+    },
+    {
+      id: 'c_pay',
+      hotelId: baseHotel.id,
+      guestId: 'guest_margret',
+      reservationId: extendedCorpRes.id,
+      corporateId: 'corp_smartwave',
+      type: 'credit',
+      category: 'payment',
+      amount: 95000,
+      description: 'Payment Received',
+      timestamp: '2026-11-18T09:40:00Z',
+      postedBy: 'staff'
+    }
+  ];
+
+  assertEqual(
+    calculateCorporateUnpostedStayCharge(extendedCorpRes, baseHotel, corpNight1Ledger, corpCheckInTime),
+    140000,
+    'Corporate unposted charge reflects +2 extended nights (140,000) immediately after extension'
+  );
+  assertEqual(
+    getReservationLiveBalance(extendedCorpRes, baseHotel, corpNight1Ledger),
+    140000,
+    'getReservationLiveBalance returns 140,000 despite stale ledgerBalance=0'
+  );
+
+  // Night 2 later posts to ledger -> unposted drops cleanly to 70,000 (zero double-counting)
+  const corpNight2Ledger: LedgerEntry[] = [
+    ...corpNight1Ledger,
+    {
+      id: 'c_n2',
+      hotelId: baseHotel.id,
+      guestId: 'guest_margret',
+      reservationId: extendedCorpRes.id,
+      corporateId: 'corp_smartwave',
+      type: 'debit',
+      category: 'room',
+      chargeType: 'room_rate',
+      referenceId: `${extendedCorpRes.id}_NIGHT_2`,
+      amount: 70000,
+      description: 'Nightly Room Charge [Extension]: Room 105 (Night of Nov 19, 2026)',
+      timestamp: '2026-11-19T12:00:00Z',
+      postedBy: 'system'
+    }
+  ];
+  assertEqual(
+    calculateCorporateUnpostedStayCharge(extendedCorpRes, baseHotel, corpNight2Ledger, new Date(2026, 10, 19, 13, 0, 0)),
+    70000,
+    'Corporate unposted charge drops to 70,000 once Night 2 posts to ledger'
+  );
+
+  // Inclusive 7.5% VAT split on Night 1 should reconstruct cleanly back to 70,000
+  const inclusiveVatHotel: Hotel = {
+    ...baseHotel,
+    taxes: [{ id: 'vat_inc', name: 'VAT', percentage: 7.5, category: 'all', isInclusive: true, status: 'active', showOnReceipt: true, showOnFolio: true }]
+  };
+  const inclusiveLedger: LedgerEntry[] = [
+    {
+      id: 'ci_n1',
+      hotelId: baseHotel.id,
+      guestId: 'guest_margret',
+      reservationId: extendedCorpRes.id,
+      corporateId: 'corp_smartwave',
+      type: 'debit',
+      category: 'room',
+      chargeType: 'room_rate',
+      amount: 65116.28,
+      description: 'Room Charge: Room 105 (Night of Nov 18, 2026)',
+      timestamp: '2026-11-18T09:35:00.000Z',
+      postedBy: 'staff'
+    },
+    {
+      id: 'ci_tax',
+      hotelId: baseHotel.id,
+      guestId: 'guest_margret',
+      reservationId: extendedCorpRes.id,
+      corporateId: 'corp_smartwave',
+      type: 'debit',
+      category: 'tax',
+      amount: 4883.72,
+      description: 'VAT (7.5%) [Inclusive] for Room Charge: Room 105 (Night of Nov 18, 2026)',
+      timestamp: '2026-11-18T09:35:00.000Z',
+      postedBy: 'staff'
+    }
+  ];
+  assertEqual(
+    calculateCorporateUnpostedStayCharge(extendedCorpRes, inclusiveVatHotel, inclusiveLedger, corpCheckInTime),
+    140000,
+    'Inclusive VAT split reconstructs Night 1 to 70,000 leaving exact 140,000 unposted'
+  );
+
+  // Exclusive 7.5% VAT adds 10,500 onto the 140,000 unposted room base
+  const exclusiveVatHotel: Hotel = {
+    ...baseHotel,
+    taxes: [{ id: 'vat_exc', name: 'VAT', percentage: 7.5, category: 'all', isInclusive: false, status: 'active', showOnReceipt: true, showOnFolio: true }]
+  };
+  assertEqual(
+    calculateCorporateUnpostedStayCharge(extendedCorpRes, exclusiveVatHotel, corpNight1Ledger, corpCheckInTime),
+    150500,
+    'Exclusive 7.5% VAT adds 10,500 onto 140,000 unposted room base (150,500)'
+  );
+
+  // Checked-out reservation yields 0 unposted corporate charge
+  assertEqual(
+    calculateCorporateUnpostedStayCharge({ ...extendedCorpRes, status: 'checked_out' }, baseHotel, corpNight1Ledger, corpCheckInTime),
+    0,
+    'Checked-out corporate reservation yields 0 unposted stay charge'
+  );
 
   console.log('\nALL RATE SNAPSHOT TESTS PASSED SUCCESSFULLY!');
 }

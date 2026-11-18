@@ -299,11 +299,21 @@ export function CorporateManagement() {
       let chargedCount = 0;
       const now = new Date();
       
+      const touchedCorporateIds = new Set<string>();
       for (const res of activeReservations) {
         const billingRes = await processAutomatedBillingForReservation(hotel, res, profile.uid, now);
         chargedCount += billingRes.chargedCount;
+        if (res.corporateId) {
+          touchedCorporateIds.add(res.corporateId);
+        }
       }
-      
+
+      await Promise.all(
+        Array.from(touchedCorporateIds).map(corpId =>
+          reconcileCorporateAccountBalance(hotel.id, corpId).catch(() => {})
+        )
+      );
+
       if (chargedCount > 0) {
         toast.success(`Successfully posted daily charges for ${chargedCount} reservations.`);
       } else {

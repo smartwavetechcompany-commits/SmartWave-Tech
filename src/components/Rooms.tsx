@@ -47,7 +47,7 @@ import { canBlockRoom, canUnblockRoom, canCheckout } from '../utils/policyUtils'
 import { ensureBaseRateSnapshot } from '../utils/rateSnapshot';
 import { calculateBilling, parseLocalDateTime, getReservationLiveBalance, BillingService } from '../utils/billingEngine';
 import { calculateStayDuration, safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
-import { postToLedger, transferToCityLedger, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
+import { postToLedger, transferToCityLedger, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials, reconcileCorporateAccountBalance } from '../services/ledgerService';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { addDays, subDays, startOfDay, endOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore, differenceInDays } from 'date-fns';
@@ -892,6 +892,10 @@ export function Rooms() {
           toast.success(`Guest checked out successfully`, { id: toastId });
         }
 
+        if (res.corporateId) {
+          reconcileCorporateAccountBalance(hotel.id, res.corporateId).catch(() => {});
+        }
+
         // Log action
         await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
           timestamp: new Date().toISOString(),
@@ -942,7 +946,11 @@ export function Rooms() {
         action: 'RESERVATION_STATUS_UPDATE',
         details: `Updated reservation for ${res.guestName} to ${status}`
       });
-      
+
+      if (status === 'checked_in' && res.corporateId) {
+        reconcileCorporateAccountBalance(hotel.id, res.corporateId).catch(() => {});
+      }
+
       // Log action for UI
       await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),

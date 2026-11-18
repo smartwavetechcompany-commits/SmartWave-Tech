@@ -5,7 +5,7 @@ import { format, addDays, parseISO, startOfDay, isAfter } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
 import { Printer, Receipt, Calendar, User, Building2, MapPin, Phone, Mail } from 'lucide-react';
 import { BillingEngine, calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
-import { calculateReservationAccount, cleanLedgerDescription } from '../utils/financialUtils';
+import { calculateReservationAccount, cleanLedgerDescription, calculateCorporateUnpostedStayBreakdown } from '../utils/financialUtils';
 import { parseTimestampToDate, safeFormatDate } from '../utils/dateUtils';
 import { calculateBookedRoomTotal, getNightlyRateForStayIndex } from '../utils/rateSnapshot';
 import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
@@ -99,14 +99,16 @@ interface ReceiptProps {
   type: 'restaurant' | 'comprehensive' | 'corporate';
   ledgerEntries?: LedgerEntry[];
   folioType?: 'guest' | 'company' | 'all';
+  corporateReservations?: Reservation[];
 }
 
-export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntries = [], folioType = 'all' }: ReceiptProps) {
+export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntries = [], folioType = 'all', corporateReservations }: ReceiptProps) {
   const { currency, exchangeRate } = useAuth();
   const branding = hotel.branding || {};
 
   // Auto-fetch ledger entries if not passed
   const [fetchedLedger, setFetchedLedger] = useState<LedgerEntry[]>([]);
+  const [fetchedCorpReservations, setFetchedCorpReservations] = useState<Reservation[]>([]);
   useEffect(() => {
     if (ledgerEntries && ledgerEntries.length > 0) return;
     if (!hotel?.id) return;
@@ -138,7 +140,25 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
     }
   }, [hotel?.id, reservation?.id, account?.id, ledgerEntries]);
 
+  useEffect(() => {
+    if (type !== 'corporate' || !hotel?.id || !account?.id || corporateReservations) return;
+    const q = query(
+      collection(db, 'hotels', hotel.id, 'reservations'),
+      where('corporateId', '==', account.id),
+      limit(500)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const items: Reservation[] = [];
+      snap.forEach((d) => items.push({ id: d.id, ...d.data() } as Reservation));
+      setFetchedCorpReservations(items.filter(r => r.status === 'checked_in'));
+    });
+    return () => unsub();
+  }, [type, hotel?.id, account?.id, corporateReservations]);
+
   const activeLedger = (ledgerEntries && ledgerEntries.length > 0) ? ledgerEntries : fetchedLedger;
+  const activeCorpReservations = type === 'corporate'
+    ? (corporateReservations || fetchedCorpReservations).filter(r => r.status === 'checked_in' && r.autoNightDeduction !== false)
+    : [];
 
   // Filter entries based on folioType if reservation is corporate
   const filteredEntries = (reservation?.corporateId && folioType && folioType !== 'all')
@@ -231,6 +251,15 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       const stayTaxTotal = reservation.taxAmount || 0;
       unpostedRoomBase = Math.max(0, (reservation.totalAmount || 0) - stayTaxTotal);
     }
+  } else if (type === 'corporate' && activeCorpReservations.length > 0) {
+    unpostedRoomBase = Number(
+      activeCorpReservations
+        .reduce((sum, corpRes) => {
+          const corpResEntries = filteredEntries.filter(e => e.reservationId === corpRes.id);
+          return sum + calculateCorporateUnpostedStayBreakdown(corpRes, hotel, corpResEntries).unpostedRoomBase;
+        }, 0)
+        .toFixed(2)
+    );
   }
 
   // Subtotal represents the gross charges of all stay/service items (excluding refund outflow debits).
@@ -266,6 +295,14 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       amount = processedEntries
         .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.toLowerCase().includes(tax.name.toLowerCase()))
         .reduce((acc, e) => acc + e.amount, 0);
+
+      // Include projected exclusive tax on unposted corporate stay/extension nights
+      if (type === 'corporate' && unpostedRoomBase > 0 && !tax.isInclusive) {
+        const taxCat = (tax.category || '').toLowerCase().trim();
+        if (taxCat !== 'restaurant' && taxCat !== 'f & b' && taxCat !== 'food') {
+          amount += Number((unpostedRoomBase * (tax.percentage / 100)).toFixed(2));
+        }
+      }
       
       // If amount is 0 in ledger, it might be an inclusive tax that was only added to description
       if (amount === 0 && tax.isInclusive) {
@@ -564,6 +601,64 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                         );
                       }
                     }
+                  } else if (type === 'corporate' && activeCorpReservations.length > 0) {
+                    activeCorpReservations.forEach((corpRes) => {
+                      const corpResEntries = filteredEntries.filter(e => e.reservationId === corpRes.id);
+                      const breakdown = calculateCorporateUnpostedStayBreakdown(corpRes, hotel, corpResEntries);
+                      if (breakdown.unpostedRoomBase <= 0.01) return;
+
+                      const unpostedNights = Math.max(0, breakdown.totalNights - breakdown.postedNightsCount);
+                      const fallbackRate = corpRes.originalNightlyRate || corpRes.nightlyRate || (corpRes.nights ? (corpRes.totalAmount || 0) / corpRes.nights : 0);
+
+                      if (unpostedNights > 0) {
+                        for (let i = 0; i < unpostedNights; i++) {
+                          const nightIndex = breakdown.postedNightsCount + i;
+                          const checkInDate = parseTimestampToDate(corpRes.checkIn);
+                          const nightDate = (checkInDate && !isNaN(checkInDate.getTime()) && checkInDate.getTime() > 0)
+                            ? addDays(checkInDate, nightIndex)
+                            : new Date();
+                          const isOverstay = nightIndex >= breakdown.bookedNights;
+                          const dateFormatted = safeFormatDate(nightDate, 'MMM dd, yyyy', 'Date N/A');
+                          const nightSnapshot = !isOverstay
+                            ? getNightlyRateForStayIndex(corpRes, nightIndex + 1, hotel, corpResEntries)
+                            : null;
+                          const rateForThisNight = isOverstay ? fallbackRate : (nightSnapshot?.rate ?? fallbackRate);
+                          if (rateForThisNight <= 0.01) continue;
+
+                          const title = isOverstay
+                            ? `Projected Overstay Charge: ${corpRes.guestName} • Room ${corpRes.roomNumber} (Night of ${dateFormatted})`
+                            : nightSnapshot?.segment === 'extension'
+                              ? `Projected Room Charge [Extension]: ${corpRes.guestName} • Room ${corpRes.roomNumber} (Night of ${dateFormatted})`
+                              : `Projected Room Charge: ${corpRes.guestName} • Room ${corpRes.roomNumber} (Night of ${dateFormatted})`;
+
+                          renderedNights.push(
+                            <div key={`corp-projected-room-${corpRes.id}-${nightIndex}-${i}`} className="flex justify-between items-start py-0.5 text-zinc-600">
+                              <div className="flex-1">
+                                <p className="text-sm font-bold flex items-center gap-1.5 flex-wrap">
+                                  {title}
+                                  <span className="px-1.5 py-0.5 bg-zinc-100 text-[8px] text-zinc-500 font-bold uppercase rounded leading-none">Unposted</span>
+                                </p>
+                                <p className="text-[10px] text-zinc-400">Night {nightIndex + 1} of stay • Rate: {formatCurrency(rateForThisNight, currency, exchangeRate)} / night</p>
+                              </div>
+                              <span className="font-bold text-sm text-right">{formatCurrency(rateForThisNight, currency, exchangeRate)}</span>
+                            </div>
+                          );
+                        }
+                      } else {
+                        renderedNights.push(
+                          <div key={`corp-projected-bal-${corpRes.id}`} className="flex justify-between items-start py-0.5 text-zinc-600">
+                            <div className="flex-1">
+                              <p className="text-sm font-bold flex items-center gap-1.5 flex-wrap">
+                                Projected Room Stay Charge: {corpRes.guestName} • Room {corpRes.roomNumber}
+                                <span className="px-1.5 py-0.5 bg-zinc-100 text-[8px] text-zinc-500 font-bold uppercase rounded leading-none">Unposted</span>
+                              </p>
+                              <p className="text-[10px] text-zinc-400">Active stay balance</p>
+                            </div>
+                            <span className="font-bold text-sm text-right">{formatCurrency(breakdown.unpostedRoomBase, currency, exchangeRate)}</span>
+                          </div>
+                        );
+                      }
+                    });
                   }
 
                   if (renderedNights.length === 0) {

@@ -3,9 +3,10 @@ import { doc, increment, collection, getDoc, query, where, getDocs, deleteDoc, w
 import { LedgerEntry, Reservation, FinanceRecord, Hotel, CorporateAccount } from '../types';
 import { database, createAuditLog } from '../utils/database';
 import { addDays, format } from 'date-fns';
-import { parseLocalDateTime, BillingService, BillingEngine } from '../utils/billingEngine';
+import { parseLocalDateTime, BillingService, BillingEngine, getReservationLiveBalance } from '../utils/billingEngine';
 import { calculateStayDuration, getGracePeriodInfo } from '../utils/dateUtils';
 import { getNightlyRateForStayIndex, computeOverstayNightAmount } from '../utils/rateSnapshot';
+import { calculateCorporateUnpostedStayCharge } from '../utils/financialUtils';
 
 import { validateLedgerTransaction, calculateGuestFinancialPosition } from './financialService';
 import {
@@ -573,6 +574,10 @@ export const postToLedger = async (
   if (reservationId) {
     // Non-blocking background verification audit
     recalculateReservationAccountFromLedger(hotelId, reservationId).catch(() => {});
+  }
+
+  if (finalCorporateId) {
+    await reconcileCorporateAccountBalance(hotelId, finalCorporateId).catch(() => {});
   }
 
   return { id: postedIds[0], ...mainEntry };
@@ -2021,11 +2026,15 @@ export const reconcileCorporateAccountBalance = async (
 
   try {
     const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId);
-    const corpSnap = await getDoc(corpRef);
+    const [corpSnap, hotelSnap] = await Promise.all([
+      getDoc(corpRef),
+      getDoc(doc(db, 'hotels', hotelId))
+    ]);
     if (!corpSnap.exists()) {
       return { currentBalance: 0, totalDebits: 0, totalCredits: 0, reconciled: false };
     }
     const corpData = corpSnap.data() as CorporateAccount;
+    const hotelDataForCalc = hotelSnap.exists() ? ({ ...hotelSnap.data(), id: hotelSnap.id } as Hotel) : null;
 
     // 1. Fetch all reservations linked to this corporate account
     const resQuery = query(
@@ -2072,6 +2081,17 @@ export const reconcileCorporateAccountBalance = async (
       await batch.commit().catch(e => console.warn('[Corporate Reconciliation] Batch commit notice:', e));
     }
 
+    const getValidEntriesByRes = () => {
+      const map = new Map<string, LedgerEntry[]>();
+      allEntriesMap.forEach(entry => {
+        if (!entry.reservationId || !validateLedgerTransaction(entry).isValid) return;
+        const list = map.get(entry.reservationId) || [];
+        list.push(entry);
+        map.set(entry.reservationId, list);
+      });
+      return map;
+    };
+
     // 3b. Automatically link unallocated corporate settlement credits to corporate debtor reservations
     // so that guest folios, receipts, and room-charged kitchen orders balance out immediately
     const unallocatedCreditDocs = corpLedgerSnap.docs.filter(d => {
@@ -2089,10 +2109,13 @@ export const reconcileCorporateAccountBalance = async (
         const creditAmount = creditData.amount || 0;
         if (creditAmount <= 0.001) continue;
 
+        const entriesByResId = getValidEntriesByRes();
+
         // Search among linked reservations for any reservation that has outstanding debt
         for (const resDoc of resSnap.docs) {
-          const rData = resDoc.data() as Reservation;
-          const rDebt = Math.max(0, (rData.ledgerBalance !== undefined ? rData.ledgerBalance : ((rData.totalAmount || 0) - (rData.paidAmount || 0))));
+          const rData = { ...(resDoc.data() as Reservation), id: resDoc.id };
+          const resEntries = entriesByResId.get(resDoc.id) || [];
+          const rDebt = Math.max(0, getReservationLiveBalance(rData, hotelDataForCalc, resEntries));
           if (rDebt > 0.001) {
             // Found debtor reservation under this corporate account
             await updateDoc(creditDoc.ref, {
@@ -2122,21 +2145,32 @@ export const reconcileCorporateAccountBalance = async (
     }
 
     // 3c. For all reservations linked to this corporate account that are fully paid, ensure kitchen orders are synced
+    const entriesByResAfterAllocation = getValidEntriesByRes();
     for (const resDoc of resSnap.docs) {
-      const rData = resDoc.data() as Reservation;
-      const rBalance = rData.ledgerBalance !== undefined ? rData.ledgerBalance : ((rData.totalAmount || 0) - (rData.paidAmount || 0));
+      const rData = { ...(resDoc.data() as Reservation), id: resDoc.id };
+      const resEntries = entriesByResAfterAllocation.get(resDoc.id) || [];
+      const rBalance = getReservationLiveBalance(rData, hotelDataForCalc, resEntries);
       if (rBalance <= 0.01 && (rData.paidAmount || 0) > 0) {
         await syncKitchenOrdersForReservation(hotelId, resDoc.id);
       }
     }
 
-    // 4. Calculate actual valid debits and credits
+    // 4. Calculate actual valid debits (posted + unposted active checked-in stay/extension charges) and credits
     const validEntries = Array.from(allEntriesMap.values())
       .filter(e => validateLedgerTransaction(e).isValid);
 
-    const actualDebits = validEntries
+    const postedDebits = validEntries
       .filter(e => e.type === 'debit')
       .reduce((acc, e) => acc + (e.amount || 0), 0);
+
+    const now = new Date();
+    const unpostedStayDebits = resSnap.docs.reduce((sum, resDoc) => {
+      const rData = { ...(resDoc.data() as Reservation), id: resDoc.id };
+      const resEntries = validEntries.filter(e => e.reservationId === resDoc.id);
+      return sum + calculateCorporateUnpostedStayCharge(rData, hotelDataForCalc, resEntries, now);
+    }, 0);
+
+    const actualDebits = postedDebits + unpostedStayDebits;
 
     const actualCredits = validEntries
       .filter(e => e.type === 'credit')

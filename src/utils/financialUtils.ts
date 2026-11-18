@@ -307,6 +307,105 @@ export function calculateReservationAccount(
   };
 }
 
+export interface CorporateUnpostedStayBreakdown {
+  unpostedRoomBase: number;
+  unpostedExclusiveTax: number;
+  totalUnpostedCharge: number;
+  postedNightsCount: number;
+  bookedNights: number;
+  overstayNights: number;
+  totalNights: number;
+}
+
+/**
+ * Calculates unposted room stay/extension/overstay charges (plus any active exclusive room taxes)
+ * for an active checked-in corporate reservation whose nightly charges have not yet posted to ledger.
+ */
+export function calculateCorporateUnpostedStayBreakdown(
+  res: Reservation,
+  hotel: Hotel | null,
+  resEntries: LedgerEntry[] = [],
+  currentTime: Date = new Date()
+): CorporateUnpostedStayBreakdown {
+  if (!res || res.status !== 'checked_in' || res.autoNightDeduction === false) {
+    return {
+      unpostedRoomBase: 0,
+      unpostedExclusiveTax: 0,
+      totalUnpostedCharge: 0,
+      postedNightsCount: 0,
+      bookedNights: res?.nights || 0,
+      overstayNights: res?.overstayNights || 0,
+      totalNights: res?.nights || 0,
+    };
+  }
+
+  const validResEntries = (resEntries || []).filter(e => {
+    const src = ((e as any).source || (e as any).sourceModule || (e as any).type_source || '').toString().toLowerCase();
+    return (e as any).isVirtual !== true && !['projection', 'forecast', 'preview', 'simulation'].includes(src);
+  });
+
+  const duration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status, {
+    hotel,
+    res,
+    currentTime,
+  });
+  const bookedNights = Math.max(1, duration.bookedNights || res.nights || 1);
+  const overstayNights = Math.max(0, duration.overstayNights || 0);
+  const totalNights = bookedNights + overstayNights;
+
+  const reconstructed = BillingEngine.reconstructInclusiveTaxes(validResEntries);
+  const postedRoomDebits = reconstructed.filter(
+    e =>
+      e.type === 'debit' &&
+      (e.category === 'room' ||
+        e.chargeType === 'room_rate' ||
+        e.chargeType === 'overstay' ||
+        (e.description || '').toLowerCase().includes('overstay'))
+  );
+  const postedRoomGross = postedRoomDebits.reduce((sum, e) => sum + (e.amount || 0), 0);
+  const postedNightsCount = postedRoomDebits.length;
+
+  const nightly = BillingEngine.getNightlyRate(res, hotel, validResEntries);
+  const expectedRoomGross =
+    calculateBookedRoomTotal(res, bookedNights, hotel, validResEntries) + overstayNights * nightly;
+
+  const unpostedRoomBase = Math.max(0, Number((expectedRoomGross - postedRoomGross).toFixed(2)));
+
+  let unpostedExclusiveTax = 0;
+  if (unpostedRoomBase > 0 && hotel?.taxes?.length) {
+    const activeExclusiveRoomTaxes = hotel.taxes.filter(t => {
+      const status = (t.status || '').toLowerCase().trim();
+      const category = (t.category || '').toLowerCase().trim();
+      if (status !== 'active' || t.isInclusive) return false;
+      return category !== 'restaurant' && category !== 'f & b' && category !== 'food';
+    });
+    activeExclusiveRoomTaxes.forEach(t => {
+      unpostedExclusiveTax += unpostedRoomBase * (t.percentage / 100);
+    });
+  }
+  unpostedExclusiveTax = Number(unpostedExclusiveTax.toFixed(2));
+  const totalUnpostedCharge = Number((unpostedRoomBase + unpostedExclusiveTax).toFixed(2));
+
+  return {
+    unpostedRoomBase,
+    unpostedExclusiveTax,
+    totalUnpostedCharge,
+    postedNightsCount,
+    bookedNights,
+    overstayNights,
+    totalNights,
+  };
+}
+
+export function calculateCorporateUnpostedStayCharge(
+  res: Reservation,
+  hotel: Hotel | null,
+  resEntries: LedgerEntry[] = [],
+  currentTime: Date = new Date()
+): number {
+  return calculateCorporateUnpostedStayBreakdown(res, hotel, resEntries, currentTime).totalUnpostedCharge;
+}
+
 /**
  * Single Source of Truth for calculating Guest Account Summary across all reservations and ledger history
  */

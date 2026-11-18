@@ -29,6 +29,8 @@ import { safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 import { increment, updateDoc, addDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { transferCorporateBalance, reconcileCorporateAccountBalance, settleLedger, postToLedger } from '../services/ledgerService';
+import { getReservationLiveBalance } from '../utils/billingEngine';
+import { calculateCorporateUnpostedStayCharge } from '../utils/financialUtils';
 import { Pagination } from './Pagination';
 
 interface CorporateFolioProps {
@@ -126,13 +128,17 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
     };
   }, [hotel?.id, account.id]);
 
-  // Auto-reconcile corporate account and link any unallocated settlements to debtor reservations
+  const resSyncKey = individualReservations
+    .map(r => `${r.id}:${r.nights || 0}:${r.checkOut || ''}:${r.overstayNights || 0}:${r.status}`)
+    .join('|');
+
+  // Auto-reconcile corporate account whenever linked checked-in reservations update (e.g. stay extensions)
   useEffect(() => {
-    if (!hotel?.id || !account?.id) return;
+    if (!hotel?.id || !account?.id || !resSyncKey) return;
     reconcileCorporateAccountBalance(hotel.id, account.id).catch(err => {
-      console.warn('[CorporateFolio] Initial reconciliation notice:', err);
+      console.warn('[CorporateFolio] Stay update reconciliation notice:', err);
     });
-  }, [hotel?.id, account.id]);
+  }, [hotel?.id, account?.id, resSyncKey]);
 
   useEffect(() => {
     if (!hotel?.id) return;
@@ -169,10 +175,13 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
         where('corporateId', '==', currentAccount.id)
       );
       const resSnap = await getDocs(qRes);
+      const owedByResId = new Map<string, number>();
       const debtorList = resSnap.docs
         .map(d => ({ id: d.id, ...d.data() } as Reservation))
         .filter(r => {
-          const owed = r.ledgerBalance !== undefined ? r.ledgerBalance : ((r.totalAmount || 0) - (r.paidAmount || 0));
+          const resLedger = ledgerEntries.filter(entry => entry.reservationId === r.id);
+          const owed = getReservationLiveBalance(r, hotel || null, resLedger);
+          owedByResId.set(r.id, Math.max(0, owed));
           return owed > 0.001;
         })
         .sort((a, b) => new Date(a.checkIn || 0).getTime() - new Date(b.checkIn || 0).getTime());
@@ -191,7 +200,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
         // Allocate across debtor reservations in FIFO order so folios, receipts, and kitchen orders are immediately updated
         for (const debtor of debtorList) {
           if (remainingSplit <= 0.001) break;
-          const currentOwed = debtor.ledgerBalance !== undefined ? debtor.ledgerBalance : ((debtor.totalAmount || 0) - (debtor.paidAmount || 0));
+          const currentOwed = owedByResId.get(debtor.id) || 0;
           if (currentOwed <= 0.001) continue;
 
           const alloc = Math.min(remainingSplit, currentOwed);
@@ -211,8 +220,9 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
             'Front Desk'
           );
 
+          owedByResId.set(debtor.id, Math.max(0, currentOwed - alloc));
           if (debtor.ledgerBalance !== undefined) {
-            debtor.ledgerBalance = Math.max(0, debtor.ledgerBalance - alloc);
+            debtor.ledgerBalance = Math.max(0, currentOwed - alloc);
           }
           if (debtor.paidAmount !== undefined) {
             debtor.paidAmount = (debtor.paidAmount || 0) + alloc;
@@ -327,9 +337,20 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
     }
   };
 
-  const totalDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
-  const totalCredits = ledgerEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0);
-  const balance = totalDebits - totalCredits;
+  const postedDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((acc, e) => acc + e.amount, 0);
+  const unpostedCheckedInDebits = individualReservations.reduce(
+    (sum, res) =>
+      sum +
+      calculateCorporateUnpostedStayCharge(
+        res,
+        hotel || null,
+        ledgerEntries.filter(e => e.reservationId === res.id)
+      ),
+    0
+  );
+  const totalDebits = Number((postedDebits + unpostedCheckedInDebits).toFixed(2));
+  const totalCredits = Number(ledgerEntries.filter(e => e.type === 'credit').reduce((acc, e) => acc + e.amount, 0).toFixed(2));
+  const balance = Number((totalDebits - totalCredits).toFixed(2));
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:p-0 print:bg-transparent print:backdrop-blur-none print:static">
@@ -402,7 +423,8 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                 hotel={hotel} 
                 account={currentAccount} 
                 type="corporate" 
-                ledgerEntries={ledgerEntries} 
+                ledgerEntries={ledgerEntries}
+                corporateReservations={individualReservations}
               />
             </div>
           </div>
@@ -555,32 +577,36 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800">
-                    {individualReservations.slice((resPage - 1) * resPageSize, resPage * resPageSize).map((res) => (
-                      <tr key={res.id} className="hover:bg-zinc-900/50 transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="text-sm text-zinc-50 font-medium">{res.guestName}</div>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-zinc-400">
-                          Room {res.roomNumber}
-                        </td>
-                        <td className="px-6 py-4 text-xs text-zinc-400">
-                          {safeFormatDate(res.checkIn, 'MMM d, yyyy')}
-                        </td>
-                        <td className="px-6 py-4 text-xs text-zinc-400">
-                          {safeFormatDate(res.checkOut, 'MMM d, yyyy')}
-                        </td>
-                        <td className={cn(
-                          "px-6 py-4 text-right text-sm font-bold",
-                          (res.ledgerBalance || 0) > 0.01 ? "text-red-500" : "text-emerald-500"
-                        )}>
-                          {(res.ledgerBalance || 0) > 0.01
-                            ? `${formatCurrency(res.ledgerBalance || 0, currency, exchangeRate)} (Debt)`
-                            : (res.ledgerBalance || 0) < -0.01
-                              ? `${formatCurrency(Math.abs(res.ledgerBalance || 0), currency, exchangeRate)} (Credit)`
-                              : `${formatCurrency(0, currency, exchangeRate)} (Settled)`}
-                        </td>
-                      </tr>
-                    ))}
+                    {individualReservations.slice((resPage - 1) * resPageSize, resPage * resPageSize).map((res) => {
+                      const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
+                      const liveBalance = getReservationLiveBalance(res, hotel || null, resLedger);
+                      return (
+                        <tr key={res.id} className="hover:bg-zinc-900/50 transition-colors">
+                          <td className="px-6 py-4">
+                            <div className="text-sm text-zinc-50 font-medium">{res.guestName}</div>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-zinc-400">
+                            Room {res.roomNumber}
+                          </td>
+                          <td className="px-6 py-4 text-xs text-zinc-400">
+                            {safeFormatDate(res.checkIn, 'MMM d, yyyy')}
+                          </td>
+                          <td className="px-6 py-4 text-xs text-zinc-400">
+                            {safeFormatDate(res.checkOut, 'MMM d, yyyy')}
+                          </td>
+                          <td className={cn(
+                            "px-6 py-4 text-right text-sm font-bold",
+                            liveBalance > 0.01 ? "text-red-500" : "text-emerald-500"
+                          )}>
+                            {liveBalance > 0.01
+                              ? `${formatCurrency(liveBalance, currency, exchangeRate)} (Debt)`
+                              : liveBalance < -0.01
+                                ? `${formatCurrency(Math.abs(liveBalance), currency, exchangeRate)} (Credit)`
+                                : `${formatCurrency(0, currency, exchangeRate)} (Settled)`}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -825,7 +851,7 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
                       </div>
                       <div>
                         <p className="text-xs font-bold text-zinc-500 uppercase">Current Balance</p>
-                        <p className="text-lg font-bold text-red-500">{formatCurrency(currentAccount.currentBalance, currency, exchangeRate)}</p>
+                        <p className="text-lg font-bold text-red-500">{formatCurrency(balance, currency, exchangeRate)}</p>
                       </div>
                     </div>
 

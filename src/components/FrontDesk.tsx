@@ -3,7 +3,7 @@ import { collection, onSnapshot, query, orderBy, doc, getDocs, getDoc, where, wr
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking, LedgerEntry, Promotion } from '../types';
-import { postToLedger, settleLedger, transferToCityLedger, processAutomatedBillingForReservation, deleteReservationWithFinancialReversal, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
+import { postToLedger, settleLedger, transferToCityLedger, processAutomatedBillingForReservation, deleteReservationWithFinancialReversal, reconcileAndRepairReservationFinancials, reconcileCorporateAccountBalance } from '../services/ledgerService';
 import { principalRoomService } from '../services/principalRoomService';
 import { recordOutstandingDebt, checkReturningGuestDebt, syncOutstandingDebtWithReservation } from '../services/debtService';
 import { ReturningGuestDebtModal } from './ReturningGuestDebtModal';
@@ -2051,6 +2051,12 @@ export function FrontDesk() {
             }
           }
         }
+
+        if (res.corporateId) {
+          await reconcileCorporateAccountBalance(hotel.id, res.corporateId).catch(e =>
+            console.warn('[FrontDesk] Post-extension corporate reconciliation notice:', e)
+          );
+        }
       }
 
       await logActivity(
@@ -2686,6 +2692,12 @@ export function FrontDesk() {
           if (guestSnap.exists() && freshResSnap.exists()) {
             // Guest & reservation checkin status updated
           }
+
+          if (res.corporateId) {
+            await reconcileCorporateAccountBalance(hotel.id, res.corporateId).catch(e =>
+              console.warn('[FrontDesk] Post-checkin corporate reconciliation notice:', e)
+            );
+          }
         }
       } else if (status === 'checked_out') {
         // 1. Authoritative financial reconciliation & stay billing before checkout
@@ -2843,6 +2855,12 @@ export function FrontDesk() {
             }
           }).catch(() => {});
           toast.success('Guest checked out successfully.');
+        }
+
+        if (res.corporateId) {
+          await reconcileCorporateAccountBalance(hotel.id, res.corporateId).catch(e =>
+            console.warn('[FrontDesk] Post-checkout corporate reconciliation notice:', e)
+          );
         }
 
         if (outstandingBalance > 0.01 && hotel.settings?.checkout?.autoGenerateOutstandingInvoice) {
