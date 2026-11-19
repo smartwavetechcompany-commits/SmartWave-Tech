@@ -111,7 +111,9 @@ async function startServer() {
   let firebaseConfig: any = null;
 
   try {
-    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    const dirnameConfigPath = path.join(__dirname, 'firebase-applet-config.json');
+    const cwdConfigPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    const configPath = fs.existsSync(dirnameConfigPath) ? dirnameConfigPath : cwdConfigPath;
     if (fs.existsSync(configPath)) {
       firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
       const { initializeApp: initClientApp, getApp: getClientApp, getApps: getClientApps } = await import('firebase/app');
@@ -3414,29 +3416,54 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // Ensure unmatched /api/* endpoints return JSON 404 instead of frontend HTML
+  app.all("/api/*", (_req, res) => {
+    res.status(404).json({ error: "API endpoint not found." });
+  });
+
   const httpServer = http.createServer(app);
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const isHmrDisabled = process.env.DISABLE_HMR === "true";
+  // Resolve frontend production build directory reliably regardless of process.cwd()
+  const candidateDistPaths = [
+    path.join(__dirname, "dist"),
+    path.join(process.cwd(), "dist"),
+  ];
+  const distPath =
+    candidateDistPaths.find((p) => fs.existsSync(path.join(p, "index.html"))) ||
+    candidateDistPaths[0];
+  const distIndexPath = path.join(distPath, "index.html");
+  const hasDistBuild = fs.existsSync(distIndexPath);
+
+  // Vite middleware for development (and safe fallback if production build was skipped by host)
+  if (process.env.NODE_ENV !== "production" || !hasDistBuild) {
+    const isHmrDisabled =
+      process.env.DISABLE_HMR === "true" || process.env.NODE_ENV === "production";
+    if (process.env.NODE_ENV === "production" && !hasDistBuild) {
+      console.warn(
+        `[FRONTEND] Production build not found at ${distIndexPath}. Serving via Vite SPA middleware fallback.`
+      );
+    }
     const vite = await createViteServer({
+      root: __dirname,
       server: {
         middlewareMode: true,
         hmr: isHmrDisabled ? false : { server: httpServer },
+        ...(isHmrDisabled ? { ws: false } : {}),
       },
       appType: "spa",
     });
-    
+
     app.use(vite.middlewares);
   } else {
     // Serve static files from dist in production
-    const distPath = path.join(process.cwd(), 'dist');
-    
     app.use(express.static(distPath));
-    
-    // SPA fallback: serve index.html for all unknown routes
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+
+    // Root route & SPA fallback: serve index.html for all non-API frontend routes
+    app.get(["/", "*"], (req, res, next) => {
+      if (req.path.startsWith("/api/")) {
+        return next();
+      }
+      res.sendFile(distIndexPath);
     });
   }
 

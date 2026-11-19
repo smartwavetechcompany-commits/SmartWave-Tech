@@ -1,4 +1,13 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load .env from the repository root even if the host launches Node from a different cwd
+dotenv.config({ path: path.join(__dirname, ".env") });
+dotenv.config();
 
 // Root deployment entry point for Node.js 22 Express hosting.
 // Reuses the existing Express + Vite application in ./server.ts without duplicating server logic.
