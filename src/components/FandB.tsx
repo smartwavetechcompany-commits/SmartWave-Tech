@@ -4774,9 +4774,9 @@ export function FandB() {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-lg overflow-hidden my-auto shadow-2xl"
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden my-auto shadow-2xl"
           >
-            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between shrink-0">
               <div>
                 <h2 className="text-xl font-bold text-zinc-50 flex items-center gap-2">
                   <DollarSign size={20} className="text-emerald-400" />
@@ -4806,7 +4806,8 @@ export function FandB() {
               const remainingDue = Math.max(0, orderTotal - currentDirectPaid);
 
               return (
-                <form onSubmit={handleSettleOrderPayment} className="p-6 space-y-5">
+                <form onSubmit={handleSettleOrderPayment} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                  <div className="p-6 space-y-5 overflow-y-auto custom-scrollbar flex-1 min-h-0">
                   {/* Order Financial Summary */}
                   <div className="bg-zinc-950 border border-zinc-800/80 rounded-2xl p-4 space-y-2.5">
                     <div className="flex items-center justify-between text-xs">
@@ -4986,8 +4987,10 @@ export function FandB() {
                     />
                   </div>
 
+                  </div>
+
                   {/* Action Buttons */}
-                  <div className="flex items-center gap-3 pt-2">
+                  <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-900 shrink-0 flex items-center gap-3">
                     <button
                       type="button"
                       onClick={() => setSettleOrderModal(null)}
