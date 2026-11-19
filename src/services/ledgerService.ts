@@ -1394,22 +1394,73 @@ export const reconcileAndRepairReservationFinancials = async (
     });
   }
 
-  // Identify any attached tax entries for the purged duplicate charges
+  // Identify any attached tax entries for the purged duplicate charges without deleting taxes
+  // belonging to a retained charge that shares the same description.
   if (duplicateIds.length > 0) {
     const dupEntries = ledgerEntries.filter(e => duplicateIds.includes((e as any).firestoreId || e.id));
+    const retainedNonTaxEntries = ledgerEntries.filter(
+      e => !duplicateIds.includes((e as any).firestoreId || e.id) && e.type === 'debit' && e.category !== 'tax'
+    );
+
     dupEntries.forEach(dup => {
       const dupDesc = dup.description;
-      if (dupDesc) {
-        const matchingTaxes = ledgerEntries!.filter(e => 
-          e.type === 'debit' && 
-          e.category === 'tax' && 
-          e.description && 
-          (e.description.includes(dupDesc) || (dup.id && e.description.includes(dup.id)))
-        );
+      if (!dupDesc) return;
+
+      const matchingTaxes = ledgerEntries!.filter(e =>
+        e.type === 'debit' &&
+        e.category === 'tax' &&
+        e.description &&
+        (e.description.includes(dupDesc) || (dup.id && e.description.includes(dup.id)))
+      );
+
+      const retainedMatch = retainedNonTaxEntries.find(r => r.description === dupDesc);
+      if (!retainedMatch) {
         matchingTaxes.forEach(t => {
           const tId = (t as any).firestoreId || t.id;
           if (tId && !duplicateIds.includes(tId)) {
             duplicateIds.push(tId);
+          }
+        });
+      } else {
+        const dupTime = dup.timestamp ? new Date(dup.timestamp).getTime() : NaN;
+        const retainedTime = retainedMatch.timestamp ? new Date(retainedMatch.timestamp).getTime() : NaN;
+
+        // Group taxes for this description by their tax prefix (before " for ") so we always
+        // preserve at least 1 valid tax entry per tax type for the retained charge.
+        const taxesByPrefix = new Map<string, (LedgerEntry & { firestoreId?: string })[]>();
+        matchingTaxes.forEach(t => {
+          const idx = (t.description || '').toLowerCase().lastIndexOf(' for ');
+          const prefix = idx !== -1 ? (t.description || '').slice(0, idx).trim().toLowerCase() : (t.description || '').trim().toLowerCase();
+          const list = taxesByPrefix.get(prefix) || [];
+          list.push(t);
+          taxesByPrefix.set(prefix, list);
+        });
+
+        taxesByPrefix.forEach(taxList => {
+          if (taxList.length <= 1) return; // Never delete the sole tax entry needed by the retained charge
+          taxList.forEach(t => {
+            const tId = (t as any).firestoreId || t.id;
+            if (!tId || duplicateIds.includes(tId)) return;
+            const tTime = t.timestamp ? new Date(t.timestamp).getTime() : NaN;
+            const matchesDupBatch =
+              t.timestamp === dup.timestamp && t.timestamp !== retainedMatch.timestamp;
+            const closerToDup =
+              !isNaN(tTime) && !isNaN(dupTime) && !isNaN(retainedTime) &&
+              Math.abs(tTime - dupTime) < Math.abs(tTime - retainedTime);
+            if (matchesDupBatch || closerToDup) {
+              duplicateIds.push(tId);
+            }
+          });
+          // If timestamps were identical and none were purged yet, keep only the earliest entry per tax type
+          const remaining = taxList.filter(t => !duplicateIds.includes((t as any).firestoreId || t.id));
+          if (remaining.length > 1) {
+            remaining.sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+            remaining.slice(1).forEach(t => {
+              const tId = (t as any).firestoreId || t.id;
+              if (tId && !duplicateIds.includes(tId)) {
+                duplicateIds.push(tId);
+              }
+            });
           }
         });
       }
@@ -1536,6 +1587,7 @@ export const detectAndPurgeDuplicateOverstayCharges = async (
 
   const overstayDebits = ledgerEntries.filter(e => 
     e.type === 'debit' && 
+    e.category !== 'tax' &&
     (e.chargeType === 'overstay' || (e.description && e.description.toLowerCase().includes('overstay')))
   );
 

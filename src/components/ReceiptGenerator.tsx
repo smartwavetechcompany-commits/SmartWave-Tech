@@ -92,6 +92,151 @@ export function processLedgerTaxes(
   return [...nonTaxEntries, ...result];
 }
 
+/**
+ * Safeguard for receipt accuracy when a posted room or overstay debit was split to its
+ * pre-tax net base (e.g. ₦73,016 from a ₦90,000 inclusive rate) but one or more of its
+ * matching [Inclusive] tax ledger entries are missing from the ledger.
+ * Pure read-only reconciliation for receipt totals/taxes; never mutates stored data or
+ * alters business logic, and only triggers when the posted debit mathematically matches
+ * the exact pre-tax split of its gross rate.
+ */
+export function reconcileMissingRoomInclusiveTaxes(
+  entries: LedgerEntry[],
+  hotel: Hotel | null | undefined,
+  reservation?: Reservation,
+  corporateReservations?: Reservation[]
+): LedgerEntry[] {
+  if (!entries || entries.length === 0 || !hotel?.taxes || hotel.taxes.length === 0) {
+    return entries;
+  }
+
+  const activeRoomInclusiveTaxes = hotel.taxes.filter(t => {
+    const status = (t.status || '').toLowerCase().trim();
+    const category = (t.category || '').toLowerCase().trim();
+    return (
+      status === 'active' &&
+      Boolean(t.isInclusive) &&
+      (t.percentage || 0) > 0 &&
+      category !== 'f & b' &&
+      category !== 'restaurant' &&
+      category !== 'food'
+    );
+  });
+
+  if (activeRoomInclusiveTaxes.length === 0) {
+    return entries;
+  }
+
+  const taxFractionSum = activeRoomInclusiveTaxes.reduce(
+    (sum, t) => sum + (t.percentage / (100 + t.percentage)),
+    0
+  );
+  if (taxFractionSum <= 0 || taxFractionSum >= 1) {
+    return entries;
+  }
+
+  const existingTaxDebits = entries.filter(
+    e => e.type === 'debit' && getSafeStr(e.category).toLowerCase() === 'tax'
+  );
+
+  const synthesizedTaxes: LedgerEntry[] = [];
+
+  for (const entry of entries) {
+    if (entry.type !== 'debit') continue;
+    const cat = getSafeStr(entry.category).toLowerCase();
+    const isRoomCharge =
+      cat === 'room' ||
+      entry.chargeType === 'room_rate' ||
+      entry.chargeType === 'overstay';
+    if (!isRoomCharge || !(entry.amount > 0)) continue;
+
+    const entryDesc = getSafeStr(entry.description).toLowerCase().trim();
+    const entryTime = entry.timestamp ? parseTimestampToDate(entry.timestamp).getTime() : NaN;
+
+    // Identify which active inclusive taxes are already present for this room debit
+    const missingTaxes = activeRoomInclusiveTaxes.filter(tax => {
+      const taxNameLower = (tax.name || '').toLowerCase().trim();
+      const hasMatchingTax = existingTaxDebits.some(t => {
+        const tDesc = getSafeStr(t.description).toLowerCase();
+        if (!tDesc.includes('inclusive')) return false;
+        if (taxNameLower && !tDesc.includes(taxNameLower)) return false;
+
+        const forIndex = tDesc.lastIndexOf(' for ');
+        if (forIndex === -1) return false;
+        const parentDesc = tDesc.slice(forIndex + 5).trim();
+        const descMatches =
+          parentDesc.length > 0 &&
+          (entryDesc === parentDesc || parentDesc.includes(entryDesc) || entryDesc.includes(parentDesc));
+        if (!descMatches) return false;
+
+        if (entry.timestamp === t.timestamp) return true;
+        if (!isNaN(entryTime) && t.timestamp) {
+          const tTime = parseTimestampToDate(t.timestamp).getTime();
+          if (!isNaN(tTime)) {
+            return Math.abs(entryTime - tTime) < 5000;
+          }
+        }
+        return true;
+      });
+      return !hasMatchingTax;
+    });
+
+    if (missingTaxes.length === 0) continue;
+
+    // Resolve candidate gross nightly rates for this debit
+    const matchedRes =
+      reservation && (!entry.reservationId || entry.reservationId === reservation.id)
+        ? reservation
+        : corporateReservations?.find(r => r.id === entry.reservationId);
+
+    const candidateGrossRates: number[] = [];
+    const appliedRate = Number((entry as any).appliedNightlyRate || 0);
+    if (appliedRate > 0) candidateGrossRates.push(appliedRate);
+
+    if (matchedRes) {
+      const engineRate = BillingEngine.getNightlyRate(matchedRes, hotel, entries);
+      if (engineRate > 0 && !candidateGrossRates.includes(engineRate)) {
+        candidateGrossRates.push(engineRate);
+      }
+      const snapshotRates = matchedRes.rateSnapshot?.nightlyRates || [];
+      snapshotRates.forEach(sn => {
+        if (sn.rate > 0 && !candidateGrossRates.includes(sn.rate)) {
+          candidateGrossRates.push(sn.rate);
+        }
+      });
+    }
+
+    // Only recover missing inclusive taxes when entry.amount matches the pre-tax split of a valid gross rate
+    const matchedGross = candidateGrossRates.find(gross => {
+      if (gross <= entry.amount + 0.5) return false;
+      const expectedPreTax = gross * (1 - taxFractionSum);
+      const tolerance = Math.max(2, gross * 0.005);
+      return Math.abs(entry.amount - expectedPreTax) <= tolerance;
+    });
+
+    if (!matchedGross) continue;
+
+    for (const tax of missingTaxes) {
+      const taxAmount = matchedGross - (matchedGross / (1 + tax.percentage / 100));
+      synthesizedTaxes.push({
+        id: `reconciled-tax-${entry.id || entryDesc}-${tax.id || tax.name}`,
+        hotelId: entry.hotelId || hotel.id,
+        guestId: entry.guestId || matchedRes?.guestId || '',
+        reservationId: entry.reservationId || matchedRes?.id,
+        corporateId: entry.corporateId,
+        type: 'debit',
+        category: 'tax',
+        amount: taxAmount,
+        description: `${tax.name} (${tax.percentage}%) [Inclusive] for ${getSafeStr(entry.description)}`,
+        timestamp: entry.timestamp,
+        postedBy: entry.postedBy || 'system'
+      });
+    }
+  }
+
+  return synthesizedTaxes.length > 0 ? [...entries, ...synthesizedTaxes] : entries;
+}
+
 interface ReceiptProps {
   hotel: Hotel;
   reservation?: Reservation;
@@ -170,9 +315,14 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
         return !e.corporateId || e.type === 'credit';
       })
     : activeLedger;
-  
+
+  // Recover any missing [Inclusive] tax entries for posted pre-tax room/overstay debits
+  const reconciledEntries = type === 'restaurant'
+    ? filteredEntries
+    : reconcileMissingRoomInclusiveTaxes(filteredEntries, hotel, reservation, activeCorpReservations);
+
   // Merge hidden taxes into their parent entries based on active settings
-  const processedEntries = processLedgerTaxes(filteredEntries, hotel.taxes || [], 'showOnReceipt');
+  const processedEntries = processLedgerTaxes(reconciledEntries, hotel.taxes || [], 'showOnReceipt');
   
   const debits = processedEntries.filter(e => e.type === 'debit');
   const chargeDebits = debits.filter(e => getSafeStr(e.category).toLowerCase() !== 'refund');
@@ -231,12 +381,12 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
 
   let unpostedRoomBase = 0;
   if (reservation && type !== 'restaurant') {
-    const resAccount = calculateReservationAccount(reservation, hotel, filteredEntries);
+    const resAccount = calculateReservationAccount(reservation, hotel, reconciledEntries);
     const totalNights = resAccount.totalNights || reservation.nights || 1;
     const bookedNightsCount = resAccount.bookingNights || reservation.nights || 1;
     // Reconstruct gross room charges (with any inclusive taxes merged back onto room entries)
     // so comparing against tax-inclusive expectedTotalRoom never double-counts posted inclusive taxes.
-    const reconstructedEntries = BillingEngine.reconstructInclusiveTaxes(filteredEntries);
+    const reconstructedEntries = BillingEngine.reconstructInclusiveTaxes(reconciledEntries);
     const reconstructedRoomDebits = reconstructedEntries.filter(
       e => e.type === 'debit' && (getSafeStr(e.category).toLowerCase() === 'room' || e.chargeType === 'room_rate' || e.chargeType === 'overstay')
     );
@@ -245,7 +395,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       : roomDebits.reduce((sum, e) => sum + (e.amount || 0), 0);
 
     if (reservation.status !== 'checked_out' && totalNights > postedNightsCount) {
-      const expectedTotalRoom = calculateBookedRoomTotal(reservation, bookedNightsCount, hotel, filteredEntries) + (resAccount.totalOverstayCharges || 0);
+      const expectedTotalRoom = calculateBookedRoomTotal(reservation, bookedNightsCount, hotel, reconciledEntries) + (resAccount.totalOverstayCharges || 0);
       unpostedRoomBase = Math.max(0, Number((expectedTotalRoom - postedRoomAmount).toFixed(2)));
     } else if (postedNightsCount === 0 && (reservation.totalAmount || 0) > 0) {
       const stayTaxTotal = reservation.taxAmount || 0;
