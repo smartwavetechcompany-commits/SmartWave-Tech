@@ -748,12 +748,20 @@ export function Dashboard() {
     toast.success('Transactions exported successfully');
   };
 
-  const getOverviewRoomBreakdown = () => [
-    { label: 'Vacant Clean', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'clean').length },
-    { label: 'Occupied', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length },
-    { label: 'Dirty', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'dirty').length },
-    { label: 'Maintenance', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'maintenance').length },
-  ];
+  const getOverviewRoomBreakdown = () => {
+    const statuses = rooms.map(r => getRoomDisplayStatus(r, activeReservations, blockings));
+    return [
+      { label: 'Vacant Clean', count: statuses.filter(s => s === 'clean' || s === 'vacant').length, color: 'bg-emerald-500' },
+      { label: 'Occupied', count: statuses.filter(s => s === 'occupied').length, color: 'bg-blue-500' },
+      { label: 'Reserved', count: statuses.filter(s => s === 'reserved').length, color: 'bg-indigo-500' },
+      { label: 'Dirty', count: statuses.filter(s => s === 'dirty').length, color: 'bg-red-500' },
+      { label: 'Cleaning', count: statuses.filter(s => s === 'cleaning').length, color: 'bg-purple-500' },
+      { label: 'Inspected', count: statuses.filter(s => s === 'inspected').length, color: 'bg-cyan-500' },
+      { label: 'Maintenance', count: statuses.filter(s => s === 'maintenance').length, color: 'bg-amber-500' },
+      { label: 'Out of Order', count: statuses.filter(s => s === 'out_of_order').length, color: 'bg-zinc-400' },
+      { label: 'Out of Service', count: statuses.filter(s => s === 'out_of_service').length, color: 'bg-slate-500' },
+    ];
+  };
 
   const handleExportOverviewPDF = () => {
     const todayLabel = format(new Date(), 'yyyy-MM-dd');
@@ -1118,12 +1126,7 @@ export function Dashboard() {
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
             <h3 className="font-bold text-zinc-50 mb-6">Room Status</h3>
             <div className="space-y-4">
-              {[
-                { label: 'Vacant Clean', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'clean').length, color: 'bg-emerald-500' },
-                { label: 'Occupied', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'occupied').length, color: 'bg-blue-500' },
-                { label: 'Dirty', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'dirty').length, color: 'bg-red-500' },
-                { label: 'Maintenance', count: rooms.filter(r => getRoomDisplayStatus(r, activeReservations, blockings) === 'maintenance').length, color: 'bg-amber-500' },
-              ].map(item => (
+              {getOverviewRoomBreakdown().map(item => (
                 <div key={item.label} className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-zinc-400">{item.label}</span>
