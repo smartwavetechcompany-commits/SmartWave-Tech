@@ -10,7 +10,7 @@ import { DEFAULT_SETTINGS } from '../constants';
 import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle, Mail, ShieldAlert, Building2 } from 'lucide-react';
 import { cn } from '../utils';
 import { playNotificationSound } from '../utils/notificationSound';
-import { notifyTrackingCodeRequestAlert } from '../services/transactionalEmailClient';
+import { notifyTrackingCodeRequestAlert, notifyPlatformEvent } from '../services/transactionalEmailClient';
 
 interface AuthPageProps {
   initialEmail?: string;
@@ -566,6 +566,19 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
           handleFirestoreError(err, OperationType.CREATE, 'registration');
         }
         
+        if (!existingStaffProfile && hotelId) {
+          try {
+            void notifyPlatformEvent({
+              hotelId,
+              eventType: 'hotel.registered',
+              entityId: hotelId,
+              metadata: { plan: selectedPlan },
+            });
+          } catch (emailErr) {
+            console.warn('[AuthPage] Hotel registration email trigger skipped:', emailErr);
+          }
+        }
+
         showNotification('Registration successful!');
       }
     } catch (err: any) {

@@ -41,7 +41,7 @@ export interface ResendSendResult {
 }
 
 const DEFAULT_RESEND_FROM_EMAIL = "onboarding@resend.dev";
-const DEFAULT_RESEND_FROM_NAME = "Tidé Hotels & Resorts";
+const DEFAULT_RESEND_FROM_NAME = "Hotel Notifications";
 const MAX_TOTAL_ATTACHMENT_BYTES = 5 * 1024 * 1024; // 5 MB safety limit
 const MAX_DEDUP_ENTRIES = 2000;
 const EXPLICIT_KEY_TTL_MS = 5 * 60 * 1000; // 5 minutes for explicit idempotency keys
@@ -66,8 +66,8 @@ export function isResendConfigured(): boolean {
 }
 
 /**
- * Parses either a plain email ("no-reply@tidehotels.de") or a named mailbox
- * ("Tidé Hotels <no-reply@tidehotels.de>" / "\"Tidé Hotels & Resorts\" <no-reply@tidehotels.de>").
+ * Parses either a plain email ("notifications@mail.example.com") or a named mailbox
+ * ("Hotel Notifications <notifications@mail.example.com>").
  */
 export function parseMailboxString(raw?: string): {
   email: string | null;
@@ -282,7 +282,7 @@ function getResendClient(): Resend | null {
 /**
  * Isolated server-side Resend email dispatch helper.
  * - Reads RESEND_API_KEY and RESEND_FROM_EMAIL exclusively from server environment variables.
- * - Supports plain and named sender formats (e.g. "Tidé Hotels <no-reply@tidehotels.de>").
+ * - Supports plain and named sender formats (e.g. "Hotel Notifications <notifications@mail.example.com>").
  * - Auto-generates plain-text fallback when not supplied.
  * - Prevents duplicate email dispatches on retried requests via bounded idempotency cache + Resend Idempotency-Key.
  * - Clearly distinguishes provider acceptance ('accepted_by_provider') from recipient inbox delivery.
@@ -317,7 +317,7 @@ export async function sendEmailWithResend(
 
   const safeSubject = sanitizeEmailHeaderValue(
     params.subject,
-    "Tidé Hotels & Resorts Notification"
+    "Hotel Platform Notification"
   );
   const fromIdentity = getResendFromIdentity(params.fromEmail, params.fromName);
 

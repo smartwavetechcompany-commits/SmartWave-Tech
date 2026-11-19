@@ -14,6 +14,7 @@ import {
   isRoomRestaurantPostingBlocked,
   RESTAURANT_POSTING_BLOCKED_MESSAGE,
 } from '../utils/restaurantPostingGuard';
+import { notifyPlatformEvent } from './transactionalEmailClient';
 
 /**
  * Distinguishes corporate account credits (corporate payments, bulk settlements, deposits, or adjustments)
@@ -580,6 +581,28 @@ export const postToLedger = async (
     await reconcileCorporateAccountBalance(hotelId, finalCorporateId).catch(() => {});
   }
 
+  // Additive: Trigger refund confirmation notification when a refund entry is posted
+  if (entry.type === 'debit' && entry.category === 'refund' && entry.amount > 0 && postedIds[0]) {
+    try {
+      void notifyPlatformEvent({
+        hotelId,
+        eventType: 'refund.processed',
+        entityId: postedIds[0],
+        reservationId: reservationId && reservationId !== 'CORPORATE_SETTLEMENT' ? reservationId : undefined,
+        guestId: guestId || undefined,
+        corporateId: finalCorporateId || undefined,
+        metadata: {
+          amount: entry.amount,
+          paymentMethod: entry.paymentMethod || paymentMethod,
+          reason: (entry as any).refundReason || entry.description,
+          reference: entry.referenceCode || postedIds[0],
+        },
+      });
+    } catch {
+      // Non-blocking
+    }
+  }
+
   return { id: postedIds[0], ...mainEntry };
 };
 
@@ -967,6 +990,27 @@ export const settleLedger = async (
     'Front Desk Folio Settlement'
   );
 
+  // Additive: Trigger payment confirmation / receipt notification after settlement succeeds
+  if (amount > 0 && result?.id) {
+    try {
+      void notifyPlatformEvent({
+        hotelId,
+        eventType: 'payment.received',
+        entityId: result.id,
+        reservationId: reservationId && reservationId !== 'CORPORATE_SETTLEMENT' ? reservationId : undefined,
+        guestId: guestId || undefined,
+        corporateId: corporateId || undefined,
+        metadata: {
+          amount,
+          paymentMethod,
+          reference: referenceCode || result.id,
+        },
+      });
+    } catch {
+      // Non-blocking
+    }
+  }
+
   return result;
 };
 
@@ -1176,6 +1220,26 @@ export const transferToCityLedger = async (
       })
     )
     .catch(() => {});
+
+  // Additive: Notify corporate contact & finance staff of City Ledger transfer
+  if (corporateId && amount > 0) {
+    try {
+      void notifyPlatformEvent({
+        hotelId,
+        eventType: 'corporate.city_ledger_transfer',
+        reservationId,
+        guestId: guestId || undefined,
+        corporateId,
+        idempotencyKey: `cl_${reservationId}_${corporateId}_${Math.round(amount * 100)}`,
+        metadata: {
+          amount,
+          reference: reservationId.slice(0, 8).toUpperCase(),
+        },
+      });
+    } catch {
+      // Non-blocking
+    }
+  }
 };
 
 export const transferCorporateBalance = async (

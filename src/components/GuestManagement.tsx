@@ -9,6 +9,7 @@ import { calculateBilling, getReservationLiveBalance } from '../utils/billingEng
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay, safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
 import { calculateGuestFinancialPosition } from '../services/financialService';
+import { notifyPlatformEvent } from '../services/transactionalEmailClient';
 import { 
   Users, 
   Plus, 
@@ -578,6 +579,29 @@ export function GuestManagement() {
           details: `Updated guest: ${newGuest.name}`
         });
 
+        const wasBlacklisted = (editingGuest.tags || []).some((t) =>
+          String(t).toLowerCase().includes('blacklist')
+        );
+        const isNowBlacklisted = (newGuest.tags || []).some((t) =>
+          String(t).toLowerCase().includes('blacklist')
+        );
+        if (isNowBlacklisted && !wasBlacklisted) {
+          try {
+            void notifyPlatformEvent({
+              hotelId: hotel.id,
+              eventType: 'guest.blacklisted',
+              guestId: editingGuest.id,
+              entityId: editingGuest.id,
+              idempotencyKey: `guest-blacklist:${hotel.id}:${editingGuest.id}:${Date.now()}`,
+              metadata: {
+                reason: newGuest.notes || 'Guest flagged as blacklisted',
+              },
+            });
+          } catch {
+            // Non-blocking email dispatch
+          }
+        }
+
         // CHECK IF CORPORATE ACCOUNT HAS CHANGED OR ASSIGNED
         const oldCorpId = editingGuest.corporateId || '';
         const newCorpId = newGuest.corporateId || '';
@@ -608,7 +632,7 @@ export function GuestManagement() {
           }
         }
       } else {
-        await database.safeAdd(collection(db, 'hotels', hotel.id, 'guests'), {
+        const createdGuestRef = await database.safeAdd(collection(db, 'hotels', hotel.id, 'guests'), {
           ...newGuest,
           totalStays: hotel?.settings?.guests?.allowLoyaltyEditing ? (newGuest.totalStays || 0) : 0,
           totalNights: 0,
@@ -622,6 +646,21 @@ export function GuestManagement() {
           action: 'GUEST_CREATED',
           details: `Created new guest: ${newGuest.name}`
         });
+
+        const createdGuestId = (createdGuestRef as any)?.id;
+        if (createdGuestId && newGuest.email) {
+          try {
+            void notifyPlatformEvent({
+              hotelId: hotel.id,
+              eventType: 'guest.profile_created',
+              guestId: createdGuestId,
+              entityId: createdGuestId,
+              idempotencyKey: `guest-created:${hotel.id}:${createdGuestId}`,
+            });
+          } catch {
+            // Non-blocking email dispatch
+          }
+        }
       }
 
       // Log action for UI visibility

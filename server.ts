@@ -35,6 +35,23 @@ import {
   buildBookingCancellationEmail,
   buildTrackingCodeRequestAlertEmail,
 } from "./src/services/emailService.ts";
+import {
+  type MultiTenantEmailEventType,
+  type EmailRecipientAudience,
+  type EmailSummaryRow,
+  resolveHotelBrandContext,
+  resolvePlatformBrandContext,
+  isHotelEmailEventEnabled,
+  resolveHotelOperationalRecipients,
+  resolvePlatformAdminRecipients,
+  resolveTrackingCodeAlertRecipients,
+  renderMultiTenantEmail,
+  verifyResendWebhookSignature,
+  recordEmailDeliveryLog,
+  updateEmailDeliveryStatusFromWebhook,
+  getTenantEmailLogs,
+  sanitizeEmailList,
+} from "./src/services/multiTenantEmailService.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -88,10 +105,20 @@ async function startServer() {
     next();
   });
 
-  app.use(express.json({ limit: "2mb" }));
+  app.use(
+    express.json({
+      limit: "2mb",
+      verify: (req: any, _res, buf) => {
+        if (typeof req.originalUrl === "string" && req.originalUrl.startsWith("/api/webhooks/resend")) {
+          req.rawBody = buf.toString("utf8");
+        }
+      },
+    })
+  );
 
   // Bounded in-memory rate limiting for API routes (prevents brute force and memory exhaustion)
   const apiRateLimiter = new BoundedRateLimiter(5000);
+  const userEmailRateLimiter = new BoundedRateLimiter(5000);
   const STRICT_AUTH_PATHS = new Set([
     "/auth/validate-token",
     "/auth/validate-reset-token",
@@ -104,6 +131,7 @@ async function startServer() {
     "/emails/send",
     "/emails/reservation-event",
     "/emails/tracking-code-request-alert",
+    "/notifications/events",
   ]);
   app.use("/api/", (req, res, next) => {
     // Exempt health check
@@ -692,7 +720,7 @@ async function startServer() {
     deliveryState?: string;
     errorSummary?: string;
   }> {
-    const safeFromName = sanitizeEmailHeaderValue(fromName, "Tidé Hotels & Resorts");
+    const safeFromName = sanitizeEmailHeaderValue(fromName, "Hotel Notifications");
     const safeSubject = sanitizeEmailHeaderValue(subject, "PMS Notification");
     let emailDispatched = false;
     let method = 'simulated';
@@ -3579,11 +3607,38 @@ async function startServer() {
     }
   });
 
-  // Helper: Read a Firestore document server-side (Firestore REST API with optional caller token, falling back to SDK)
-  async function readFirestoreDocServerSide(
+  // Helper: Encode JS values to Firestore REST API Value format (no Admin SDK / service account required)
+  function encodeFirestoreValue(val: any): Record<string, any> {
+    if (val === null || val === undefined) return { nullValue: null };
+    if (typeof val === "boolean") return { booleanValue: val };
+    if (typeof val === "number") {
+      return Number.isInteger(val) ? { integerValue: String(val) } : { doubleValue: val };
+    }
+    if (typeof val === "string") return { stringValue: val };
+    if (Array.isArray(val)) {
+      return {
+        arrayValue: {
+          values: val.filter((item) => item !== undefined).map((item) => encodeFirestoreValue(item)),
+        },
+      };
+    }
+    if (typeof val === "object") {
+      const fields: Record<string, any> = {};
+      for (const [k, v] of Object.entries(val)) {
+        if (v !== undefined) {
+          fields[k] = encodeFirestoreValue(v);
+        }
+      }
+      return { mapValue: { fields } };
+    }
+    return { stringValue: String(val) };
+  }
+
+  // Helper: Read a Firestore document with metadata (updateTime for optimistic concurrency)
+  async function readFirestoreDocWithMetaServerSide(
     docPath: string,
     bearerToken?: string
-  ): Promise<Record<string, any> | null> {
+  ): Promise<{ data: Record<string, any>; updateTime?: string; name?: string } | null> {
     if (firebaseConfig?.projectId) {
       try {
         const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
@@ -3605,7 +3660,11 @@ async function startServer() {
             for (const [k, v] of Object.entries(fsDoc.fields)) {
               decoded[k] = decodeFirestoreValue(v);
             }
-            return decoded;
+            return {
+              data: decoded,
+              updateTime: typeof fsDoc.updateTime === "string" ? fsDoc.updateTime : undefined,
+              name: typeof fsDoc.name === "string" ? fsDoc.name : undefined,
+            };
           }
         }
       } catch {
@@ -3620,7 +3679,7 @@ async function startServer() {
           const { doc, getDoc } = await import("firebase/firestore");
           const snap = await getDoc(doc(db, segments[0], ...segments.slice(1)));
           if (snap.exists()) {
-            return snap.data() as Record<string, any>;
+            return { data: snap.data() as Record<string, any> };
           }
         }
       } catch {
@@ -3631,36 +3690,279 @@ async function startServer() {
     return null;
   }
 
-  // Bounded in-memory deduplication for transactional email events (defense-in-depth alongside Resend idempotency keys)
+  // Helper: Read a Firestore document server-side
+  async function readFirestoreDocServerSide(
+    docPath: string,
+    bearerToken?: string
+  ): Promise<Record<string, any> | null> {
+    const res = await readFirestoreDocWithMetaServerSide(docPath, bearerToken);
+    return res ? res.data : null;
+  }
+
+  // Helper: Conditional PATCH on Firestore document via authenticated REST API (optimistic concurrency via updateTime)
+  async function patchFirestoreFieldsServerSide(
+    docPath: string,
+    nestedFields: Record<string, any>,
+    fieldPaths: string[],
+    bearerToken: string,
+    expectedUpdateTime?: string
+  ): Promise<{ ok: boolean; status: number; updateTime?: string }> {
+    if (!firebaseConfig?.projectId || !bearerToken) {
+      return { ok: false, status: 500 };
+    }
+    try {
+      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+      const encodedPath = docPath
+        .split("/")
+        .filter(Boolean)
+        .map((seg) => encodeURIComponent(seg))
+        .join("/");
+      const params = new URLSearchParams();
+      for (const fp of fieldPaths) {
+        params.append("updateMask.fieldPaths", fp);
+      }
+      if (expectedUpdateTime) {
+        params.append("currentDocument.updateTime", expectedUpdateTime);
+      }
+      const restUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/${encodedPath}?${params.toString()}`;
+      const encodedFields: Record<string, any> = {};
+      for (const [k, v] of Object.entries(nestedFields)) {
+        if (v !== undefined) {
+          encodedFields[k] = encodeFirestoreValue(v);
+        }
+      }
+      const fsResp = await fetch(restUrl, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${bearerToken}`,
+        },
+        body: JSON.stringify({ fields: encodedFields }),
+      });
+      if (!fsResp.ok) {
+        return { ok: false, status: fsResp.status };
+      }
+      const out = await fsResp.json().catch(() => ({}));
+      return {
+        ok: true,
+        status: fsResp.status,
+        updateTime: typeof out?.updateTime === "string" ? out.updateTime : undefined,
+      };
+    } catch {
+      return { ok: false, status: 500 };
+    }
+  }
+
+  // Helper: Persist tenant-isolated email log document into hotels/{hotelId}/emailNotifications/{logId}
+  async function persistTenantEmailLogToFirestore(
+    hotelId: string,
+    logId: string,
+    payload: Record<string, any>,
+    bearerToken?: string
+  ): Promise<void> {
+    if (!firebaseConfig?.projectId || !isSafeIdentifier(hotelId) || !isSafeIdentifier(logId)) {
+      return;
+    }
+    try {
+      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+      const collectionPath =
+        hotelId === "SYSTEM"
+          ? "systemLogs"
+          : `hotels/${encodeURIComponent(hotelId)}/emailNotifications`;
+      const restUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/${collectionPath}?documentId=${encodeURIComponent(logId)}`;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (bearerToken) {
+        headers.Authorization = `Bearer ${bearerToken}`;
+      }
+      const encodedFields: Record<string, any> = {};
+      for (const [k, v] of Object.entries(payload)) {
+        if (v !== undefined) {
+          encodedFields[k] = encodeFirestoreValue(v);
+        }
+      }
+      await fetch(restUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ fields: encodedFields }),
+      }).catch(() => {});
+    } catch {
+      // Non-blocking audit log persistence
+    }
+  }
+
+  // Helper: Query active staff/admins belonging strictly to a specific hotelId (strict tenant isolation)
+  async function queryHotelStaffUsersServerSide(
+    hotelId: string,
+    bearerToken?: string
+  ): Promise<Array<{ uid?: string; email?: string; role?: string; staffRole?: string; roles?: string[]; status?: string }>> {
+    if (!firebaseConfig?.projectId || !isSafeIdentifier(hotelId)) return [];
+    try {
+      const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+      const queryUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents:runQuery`;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (bearerToken) {
+        headers.Authorization = `Bearer ${bearerToken}`;
+      }
+      const body = {
+        structuredQuery: {
+          from: [{ collectionId: "users" }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: "hotelId" },
+              op: "EQUAL",
+              value: { stringValue: hotelId },
+            },
+          },
+          limit: 100,
+        },
+      };
+      const resp = await fetch(queryUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) return [];
+      const rows = await resp.json();
+      if (!Array.isArray(rows)) return [];
+      const results: Array<{ uid?: string; email?: string; role?: string; staffRole?: string; roles?: string[]; status?: string }> = [];
+      for (const row of rows) {
+        if (row?.document?.fields) {
+          const decoded: Record<string, any> = {};
+          for (const [k, v] of Object.entries(row.document.fields)) {
+            decoded[k] = decodeFirestoreValue(v);
+          }
+          // Enforce strict tenant isolation in-code too
+          if (String(decoded.hotelId || decoded.hotel_id || "") === hotelId) {
+            results.push(decoded);
+          }
+        }
+      }
+      return results;
+    } catch {
+      return [];
+    }
+  }
+
+  // Bounded in-memory deduplication & in-flight locks for transactional email events
   const sentTransactionalEventKeys = new Map<string, number>();
+  const inFlightTransactionalKeys = new Set<string>();
   const TRANSACTIONAL_DEDUPE_TTL_MS = 24 * 60 * 60 * 1000;
-  function markTransactionalEventIfNew(eventKey: string): boolean {
-    const now = Date.now();
+  function hasRecentTransactionalEvent(eventKey: string): boolean {
     const existing = sentTransactionalEventKeys.get(eventKey);
-    if (existing && now - existing < TRANSACTIONAL_DEDUPE_TTL_MS) {
+    if (!existing) return false;
+    if (Date.now() - existing >= TRANSACTIONAL_DEDUPE_TTL_MS) {
+      sentTransactionalEventKeys.delete(eventKey);
       return false;
     }
+    return true;
+  }
+  function markTransactionalEventSent(eventKey: string): void {
     if (sentTransactionalEventKeys.size >= 5000) {
       const oldestKey = sentTransactionalEventKeys.keys().next().value;
       if (oldestKey) sentTransactionalEventKeys.delete(oldestKey);
     }
-    sentTransactionalEventKeys.set(eventKey, now);
-    return true;
+    sentTransactionalEventKeys.set(eventKey, Date.now());
   }
 
-  // API Route: Dedicated Server-Built Transactional Reservation Email (Confirmation & Cancellation)
-  app.post("/api/emails/reservation-event", async (req, res) => {
+  function formatMoneyForEmail(amount: unknown, currency = "NGN"): string {
+    const num = Number(amount);
+    if (!Number.isFinite(num)) return "";
+    return `${currency} ${num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  // Shared handler for dedicated server-built reservation notifications (confirmation, checked_in, checked_out, cancelled, no_show)
+  async function handleReservationNotification(
+    req: express.Request,
+    res: express.Response,
+    reservationId: string,
+    rawEvent: string,
+    requestedHotelId?: string
+  ) {
     const caller = await requireAuth(req, res);
     if (!caller) return;
 
-    const { hotelId, reservationId, eventType } = req.body || {};
+    // Per-user rate limit (max 30 reservation notification dispatches per minute per user)
+    const userLimit = userEmailRateLimiter.check(`res_notify:${caller.uid}`, 30, 60_000);
+    if (!userLimit.allowed) {
+      return res.status(429).json({
+        error: "Too many email notification requests for this user. Please wait shortly.",
+        retryAfterMs: userLimit.retryAfterMs,
+      });
+    }
+
+    const callerHotelId =
+      typeof caller.profile?.hotelId === "string" && caller.profile.hotelId.trim()
+        ? caller.profile.hotelId.trim()
+        : typeof caller.profile?.hotel_id === "string" && caller.profile.hotel_id.trim()
+          ? caller.profile.hotel_id.trim()
+          : "";
+    const hotelId =
+      typeof requestedHotelId === "string" && requestedHotelId.trim()
+        ? requestedHotelId.trim()
+        : callerHotelId;
 
     if (!isSafeIdentifier(hotelId) || !isSafeIdentifier(reservationId)) {
       return res.status(400).json({ error: "Valid hotelId and reservationId are required." });
     }
 
-    if (eventType !== "booking_confirmation" && eventType !== "booking_cancellation") {
-      return res.status(400).json({ error: "Unsupported reservation email eventType." });
+    const normalizedEventMap: Record<
+      string,
+      {
+        canonical: "confirmation" | "checked_in" | "checked_out" | "cancelled" | "no_show";
+        fullType: MultiTenantEmailEventType;
+        markerKey: "confirmation" | "checkedIn" | "checkedOut" | "cancelled" | "noShow";
+        audience: EmailRecipientAudience;
+      }
+    > = {
+      confirmation: {
+        canonical: "confirmation",
+        fullType: "reservation.confirmed",
+        markerKey: "confirmation",
+        audience: "guest",
+      },
+      booking_confirmation: {
+        canonical: "confirmation",
+        fullType: "reservation.confirmed",
+        markerKey: "confirmation",
+        audience: "guest",
+      },
+      checked_in: {
+        canonical: "checked_in",
+        fullType: "reservation.checked_in",
+        markerKey: "checkedIn",
+        audience: "guest",
+      },
+      checked_out: {
+        canonical: "checked_out",
+        fullType: "reservation.checked_out",
+        markerKey: "checkedOut",
+        audience: "guest",
+      },
+      cancelled: {
+        canonical: "cancelled",
+        fullType: "reservation.cancelled",
+        markerKey: "cancelled",
+        audience: "guest",
+      },
+      booking_cancellation: {
+        canonical: "cancelled",
+        fullType: "reservation.cancelled",
+        markerKey: "cancelled",
+        audience: "guest",
+      },
+      no_show: {
+        canonical: "no_show",
+        fullType: "reservation.no_show",
+        markerKey: "noShow",
+        audience: "hotel_staff",
+      },
+    };
+
+    const eventSpec = normalizedEventMap[String(rawEvent || "").trim()];
+    if (!eventSpec) {
+      return res.status(400).json({
+        error: "Unsupported reservation notification event. Expected confirmation, checked_in, checked_out, cancelled, or no_show.",
+      });
     }
 
     if (!isSuperAdminCaller(caller) && !callerIsHotelStaff(caller, hotelId)) {
@@ -3678,30 +3980,37 @@ async function startServer() {
       });
     }
 
+    const dedupeKey = `res-notify:${hotelId}:${reservationId}:${eventSpec.canonical}`;
+    if (inFlightTransactionalKeys.has(dedupeKey) || hasRecentTransactionalEvent(dedupeKey)) {
+      return res.status(200).json({
+        success: true,
+        skipped: true,
+        reason: "Notification already dispatched or in progress for this reservation event.",
+      });
+    }
+
+    inFlightTransactionalKeys.add(dedupeKey);
     try {
-      const reservation = await readFirestoreDocServerSide(
+      const resMeta = await readFirestoreDocWithMetaServerSide(
         `hotels/${hotelId}/reservations/${reservationId}`,
         caller.idToken
       );
 
-      if (!reservation) {
+      if (!resMeta || !resMeta.data) {
         return res.status(404).json({ error: "Reservation not found." });
       }
+      const reservation = resMeta.data;
 
       if (reservation.hotelId && String(reservation.hotelId) !== hotelId) {
-        return res.status(403).json({ error: "Forbidden: Reservation does not belong to the specified hotel." });
-      }
-
-      const currentStatus = String(reservation.status || "").toLowerCase();
-      if (eventType === "booking_cancellation" && currentStatus !== "cancelled") {
-        return res.status(409).json({
-          success: false,
-          skipped: true,
-          error: "Cancellation email can only be sent for a cancelled reservation.",
+        return res.status(403).json({
+          error: "Forbidden: Reservation does not belong to the specified hotel.",
         });
       }
+
+      // Confirm CURRENT reservation status matches the requested event
+      const currentStatus = String(reservation.status || "").toLowerCase();
       if (
-        eventType === "booking_confirmation" &&
+        eventSpec.canonical === "confirmation" &&
         (currentStatus === "cancelled" || currentStatus === "no_show")
       ) {
         return res.status(409).json({
@@ -3710,52 +4019,99 @@ async function startServer() {
           error: "Confirmation email cannot be sent for a cancelled or no-show reservation.",
         });
       }
-
-      let guestEmail = typeof reservation.guestEmail === "string" ? reservation.guestEmail.trim() : "";
-      if (!guestEmail && typeof reservation.guestId === "string" && isSafeIdentifier(reservation.guestId)) {
-        const guestDoc = await readFirestoreDocServerSide(
-          `hotels/${hotelId}/guests/${reservation.guestId}`,
-          caller.idToken
-        );
-        if (guestDoc && typeof guestDoc.email === "string") {
-          guestEmail = guestDoc.email.trim();
-        }
-      }
-
-      if (!guestEmail || !isValidEmailAddress(guestEmail)) {
-        return res.status(200).json({
-          success: true,
+      if (eventSpec.canonical === "checked_in" && currentStatus !== "checked_in") {
+        return res.status(409).json({
+          success: false,
           skipped: true,
-          reason: "Guest does not have a valid email address on file.",
+          error: "Check-in email can only be sent when reservation status is checked_in.",
+        });
+      }
+      if (eventSpec.canonical === "checked_out" && currentStatus !== "checked_out") {
+        return res.status(409).json({
+          success: false,
+          skipped: true,
+          error: "Check-out email can only be sent when reservation status is checked_out.",
+        });
+      }
+      if (eventSpec.canonical === "cancelled" && currentStatus !== "cancelled") {
+        return res.status(409).json({
+          success: false,
+          skipped: true,
+          error: "Cancellation email can only be sent when reservation status is cancelled.",
+        });
+      }
+      if (eventSpec.canonical === "no_show" && currentStatus !== "no_show") {
+        return res.status(409).json({
+          success: false,
+          skipped: true,
+          error: "No-show alert can only be sent when reservation status is no_show.",
         });
       }
 
-      const dedupeKey = `${eventType}:${hotelId}:${reservationId}`;
-      if (!markTransactionalEventIfNew(dedupeKey)) {
+      // Persistent idempotency marker check on reservation.emailsSent.<markerKey>
+      const existingEmailsSent =
+        reservation.emailsSent && typeof reservation.emailsSent === "object"
+          ? reservation.emailsSent
+          : {};
+      if (existingEmailsSent[eventSpec.markerKey]) {
+        markTransactionalEventSent(dedupeKey);
         return res.status(200).json({
           success: true,
           skipped: true,
-          reason: "Notification already dispatched for this reservation event.",
+          reason: `Email for '${eventSpec.canonical}' was already sent at ${existingEmailsSent[eventSpec.markerKey]}.`,
         });
       }
 
+      // Load this tenant hotel's own configuration & branding
       const hotelDoc = await readFirestoreDocServerSide(`hotels/${hotelId}`, caller.idToken);
-      const hotelName =
-        (hotelDoc && typeof hotelDoc.name === "string" && hotelDoc.name.trim()) ||
-        "Hotel";
-      const hotelEmail =
-        hotelDoc && typeof hotelDoc.email === "string" && isValidEmailAddress(hotelDoc.email.trim())
-          ? hotelDoc.email.trim()
-          : undefined;
-      const hotelPhone =
-        hotelDoc && typeof hotelDoc.phone === "string" && hotelDoc.phone.trim()
-          ? hotelDoc.phone.trim()
-          : undefined;
-      const hotelAddress =
-        hotelDoc && typeof hotelDoc.address === "string" && hotelDoc.address.trim()
-          ? hotelDoc.address.trim()
-          : undefined;
+      const prefCheck = isHotelEmailEventEnabled(hotelDoc, eventSpec.fullType, eventSpec.audience);
+      if (!prefCheck.enabled) {
+        return res.status(200).json({
+          success: true,
+          skipped: true,
+          reason: prefCheck.reason,
+        });
+      }
 
+      // Resolve recipients server-side (never from browser)
+      let recipients: string[] = [];
+      if (eventSpec.audience === "guest") {
+        let guestEmail =
+          typeof reservation.guestEmail === "string" ? reservation.guestEmail.trim() : "";
+        if (
+          !guestEmail &&
+          typeof reservation.guestId === "string" &&
+          isSafeIdentifier(reservation.guestId)
+        ) {
+          const guestDoc = await readFirestoreDocServerSide(
+            `hotels/${hotelId}/guests/${reservation.guestId}`,
+            caller.idToken
+          );
+          if (guestDoc && typeof guestDoc.email === "string") {
+            guestEmail = guestDoc.email.trim();
+          }
+        }
+        if (guestEmail && isValidEmailAddress(guestEmail)) {
+          recipients = [guestEmail];
+        }
+      } else {
+        const staffUsers = await queryHotelStaffUsersServerSide(hotelId, caller.idToken);
+        recipients = resolveHotelOperationalRecipients(hotelDoc, eventSpec.fullType, staffUsers);
+      }
+
+      if (recipients.length === 0) {
+        return res.status(200).json({
+          success: true,
+          skipped: true,
+          reason:
+            eventSpec.audience === "guest"
+              ? "Guest does not have a valid email address on file."
+              : "No authorized hotel staff recipient configured for this operational alert.",
+        });
+      }
+
+      const appUrl = getAppUrl();
+      const brand = resolveHotelBrandContext(hotelId, hotelDoc, appUrl);
       const guestName =
         (typeof reservation.guestName === "string" && reservation.guestName.trim()) || "Guest";
       const roomLabel = reservation.roomNumber
@@ -3763,81 +4119,950 @@ async function startServer() {
         : reservation.roomTypeName
           ? String(reservation.roomTypeName).trim()
           : "Assigned Room";
-      const checkIn = [
-        typeof reservation.checkIn === "string" ? reservation.checkIn.trim() : "",
-        typeof reservation.checkInTime === "string" && reservation.checkInTime.trim()
-          ? `(${reservation.checkInTime.trim()})`
-          : "",
-      ]
-        .filter(Boolean)
-        .join(" ") || "N/A";
-      const checkOut = [
-        typeof reservation.checkOut === "string" ? reservation.checkOut.trim() : "",
-        typeof reservation.checkOutTime === "string" && reservation.checkOutTime.trim()
-          ? `(${reservation.checkOutTime.trim()})`
-          : "",
-      ]
-        .filter(Boolean)
-        .join(" ") || "N/A";
+      const checkIn =
+        [
+          typeof reservation.checkIn === "string" ? reservation.checkIn.trim() : "",
+          typeof reservation.checkInTime === "string" && reservation.checkInTime.trim()
+            ? `(${reservation.checkInTime.trim()})`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" ") || "N/A";
+      const checkOut =
+        [
+          typeof reservation.checkOut === "string" ? reservation.checkOut.trim() : "",
+          typeof reservation.checkOutTime === "string" && reservation.checkOutTime.trim()
+            ? `(${reservation.checkOutTime.trim()})`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" ") || "N/A";
       const bookingRef = reservationId.slice(0, 8).toUpperCase();
-      const appUrl = getAppUrl();
 
-      const templateData = {
-        hotelName,
-        guestName,
-        roomLabel,
-        checkIn,
-        checkOut,
-        bookingRef,
-        hotelEmail,
-        hotelPhone,
-        hotelAddress,
-        appUrl,
-      };
+      const rows: EmailSummaryRow[] = [
+        { label: "Booking Reference", value: bookingRef },
+        { label: "Guest Name", value: guestName },
+        { label: "Room", value: roomLabel },
+        { label: "Check-In", value: checkIn },
+        { label: "Check-Out", value: checkOut },
+      ];
+      if (reservation.nights) {
+        rows.push({ label: "Nights", value: String(reservation.nights) });
+      }
+      if (
+        (eventSpec.canonical === "checked_out" || eventSpec.canonical === "confirmation") &&
+        Number.isFinite(Number(reservation.totalAmount)) &&
+        Number(reservation.totalAmount) > 0
+      ) {
+        rows.push({
+          label: "Total Amount",
+          value: formatMoneyForEmail(reservation.totalAmount, brand.currency),
+        });
+      }
+      if (
+        eventSpec.canonical === "checked_out" &&
+        Number.isFinite(Number(reservation.paidAmount))
+      ) {
+        rows.push({
+          label: "Total Paid",
+          value: formatMoneyForEmail(reservation.paidAmount, brand.currency),
+        });
+      }
 
-      const built =
-        eventType === "booking_cancellation"
-          ? buildBookingCancellationEmail(templateData)
-          : buildBookingConfirmationEmail(templateData);
+      const rendered = renderMultiTenantEmail(eventSpec.fullType, brand, {
+        recipientName: eventSpec.audience === "guest" ? guestName : undefined,
+        subjectOverride: `${
+          eventSpec.canonical === "confirmation"
+            ? "Booking Confirmation"
+            : eventSpec.canonical === "checked_in"
+              ? "Check-In Confirmation"
+              : eventSpec.canonical === "checked_out"
+                ? "Thank You & Check-Out Summary"
+                : eventSpec.canonical === "cancelled"
+                  ? "Booking Cancellation"
+                  : "[Operations] Reservation No-Show"
+        } - ${brand.hotelName} (${bookingRef})`,
+        rows,
+        note:
+          eventSpec.canonical === "cancelled"
+            ? "If this cancellation was unexpected, please contact the hotel directly."
+            : eventSpec.canonical === "checked_out"
+              ? "Thank you for choosing us. We look forward to welcoming you again."
+              : undefined,
+        ctaLabel: "Hotel Portal",
+        ctaUrl: appUrl,
+      });
+
+      const logId = `em_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const nowIso = new Date().toISOString();
 
       const result = await sendEmail({
-        to: guestEmail,
-        subject: built.subject,
-        html: built.html,
-        text: built.text,
-        replyTo: hotelEmail,
+        to: recipients,
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+        fromName: rendered.fromName,
+        replyTo: rendered.replyTo,
         idempotencyKey: dedupeKey,
+        tags: [
+          { name: "hotelId", value: hotelId },
+          { name: "eventType", value: eventSpec.fullType },
+          { name: "audience", value: eventSpec.audience },
+          { name: "reservationId", value: reservationId },
+          { name: "logId", value: logId },
+        ],
       });
 
       if (!result.success) {
-        sentTransactionalEventKeys.delete(dedupeKey);
+        // Do NOT set emailsSent marker on failure so a safe retry is possible
+        const failLog = {
+          logId,
+          hotelId,
+          eventType: eventSpec.fullType,
+          audience: eventSpec.audience,
+          recipients,
+          subject: rendered.subject,
+          reservationId,
+          guestId: typeof reservation.guestId === "string" ? reservation.guestId : undefined,
+          idempotencyKey: dedupeKey,
+          provider: "resend" as const,
+          status: (result.deliveryState === "unconfigured" ? "unconfigured" : "failed") as
+            | "unconfigured"
+            | "failed",
+          attempts: result.attempts,
+          error: result.error,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        };
+        recordEmailDeliveryLog(failLog);
+        void persistTenantEmailLogToFirestore(hotelId, logId, failLog, caller.idToken);
         return res.status(result.statusCode || 502).json({
           success: false,
           deliveryState: result.deliveryState,
           provider: result.provider,
-          error: result.error || "Failed to dispatch transactional reservation email.",
+          error: result.error || "Failed to dispatch reservation email.",
         });
       }
+
+      // Mark sent in memory and persist conditional emailsSent.<markerKey> on reservation
+      markTransactionalEventSent(dedupeKey);
+      const sentAt = new Date().toISOString();
+      const updatedEmailsSent = {
+        ...existingEmailsSent,
+        [eventSpec.markerKey]: sentAt,
+      };
+      const patchRes = await patchFirestoreFieldsServerSide(
+        `hotels/${hotelId}/reservations/${reservationId}`,
+        { emailsSent: updatedEmailsSent },
+        [`emailsSent.${eventSpec.markerKey}`],
+        caller.idToken,
+        resMeta.updateTime
+      );
+      if (!patchRes.ok && patchRes.status === 412) {
+        // Retry once without updateTime precondition so marker is recorded if another field updated concurrently
+        await patchFirestoreFieldsServerSide(
+          `hotels/${hotelId}/reservations/${reservationId}`,
+          { emailsSent: updatedEmailsSent },
+          [`emailsSent.${eventSpec.markerKey}`],
+          caller.idToken
+        );
+      }
+
+      const successLog = {
+        logId,
+        hotelId,
+        eventType: eventSpec.fullType,
+        audience: eventSpec.audience,
+        recipients,
+        subject: rendered.subject,
+        reservationId,
+        guestId: typeof reservation.guestId === "string" ? reservation.guestId : undefined,
+        idempotencyKey: dedupeKey,
+        provider: "resend" as const,
+        messageId: result.messageId,
+        status: "accepted_by_provider" as const,
+        attempts: result.attempts,
+        createdAt: nowIso,
+        updatedAt: sentAt,
+      };
+      recordEmailDeliveryLog(successLog);
+      void persistTenantEmailLogToFirestore(hotelId, logId, successLog, caller.idToken);
 
       return res.status(200).json({
         success: true,
         messageId: result.messageId,
+        logId,
         deliveryState: result.deliveryState,
         provider: result.provider,
       });
     } catch (err: any) {
       console.error(
-        "[API /api/emails/reservation-event] Error:",
+        "[API /api/reservations/:id/notify] Error:",
         sanitizeErrorForClient(err, "Reservation email dispatch failed.")
       );
       return res.status(500).json({
         success: false,
         error: sanitizeErrorForClient(err, "Failed to process reservation email notification."),
       });
+    } finally {
+      inFlightTransactionalKeys.delete(dedupeKey);
+    }
+  }
+
+  // API Route: Dedicated Authenticated Reservation Notification Endpoint
+  app.post("/api/reservations/:id/notify", async (req, res) => {
+    const reservationId = String(req.params.id || "").trim();
+    const { event, eventType, hotelId } = req.body || {};
+    return handleReservationNotification(
+      req,
+      res,
+      reservationId,
+      String(event || eventType || ""),
+      typeof hotelId === "string" ? hotelId : undefined
+    );
+  });
+
+  // Backward-compatible alias delegating to the same strict reservation notification handler
+  app.post("/api/emails/reservation-event", async (req, res) => {
+    const { hotelId, reservationId, eventType, event } = req.body || {};
+    return handleReservationNotification(
+      req,
+      res,
+      String(reservationId || "").trim(),
+      String(event || eventType || ""),
+      typeof hotelId === "string" ? hotelId : undefined
+    );
+  });
+
+  // API Route: Unified Authenticated Multi-Tenant Module Event Notification Endpoint
+  app.post("/api/notifications/events", async (req, res) => {
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
+    const userLimit = userEmailRateLimiter.check(`module_notify:${caller.uid}`, 40, 60_000);
+    if (!userLimit.allowed) {
+      return res.status(429).json({
+        error: "Too many notification requests for this user. Please wait shortly.",
+        retryAfterMs: userLimit.retryAfterMs,
+      });
+    }
+
+    const {
+      hotelId: rawHotelId,
+      eventType,
+      entityId,
+      reservationId,
+      guestId,
+      corporateId,
+      staffUid,
+      idempotencyKey: clientIdemp,
+      metadata: rawMetadata,
+    } = req.body || {};
+
+    const callerHotelId =
+      typeof caller.profile?.hotelId === "string" && caller.profile.hotelId.trim()
+        ? caller.profile.hotelId.trim()
+        : typeof caller.profile?.hotel_id === "string" && caller.profile.hotel_id.trim()
+          ? caller.profile.hotel_id.trim()
+          : "";
+    const hotelId =
+      typeof rawHotelId === "string" && rawHotelId.trim() ? rawHotelId.trim() : callerHotelId;
+
+    if (!isSafeIdentifier(hotelId)) {
+      return res.status(400).json({ error: "Valid hotelId is required." });
+    }
+
+    const allowedModuleEvents = new Set<MultiTenantEmailEventType>([
+      "payment.received",
+      "invoice.issued",
+      "receipt.sent",
+      "refund.processed",
+      "fnb.order_posted",
+      "fnb.order_voided",
+      "housekeeping.room_ready",
+      "housekeeping.inspection_failed",
+      "housekeeping.guest_request",
+      "maintenance.issue_reported",
+      "maintenance.issue_resolved",
+      "guest.profile_created",
+      "guest.blacklisted",
+      "staff.account_status_changed",
+      "hotel.registered",
+      "corporate.account_created",
+      "corporate.city_ledger_transfer",
+      "corporate.payment_settled",
+      "corporate.low_balance_alert",
+      "subscription.renewed",
+      "subscription.expiring_or_expired",
+      "tracking_code.request_status_updated",
+      "system.daily_revenue_deficit",
+      "system.operational_alert",
+    ]);
+
+    if (typeof eventType !== "string" || !allowedModuleEvents.has(eventType as MultiTenantEmailEventType)) {
+      return res.status(400).json({ error: "Unsupported multi-tenant notification eventType." });
+    }
+    const typedEvent = eventType as MultiTenantEmailEventType;
+
+    // Enforce strict tenant isolation
+    if (!isSuperAdminCaller(caller) && !callerIsHotelStaff(caller, hotelId)) {
+      return res.status(403).json({
+        error: "Forbidden: You are not authorized to dispatch notifications for this hotel.",
+      });
+    }
+
+    const configCheck = validateEmailConfig();
+    if (!configCheck.ok) {
+      return res.status(503).json({
+        success: false,
+        deliveryState: "unconfigured",
+        error: configCheck.error,
+      });
+    }
+
+    const safeEntityId = typeof entityId === "string" && isSafeIdentifier(entityId) ? entityId : "";
+    const safeResId =
+      typeof reservationId === "string" && isSafeIdentifier(reservationId) ? reservationId : "";
+    const safeGuestId = typeof guestId === "string" && isSafeIdentifier(guestId) ? guestId : "";
+    const safeCorpId =
+      typeof corporateId === "string" && isSafeIdentifier(corporateId) ? corporateId : "";
+    const safeStaffUid = typeof staffUid === "string" && isSafeIdentifier(staffUid) ? staffUid : "";
+    const meta =
+      rawMetadata && typeof rawMetadata === "object" && !Array.isArray(rawMetadata)
+        ? (rawMetadata as Record<string, any>)
+        : {};
+
+    const cleanMetaStr = (key: string, maxLen = 140): string | undefined => {
+      const v = meta[key];
+      if (v === undefined || v === null) return undefined;
+      const s = String(v).trim();
+      return s ? s.slice(0, maxLen) : undefined;
+    };
+
+    const dedupeSuffix =
+      typeof clientIdemp === "string" && clientIdemp.trim()
+        ? clientIdemp.trim().slice(0, 80)
+        : safeEntityId || safeResId || safeCorpId || safeStaffUid || safeGuestId || "general";
+    const dedupeKey = `evt:${hotelId}:${typedEvent}:${dedupeSuffix}`;
+
+    if (inFlightTransactionalKeys.has(dedupeKey) || hasRecentTransactionalEvent(dedupeKey)) {
+      return res.status(200).json({
+        success: true,
+        skipped: true,
+        reason: "Notification already dispatched for this event.",
+      });
+    }
+
+    inFlightTransactionalKeys.add(dedupeKey);
+    try {
+      const [hotelDoc, systemSettings] = await Promise.all([
+        readFirestoreDocServerSide(`hotels/${hotelId}`, caller.idToken),
+        readFirestoreDocServerSide("system/settings"),
+      ]);
+
+      if (!hotelDoc && hotelId !== "SYSTEM") {
+        return res.status(404).json({ error: "Hotel organization not found." });
+      }
+
+      const appUrl = getAppUrl();
+      const hotelBrand = resolveHotelBrandContext(hotelId, hotelDoc, appUrl);
+      const platformBrand = resolvePlatformBrandContext(systemSettings, appUrl);
+
+      // Load optional authoritative tenant records server-side (strictly under hotels/{hotelId})
+      const [reservationDoc, guestDoc, corporateDoc, staffDoc] = await Promise.all([
+        safeResId
+          ? readFirestoreDocServerSide(`hotels/${hotelId}/reservations/${safeResId}`, caller.idToken)
+          : Promise.resolve(null),
+        safeGuestId
+          ? readFirestoreDocServerSide(`hotels/${hotelId}/guests/${safeGuestId}`, caller.idToken)
+          : Promise.resolve(null),
+        safeCorpId
+          ? readFirestoreDocServerSide(
+              `hotels/${hotelId}/corporate_accounts/${safeCorpId}`,
+              caller.idToken
+            )
+          : Promise.resolve(null),
+        safeStaffUid
+          ? readFirestoreDocServerSide(`users/${safeStaffUid}`, caller.idToken)
+          : Promise.resolve(null),
+      ]);
+
+      // Verify any fetched cross-collection staff record belongs to this exact hotel
+      const verifiedStaffDoc =
+        staffDoc && String(staffDoc.hotelId || staffDoc.hotel_id || "") === hotelId
+          ? staffDoc
+          : null;
+
+      // Resolve authoritative guest email from reservation or guest profile
+      let resolvedGuestEmail =
+        (reservationDoc && typeof reservationDoc.guestEmail === "string"
+          ? reservationDoc.guestEmail.trim()
+          : "") ||
+        (guestDoc && typeof guestDoc.email === "string" ? guestDoc.email.trim() : "");
+      if (
+        !resolvedGuestEmail &&
+        reservationDoc &&
+        typeof reservationDoc.guestId === "string" &&
+        isSafeIdentifier(reservationDoc.guestId)
+      ) {
+        const linkedGuest = await readFirestoreDocServerSide(
+          `hotels/${hotelId}/guests/${reservationDoc.guestId}`,
+          caller.idToken
+        );
+        if (linkedGuest && typeof linkedGuest.email === "string") {
+          resolvedGuestEmail = linkedGuest.email.trim();
+        }
+      }
+      if (!isValidEmailAddress(resolvedGuestEmail)) resolvedGuestEmail = "";
+
+      const resolvedGuestName =
+        (reservationDoc && typeof reservationDoc.guestName === "string" && reservationDoc.guestName.trim()) ||
+        (guestDoc && typeof guestDoc.name === "string" && guestDoc.name.trim()) ||
+        cleanMetaStr("guestName") ||
+        "Guest";
+
+      const resolvedCorpEmail =
+        corporateDoc && typeof corporateDoc.email === "string" && isValidEmailAddress(corporateDoc.email.trim())
+          ? corporateDoc.email.trim()
+          : "";
+
+      const staffUsersCache: { loaded: boolean; list: any[] } = { loaded: false, list: [] };
+      const getHotelStaff = async () => {
+        if (!staffUsersCache.loaded) {
+          staffUsersCache.list = await queryHotelStaffUsersServerSide(hotelId, caller.idToken);
+          staffUsersCache.loaded = true;
+        }
+        return staffUsersCache.list;
+      };
+
+      type DispatchPlan = {
+        audience: EmailRecipientAudience;
+        recipients: string[];
+        brand: typeof hotelBrand;
+        recipientName?: string;
+        rows: EmailSummaryRow[];
+        note?: string;
+        subjectOverride?: string;
+        keySuffix: string;
+      };
+
+      const plans: DispatchPlan[] = [];
+      const amtStr =
+        meta.amount !== undefined ? formatMoneyForEmail(meta.amount, hotelBrand.currency) : undefined;
+      const roomStr =
+        (reservationDoc?.roomNumber ? `Room ${reservationDoc.roomNumber}` : undefined) ||
+        (cleanMetaStr("roomNumber") ? `Room ${cleanMetaStr("roomNumber")}` : undefined);
+
+      switch (typedEvent) {
+        case "payment.received":
+        case "receipt.sent":
+        case "invoice.issued":
+        case "refund.processed": {
+          const rows: EmailSummaryRow[] = [
+            { label: "Hotel", value: hotelBrand.hotelName },
+            { label: "Guest", value: resolvedGuestName },
+            ...(safeResId ? [{ label: "Booking Reference", value: safeResId.slice(0, 8).toUpperCase() }] : []),
+            ...(roomStr ? [{ label: "Room", value: roomStr }] : []),
+            ...(amtStr ? [{ label: "Amount", value: amtStr }] : []),
+            ...(cleanMetaStr("paymentMethod")
+              ? [{ label: "Method", value: cleanMetaStr("paymentMethod")!.toUpperCase() }]
+              : []),
+            ...(cleanMetaStr("reference") ? [{ label: "Reference", value: cleanMetaStr("reference")! }] : []),
+            ...(cleanMetaStr("reason") ? [{ label: "Reason", value: cleanMetaStr("reason")! }] : []),
+            ...(meta.outstandingBalance !== undefined
+              ? [
+                  {
+                    label: "Outstanding Balance",
+                    value: formatMoneyForEmail(meta.outstandingBalance, hotelBrand.currency),
+                  },
+                ]
+              : []),
+          ];
+
+          if (resolvedGuestEmail) {
+            plans.push({
+              audience: "guest",
+              recipients: [resolvedGuestEmail],
+              brand: hotelBrand,
+              recipientName: resolvedGuestName,
+              rows,
+              keySuffix: "guest",
+            });
+          } else if (typedEvent === "invoice.issued" && resolvedCorpEmail) {
+            plans.push({
+              audience: "corporate",
+              recipients: [resolvedCorpEmail],
+              brand: hotelBrand,
+              recipientName: String(corporateDoc?.contactPerson || corporateDoc?.name || ""),
+              rows,
+              keySuffix: "corporate",
+            });
+          }
+
+          if (typedEvent === "refund.processed") {
+            const financeStaff = resolveHotelOperationalRecipients(
+              hotelDoc,
+              typedEvent,
+              await getHotelStaff()
+            );
+            if (financeStaff.length > 0) {
+              plans.push({
+                audience: "hotel_staff",
+                recipients: financeStaff,
+                brand: hotelBrand,
+                rows,
+                note: "Operational finance copy for audit & reconciliation.",
+                keySuffix: "staff",
+              });
+            }
+          }
+          break;
+        }
+
+        case "fnb.order_posted": {
+          if (resolvedGuestEmail) {
+            plans.push({
+              audience: "guest",
+              recipients: [resolvedGuestEmail],
+              brand: hotelBrand,
+              recipientName: resolvedGuestName,
+              rows: [
+                { label: "Guest", value: resolvedGuestName },
+                ...(roomStr ? [{ label: "Room", value: roomStr }] : []),
+                ...(cleanMetaStr("billNumber") ? [{ label: "Order / Bill #", value: cleanMetaStr("billNumber")! }] : []),
+                ...(amtStr ? [{ label: "Amount Posted", value: amtStr }] : []),
+                ...(cleanMetaStr("outletName") ? [{ label: "Outlet", value: cleanMetaStr("outletName")! }] : []),
+              ],
+              keySuffix: "guest",
+            });
+          }
+          break;
+        }
+
+        case "fnb.order_voided": {
+          const staffRecips = resolveHotelOperationalRecipients(
+            hotelDoc,
+            typedEvent,
+            await getHotelStaff()
+          );
+          if (staffRecips.length > 0) {
+            plans.push({
+              audience: "hotel_staff",
+              recipients: staffRecips,
+              brand: hotelBrand,
+              rows: [
+                ...(cleanMetaStr("billNumber") ? [{ label: "Order / Bill #", value: cleanMetaStr("billNumber")! }] : []),
+                ...(roomStr ? [{ label: "Room", value: roomStr }] : []),
+                ...(amtStr ? [{ label: "Voided Amount", value: amtStr }] : []),
+                ...(cleanMetaStr("reason") ? [{ label: "Void Reason", value: cleanMetaStr("reason")! }] : []),
+                { label: "Actioned By", value: caller.email || caller.uid },
+              ],
+              keySuffix: "staff",
+            });
+          }
+          break;
+        }
+
+        case "housekeeping.room_ready":
+        case "housekeeping.inspection_failed":
+        case "housekeeping.guest_request": {
+          const hkRecips = resolveHotelOperationalRecipients(
+            hotelDoc,
+            typedEvent,
+            await getHotelStaff()
+          );
+          if (hkRecips.length > 0) {
+            plans.push({
+              audience: "hotel_staff",
+              recipients: hkRecips,
+              brand: hotelBrand,
+              rows: [
+                ...(roomStr ? [{ label: "Room", value: roomStr }] : []),
+                ...(cleanMetaStr("item") ? [{ label: "Requested Item", value: cleanMetaStr("item")! }] : []),
+                ...(cleanMetaStr("priority") ? [{ label: "Priority", value: cleanMetaStr("priority")!.toUpperCase() }] : []),
+                ...(meta.score !== undefined ? [{ label: "Inspection Score", value: `${meta.score}%` }] : []),
+                ...(cleanMetaStr("remarks") ? [{ label: "Notes / Remarks", value: cleanMetaStr("remarks")! }] : []),
+                { label: "Updated By", value: caller.email || caller.uid },
+              ],
+              keySuffix: "staff",
+            });
+          }
+          break;
+        }
+
+        case "maintenance.issue_reported":
+        case "maintenance.issue_resolved": {
+          const maintRecips = resolveHotelOperationalRecipients(
+            hotelDoc,
+            typedEvent,
+            await getHotelStaff()
+          );
+          if (maintRecips.length > 0) {
+            plans.push({
+              audience: "hotel_staff",
+              recipients: maintRecips,
+              brand: hotelBrand,
+              rows: [
+                ...(roomStr ? [{ label: "Room / Location", value: roomStr }] : []),
+                ...(cleanMetaStr("issue") ? [{ label: "Issue", value: cleanMetaStr("issue")! }] : []),
+                ...(cleanMetaStr("priority") ? [{ label: "Priority", value: cleanMetaStr("priority")!.toUpperCase() }] : []),
+                ...(cleanMetaStr("status") ? [{ label: "Status", value: cleanMetaStr("status")! }] : []),
+                ...(cleanMetaStr("notes") ? [{ label: "Notes", value: cleanMetaStr("notes")! }] : []),
+                { label: "Reported / Updated By", value: caller.email || caller.uid },
+              ],
+              keySuffix: "staff",
+            });
+          }
+          break;
+        }
+
+        case "guest.profile_created": {
+          if (resolvedGuestEmail) {
+            plans.push({
+              audience: "guest",
+              recipients: [resolvedGuestEmail],
+              brand: hotelBrand,
+              recipientName: resolvedGuestName,
+              rows: [
+                { label: "Guest Name", value: resolvedGuestName },
+                { label: "Hotel", value: hotelBrand.hotelName },
+                ...(guestDoc?.phone ? [{ label: "Phone", value: String(guestDoc.phone) }] : []),
+              ],
+              keySuffix: "guest",
+            });
+          }
+          break;
+        }
+
+        case "guest.blacklisted": {
+          const deskRecips = resolveHotelOperationalRecipients(
+            hotelDoc,
+            typedEvent,
+            await getHotelStaff()
+          );
+          if (deskRecips.length > 0) {
+            plans.push({
+              audience: "hotel_staff",
+              recipients: deskRecips,
+              brand: hotelBrand,
+              rows: [
+                { label: "Guest Name", value: resolvedGuestName },
+                ...(cleanMetaStr("reason") ? [{ label: "Notes", value: cleanMetaStr("reason")! }] : []),
+                { label: "Updated By", value: caller.email || caller.uid },
+              ],
+              keySuffix: "staff",
+            });
+          }
+          break;
+        }
+
+        case "staff.account_status_changed": {
+          const targetEmail =
+            verifiedStaffDoc && typeof verifiedStaffDoc.email === "string" && isValidEmailAddress(verifiedStaffDoc.email.trim())
+              ? verifiedStaffDoc.email.trim()
+              : "";
+          const rows: EmailSummaryRow[] = [
+            { label: "Hotel", value: hotelBrand.hotelName },
+            {
+              label: "Staff Member",
+              value: String(verifiedStaffDoc?.displayName || verifiedStaffDoc?.name || targetEmail || safeStaffUid),
+            },
+            { label: "New Status", value: cleanMetaStr("status") || String(verifiedStaffDoc?.status || "updated") },
+            { label: "Updated By", value: caller.email || caller.uid },
+          ];
+          if (targetEmail) {
+            plans.push({
+              audience: "staff_member",
+              recipients: [targetEmail],
+              brand: hotelBrand,
+              recipientName: String(verifiedStaffDoc?.displayName || verifiedStaffDoc?.name || ""),
+              rows,
+              keySuffix: "staff_member",
+            });
+          }
+          break;
+        }
+
+        case "hotel.registered": {
+          const rows: EmailSummaryRow[] = [
+            { label: "Hotel Name", value: hotelBrand.hotelName },
+            { label: "Hotel ID", value: hotelId },
+            { label: "Plan", value: String(hotelDoc?.plan || cleanMetaStr("plan") || "standard").toUpperCase() },
+            { label: "Admin Email", value: caller.email || "N/A" },
+            ...(hotelDoc?.subscriptionExpiry
+              ? [{ label: "Subscription Expiry", value: String(hotelDoc.subscriptionExpiry).slice(0, 10) }]
+              : []),
+          ];
+          if (caller.email && isValidEmailAddress(caller.email)) {
+            plans.push({
+              audience: "hotel_staff",
+              recipients: [caller.email],
+              brand: hotelBrand,
+              recipientName: String(caller.profile?.displayName || hotelBrand.hotelName),
+              rows,
+              keySuffix: "hotel_admin",
+            });
+          }
+          const superAdmins = resolvePlatformAdminRecipients(systemSettings);
+          if (superAdmins.length > 0) {
+            plans.push({
+              audience: "platform_superadmin",
+              recipients: superAdmins,
+              brand: platformBrand,
+              subjectOverride: `[Platform Admin] New Hotel Registered - ${hotelBrand.hotelName}`,
+              rows,
+              keySuffix: "platform",
+            });
+          }
+          break;
+        }
+
+        case "corporate.account_created":
+        case "corporate.city_ledger_transfer":
+        case "corporate.payment_settled":
+        case "corporate.low_balance_alert": {
+          const corpName = String(corporateDoc?.name || cleanMetaStr("corporateName") || "Corporate Account");
+          const rows: EmailSummaryRow[] = [
+            { label: "Hotel", value: hotelBrand.hotelName },
+            { label: "Corporate Account", value: corpName },
+            ...(safeResId ? [{ label: "Booking Reference", value: safeResId.slice(0, 8).toUpperCase() }] : []),
+            ...(amtStr ? [{ label: "Amount", value: amtStr }] : []),
+            ...(cleanMetaStr("paymentMethod")
+              ? [{ label: "Payment Method", value: cleanMetaStr("paymentMethod")!.toUpperCase() }]
+              : []),
+            ...(cleanMetaStr("reference") ? [{ label: "Invoice / Reference", value: cleanMetaStr("reference")! }] : []),
+            ...(corporateDoc?.currentBalance !== undefined
+              ? [
+                  {
+                    label: "Current Balance",
+                    value: formatMoneyForEmail(corporateDoc.currentBalance, hotelBrand.currency),
+                  },
+                ]
+              : []),
+          ];
+          if (typedEvent !== "corporate.low_balance_alert" && resolvedCorpEmail) {
+            plans.push({
+              audience: "corporate",
+              recipients: [resolvedCorpEmail],
+              brand: hotelBrand,
+              recipientName: String(corporateDoc?.contactPerson || corpName),
+              rows,
+              keySuffix: "corporate",
+            });
+          }
+          const corpStaff = resolveHotelOperationalRecipients(
+            hotelDoc,
+            typedEvent,
+            await getHotelStaff()
+          );
+          if (corpStaff.length > 0) {
+            plans.push({
+              audience: "hotel_staff",
+              recipients: corpStaff,
+              brand: hotelBrand,
+              rows,
+              keySuffix: "staff",
+            });
+          }
+          break;
+        }
+
+        case "subscription.renewed":
+        case "subscription.expiring_or_expired": {
+          const rows: EmailSummaryRow[] = [
+            { label: "Hotel", value: hotelBrand.hotelName },
+            { label: "Hotel ID", value: hotelId },
+            { label: "Plan", value: String(hotelDoc?.plan || cleanMetaStr("plan") || "standard").toUpperCase() },
+            {
+              label: "Subscription Status",
+              value: String(hotelDoc?.subscriptionStatus || cleanMetaStr("status") || "active").toUpperCase(),
+            },
+            ...(hotelDoc?.subscriptionExpiry
+              ? [{ label: "Expiry Date", value: String(hotelDoc.subscriptionExpiry).slice(0, 10) }]
+              : []),
+          ];
+          const hotelAdmins = sanitizeEmailList([
+            ...(caller.email ? [caller.email] : []),
+            ...resolveHotelOperationalRecipients(hotelDoc, typedEvent, await getHotelStaff()),
+          ]);
+          if (hotelAdmins.length > 0) {
+            plans.push({
+              audience: "hotel_staff",
+              recipients: hotelAdmins,
+              brand: hotelBrand,
+              rows,
+              keySuffix: "hotel_admin",
+            });
+          }
+          const superAdmins = resolvePlatformAdminRecipients(systemSettings);
+          if (superAdmins.length > 0) {
+            plans.push({
+              audience: "platform_superadmin",
+              recipients: superAdmins,
+              brand: platformBrand,
+              subjectOverride: `[Platform Admin] ${
+                typedEvent === "subscription.renewed" ? "Subscription Renewed" : "Subscription Alert"
+              } - ${hotelBrand.hotelName}`,
+              rows,
+              keySuffix: "platform",
+            });
+          }
+          break;
+        }
+
+        case "system.daily_revenue_deficit":
+        case "system.operational_alert": {
+          const rows: EmailSummaryRow[] = [
+            { label: "Hotel", value: hotelBrand.hotelName },
+            ...(cleanMetaStr("summary") ? [{ label: "Summary", value: cleanMetaStr("summary")! }] : []),
+            ...(amtStr ? [{ label: "Amount", value: amtStr }] : []),
+            ...(cleanMetaStr("details") ? [{ label: "Details", value: cleanMetaStr("details")! }] : []),
+          ];
+          const staffRecips = resolveHotelOperationalRecipients(
+            hotelDoc,
+            typedEvent,
+            await getHotelStaff()
+          );
+          if (staffRecips.length > 0) {
+            plans.push({
+              audience: "hotel_staff",
+              recipients: staffRecips,
+              brand: hotelBrand,
+              rows,
+              keySuffix: "staff",
+            });
+          }
+          break;
+        }
+
+        default:
+          break;
+      }
+
+      if (plans.length === 0) {
+        return res.status(200).json({
+          success: true,
+          skipped: true,
+          reason: "No eligible recipient email address resolved for this event.",
+        });
+      }
+
+      const dispatchResults: Array<{
+        audience: EmailRecipientAudience;
+        success: boolean;
+        skipped?: boolean;
+        messageId?: string;
+        logId?: string;
+        error?: string;
+      }> = [];
+
+      let anySucceeded = false;
+
+      for (const plan of plans) {
+        const pref =
+          plan.audience === "platform_superadmin"
+            ? { enabled: true }
+            : isHotelEmailEventEnabled(hotelDoc, typedEvent, plan.audience);
+        if (!pref.enabled) {
+          dispatchResults.push({
+            audience: plan.audience,
+            success: true,
+            skipped: true,
+          });
+          continue;
+        }
+
+        const rendered = renderMultiTenantEmail(typedEvent, plan.brand, {
+          recipientName: plan.recipientName,
+          rows: plan.rows,
+          note: plan.note,
+          subjectOverride: plan.subjectOverride,
+          ctaLabel: plan.audience === "platform_superadmin" ? "Admin Portal" : "Hotel Portal",
+          ctaUrl: appUrl,
+        });
+
+        const logId = `em_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const nowIso = new Date().toISOString();
+        const planKey = `${dedupeKey}:${plan.keySuffix}`;
+
+        const result = await sendEmail({
+          to: plan.recipients,
+          subject: rendered.subject,
+          html: rendered.html,
+          text: rendered.text,
+          fromName: rendered.fromName,
+          replyTo: rendered.replyTo,
+          idempotencyKey: planKey,
+          tags: [
+            { name: "hotelId", value: plan.brand.hotelId },
+            { name: "eventType", value: typedEvent },
+            { name: "audience", value: plan.audience },
+            { name: "logId", value: logId },
+            ...(safeResId ? [{ name: "reservationId", value: safeResId }] : []),
+          ],
+        });
+
+        const logEntry = {
+          logId,
+          hotelId: plan.brand.hotelId,
+          eventType: typedEvent,
+          audience: plan.audience,
+          recipients: plan.recipients,
+          subject: rendered.subject,
+          reservationId: safeResId || undefined,
+          guestId: safeGuestId || undefined,
+          corporateId: safeCorpId || undefined,
+          entityId: safeEntityId || undefined,
+          idempotencyKey: planKey,
+          provider: "resend" as const,
+          messageId: result.messageId,
+          status: (result.success
+            ? "accepted_by_provider"
+            : result.deliveryState === "unconfigured"
+              ? "unconfigured"
+              : "failed") as "accepted_by_provider" | "unconfigured" | "failed",
+          attempts: result.attempts,
+          error: result.error,
+          createdAt: nowIso,
+          updatedAt: new Date().toISOString(),
+        };
+        recordEmailDeliveryLog(logEntry);
+        void persistTenantEmailLogToFirestore(plan.brand.hotelId, logId, logEntry, caller.idToken);
+
+        if (result.success) anySucceeded = true;
+        dispatchResults.push({
+          audience: plan.audience,
+          success: result.success,
+          messageId: result.messageId,
+          logId,
+          error: result.error,
+        });
+      }
+
+      if (anySucceeded) {
+        markTransactionalEventSent(dedupeKey);
+      }
+
+      const allFailed = dispatchResults.length > 0 && dispatchResults.every((r) => !r.success);
+      return res.status(allFailed ? 502 : 200).json({
+        success: !allFailed,
+        dispatches: dispatchResults,
+      });
+    } catch (err: any) {
+      console.error(
+        "[API /api/notifications/events] Error:",
+        sanitizeErrorForClient(err, "Module notification dispatch failed.")
+      );
+      return res.status(500).json({
+        success: false,
+        error: sanitizeErrorForClient(err, "Failed to process module notification."),
+      });
+    } finally {
+      inFlightTransactionalKeys.delete(dedupeKey);
     }
   });
 
-  // API Route: Dedicated Server-Built Admin Alert for New Tracking Code Requests
+  // API Route: Dedicated Server-Built Admin Alert for New Tracking Code Requests (Platform + Hotel Renewal Routing)
   app.post("/api/emails/tracking-code-request-alert", async (req, res) => {
     const { requestId } = req.body || {};
 
@@ -3854,6 +5079,16 @@ async function startServer() {
       });
     }
 
+    const dedupeKey = `tracking-code-req:${requestId}`;
+    if (inFlightTransactionalKeys.has(dedupeKey) || hasRecentTransactionalEvent(dedupeKey)) {
+      return res.status(200).json({
+        success: true,
+        skipped: true,
+        reason: "Admin alert already dispatched for this request.",
+      });
+    }
+
+    inFlightTransactionalKeys.add(dedupeKey);
     try {
       const requestDoc = await readFirestoreDocServerSide(`trackingCodeRequests/${requestId}`);
       if (!requestDoc) {
@@ -3869,78 +5104,121 @@ async function startServer() {
         });
       }
 
-      const dedupeKey = `tracking-code-req:${requestId}`;
-      if (!markTransactionalEventIfNew(dedupeKey)) {
+      const requestHotelId =
+        typeof requestDoc.hotelId === "string" &&
+        requestDoc.hotelId !== "unknown" &&
+        isSafeIdentifier(requestDoc.hotelId)
+          ? requestDoc.hotelId
+          : "";
+
+      const [systemSettings, requestHotelDoc] = await Promise.all([
+        readFirestoreDocServerSide("system/settings"),
+        requestHotelId
+          ? readFirestoreDocServerSide(`hotels/${requestHotelId}`)
+          : Promise.resolve(null),
+      ]);
+
+      const recipients = resolveTrackingCodeAlertRecipients(systemSettings, requestHotelDoc);
+      if (recipients.length === 0) {
         return res.status(200).json({
           success: true,
           skipped: true,
-          reason: "Admin alert already dispatched for this request.",
-        });
-      }
-
-      const systemSettings = await readFirestoreDocServerSide("system/settings");
-      const candidates = [
-        typeof systemSettings?.supportEmail === "string" ? systemSettings.supportEmail.trim() : "",
-        typeof process.env.ADMIN_ALERT_EMAIL === "string" ? process.env.ADMIN_ALERT_EMAIL.trim() : "",
-      ];
-      const adminEmail = candidates.find((addr) => addr && isValidEmailAddress(addr));
-
-      if (!adminEmail) {
-        sentTransactionalEventKeys.delete(dedupeKey);
-        return res.status(200).json({
-          success: true,
-          skipped: true,
-          reason: "No valid admin supportEmail configured.",
+          reason: "No valid platform or hotel tracking code alert recipient configured.",
         });
       }
 
       const appUrl = getAppUrl();
-      const built = buildTrackingCodeRequestAlertEmail({
-        requestId,
-        hotelName:
-          (typeof requestDoc.hotelName === "string" && requestDoc.hotelName.trim()) ||
-          "Unnamed Hotel",
-        requesterEmail:
-          (typeof requestDoc.email === "string" && requestDoc.email.trim()) || "Not provided",
-        requesterPhone:
-          typeof requestDoc.phone === "string" && requestDoc.phone.trim()
-            ? requestDoc.phone.trim()
-            : undefined,
-        plan:
-          typeof requestDoc.plan === "string" && requestDoc.plan.trim()
-            ? requestDoc.plan.trim()
-            : undefined,
-        requestType:
-          typeof requestDoc.type === "string" && requestDoc.type.trim()
-            ? requestDoc.type.trim()
-            : undefined,
-        message:
-          typeof requestDoc.message === "string" && requestDoc.message.trim()
-            ? requestDoc.message.trim()
-            : undefined,
-        requestedAt:
-          typeof requestDoc.timestamp === "string" && requestDoc.timestamp.trim()
-            ? requestDoc.timestamp.trim()
-            : undefined,
-        appUrl,
+      const platformBrand = resolvePlatformBrandContext(systemSettings, appUrl);
+      const isRenewal = String(requestDoc.type || "").toLowerCase() === "renewal";
+      const reqHotelName =
+        (typeof requestDoc.hotelName === "string" && requestDoc.hotelName.trim()) ||
+        (requestHotelDoc && typeof requestHotelDoc.name === "string" && requestHotelDoc.name.trim()) ||
+        "Prospective Hotel";
+
+      const rendered = renderMultiTenantEmail("tracking_code.request_submitted", platformBrand, {
+        title: isRenewal ? "Subscription Renewal Code Request" : "New Tracking Code Request",
+        subjectOverride: `[Platform Admin] ${
+          isRenewal ? "Renewal Code Request" : "New Tracking Code Request"
+        } - ${reqHotelName}`,
+        intro: isRenewal
+          ? `An existing hotel organization (${reqHotelName}) submitted a subscription renewal code request.`
+          : `A new hotel registration tracking code request has been submitted for ${reqHotelName}.`,
+        rows: [
+          { label: "Request ID", value: requestId },
+          { label: "Request Type", value: isRenewal ? "Subscription Renewal" : "New Hotel Registration" },
+          { label: "Hotel Name", value: reqHotelName },
+          ...(requestHotelId ? [{ label: "Hotel ID", value: requestHotelId }] : []),
+          {
+            label: "Requester Email",
+            value:
+              (typeof requestDoc.email === "string" && requestDoc.email.trim()) || "Not provided",
+          },
+          ...(typeof requestDoc.phone === "string" && requestDoc.phone.trim()
+            ? [{ label: "Phone", value: requestDoc.phone.trim() }]
+            : []),
+          ...(typeof requestDoc.plan === "string" && requestDoc.plan.trim()
+            ? [{ label: "Requested Plan", value: requestDoc.plan.trim() }]
+            : []),
+          ...(typeof requestDoc.message === "string" && requestDoc.message.trim()
+            ? [{ label: "Notes", value: requestDoc.message.trim() }]
+            : []),
+          ...(typeof requestDoc.timestamp === "string" && requestDoc.timestamp.trim()
+            ? [{ label: "Submitted At", value: requestDoc.timestamp.trim() }]
+            : []),
+        ],
+        ctaLabel: "Review in Admin Portal",
+        ctaUrl: appUrl,
       });
 
       const requesterReplyTo =
         typeof requestDoc.email === "string" && isValidEmailAddress(requestDoc.email.trim())
           ? requestDoc.email.trim()
-          : undefined;
+          : platformBrand.replyTo;
+
+      const logId = `em_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const nowIso = new Date().toISOString();
 
       const result = await sendEmail({
-        to: adminEmail,
-        subject: built.subject,
-        html: built.html,
-        text: built.text,
+        to: recipients,
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+        fromName: rendered.fromName,
         replyTo: requesterReplyTo,
         idempotencyKey: dedupeKey,
+        tags: [
+          { name: "hotelId", value: requestHotelId || "SYSTEM" },
+          { name: "eventType", value: "tracking_code.request_submitted" },
+          { name: "audience", value: "platform_superadmin" },
+          { name: "logId", value: logId },
+        ],
       });
 
+      const logEntry = {
+        logId,
+        hotelId: requestHotelId || "SYSTEM",
+        eventType: "tracking_code.request_submitted",
+        audience: "platform_superadmin" as const,
+        recipients,
+        subject: rendered.subject,
+        entityId: requestId,
+        idempotencyKey: dedupeKey,
+        provider: "resend" as const,
+        messageId: result.messageId,
+        status: (result.success
+          ? "accepted_by_provider"
+          : result.deliveryState === "unconfigured"
+            ? "unconfigured"
+            : "failed") as "accepted_by_provider" | "unconfigured" | "failed",
+        attempts: result.attempts,
+        error: result.error,
+        createdAt: nowIso,
+        updatedAt: new Date().toISOString(),
+      };
+      recordEmailDeliveryLog(logEntry);
+      void persistTenantEmailLogToFirestore(requestHotelId || "SYSTEM", logId, logEntry);
+
       if (!result.success) {
-        sentTransactionalEventKeys.delete(dedupeKey);
         return res.status(result.statusCode || 502).json({
           success: false,
           deliveryState: result.deliveryState,
@@ -3949,9 +5227,11 @@ async function startServer() {
         });
       }
 
+      markTransactionalEventSent(dedupeKey);
       return res.status(200).json({
         success: true,
         messageId: result.messageId,
+        logId,
         deliveryState: result.deliveryState,
         provider: result.provider,
       });
@@ -3964,7 +5244,119 @@ async function startServer() {
         success: false,
         error: sanitizeErrorForClient(err, "Failed to process tracking code request alert."),
       });
+    } finally {
+      inFlightTransactionalKeys.delete(dedupeKey);
     }
+  });
+
+  // API Route: Resend Webhook Receiver for Real-Time Delivery Lifecycle Tracking
+  app.post("/api/webhooks/resend", async (req: any, res) => {
+    const webhookSecret = (process.env.RESEND_WEBHOOK_SECRET || "").trim();
+    const rawBody =
+      typeof req.rawBody === "string" ? req.rawBody : JSON.stringify(req.body || {});
+
+    if (webhookSecret) {
+      const sigCheck = verifyResendWebhookSignature(rawBody, req.headers, webhookSecret);
+      if (!sigCheck.valid) {
+        return res.status(401).json({ error: sigCheck.error || "Invalid webhook signature." });
+      }
+    }
+
+    const eventType = typeof req.body?.type === "string" ? req.body.type.trim() : "";
+    const data = req.body?.data && typeof req.body.data === "object" ? req.body.data : {};
+    const messageId =
+      typeof data.email_id === "string"
+        ? data.email_id.trim()
+        : typeof data.id === "string"
+          ? data.id.trim()
+          : "";
+
+    if (!eventType || !messageId) {
+      return res.status(400).json({ error: "Invalid Resend webhook payload." });
+    }
+
+    // Parse Resend tags (array of { name, value } or key-value map)
+    const tagMap: Record<string, string> = {};
+    if (Array.isArray(data.tags)) {
+      for (const t of data.tags) {
+        if (t && typeof t.name === "string" && typeof t.value === "string") {
+          tagMap[t.name] = t.value;
+        }
+      }
+    } else if (data.tags && typeof data.tags === "object") {
+      for (const [k, v] of Object.entries(data.tags)) {
+        if (typeof v === "string") tagMap[k] = v;
+      }
+    }
+
+    const eventTimestamp =
+      typeof req.body?.created_at === "string" ? req.body.created_at : new Date().toISOString();
+
+    const updated = updateEmailDeliveryStatusFromWebhook({
+      webhookType: eventType,
+      messageId,
+      tags: tagMap,
+      eventTimestamp,
+    });
+
+    const tenantHotelId = updated?.hotelId || tagMap.hotelId;
+    if (tenantHotelId && isSafeIdentifier(tenantHotelId)) {
+      const whLogId = `wh_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      void persistTenantEmailLogToFirestore(tenantHotelId, whLogId, {
+        logId: updated?.logId || whLogId,
+        recordType: "webhook_delivery_event",
+        hotelId: tenantHotelId,
+        messageId,
+        webhookType: eventType,
+        deliveryStatus: updated?.status || eventType,
+        eventType: updated?.eventType || tagMap.eventType || "unknown",
+        reservationId: updated?.reservationId || tagMap.reservationId,
+        createdAt: eventTimestamp,
+      });
+    }
+
+    return res.status(200).json({
+      received: true,
+      tracked: Boolean(updated),
+      status: updated?.status || eventType,
+    });
+  });
+
+  // API Route: Tenant-Isolated Email Delivery Logs Lookup
+  app.get("/api/notifications/logs", async (req, res) => {
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
+    const requestedHotelId =
+      typeof req.query.hotelId === "string" ? req.query.hotelId.trim() : "";
+    const callerHotelId =
+      typeof caller.profile?.hotelId === "string" && caller.profile.hotelId.trim()
+        ? caller.profile.hotelId.trim()
+        : typeof caller.profile?.hotel_id === "string" && caller.profile.hotel_id.trim()
+          ? caller.profile.hotel_id.trim()
+          : "";
+    const targetHotelId = requestedHotelId || callerHotelId;
+
+    if (!isSafeIdentifier(targetHotelId)) {
+      return res.status(400).json({ error: "Valid hotelId is required." });
+    }
+
+    if (!isSuperAdminCaller(caller) && !callerIsHotelStaff(caller, targetHotelId)) {
+      return res.status(403).json({
+        error: "Forbidden: Cannot access email logs for another hotel.",
+      });
+    }
+
+    const limitParam = Number(req.query.limit || 50);
+    const logs = getTenantEmailLogs(
+      targetHotelId,
+      Number.isFinite(limitParam) ? limitParam : 50
+    );
+    return res.status(200).json({
+      hotelId: targetHotelId,
+      count: logs.length,
+      logs,
+    });
   });
 
   // API Route: Verify Email System Status (Diagnostic & Validation)

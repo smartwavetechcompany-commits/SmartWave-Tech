@@ -20,7 +20,7 @@ import {
   validateDepositApplication,
 } from '../services/guestDepositService';
 import { printDocument } from '../utils/printUtils';
-import { notifyReservationEmailEvent } from '../services/transactionalEmailClient';
+import { notifyReservationEmailEvent, notifyPlatformEvent } from '../services/transactionalEmailClient';
 import { QrCode, Key as SmartKeyIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -1685,7 +1685,7 @@ export function FrontDesk() {
       if (newBooking.guestEmail?.trim() && createdStays.length > 0) {
         try {
           for (const stay of createdStays) {
-            void notifyReservationEmailEvent(hotel.id, stay.resId, 'booking_confirmation');
+            void notifyReservationEmailEvent(hotel.id, stay.resId, 'confirmation');
           }
         } catch (emailErr) {
           console.warn('[FrontDesk] Booking confirmation email trigger skipped:', emailErr);
@@ -2792,6 +2792,15 @@ export function FrontDesk() {
             );
           }
         }
+
+        // Additive: Trigger transactional check-in email strictly on real transition to checked_in
+        if (res.status !== 'checked_in') {
+          try {
+            void notifyReservationEmailEvent(hotel.id, res.id, 'checked_in');
+          } catch (emailErr) {
+            console.warn('[FrontDesk] Check-in email trigger skipped:', emailErr);
+          }
+        }
       } else if (status === 'checked_out') {
         // 1. Authoritative financial reconciliation & stay billing before checkout
         const now = new Date();
@@ -3021,6 +3030,30 @@ export function FrontDesk() {
         } catch (err) {
           console.error("Failed to write to checkout_history:", err);
         }
+
+        // Additive: Trigger transactional check-out email (and outstanding invoice if configured) on transition to checked_out
+        if (res.status !== 'checked_out') {
+          try {
+            void notifyReservationEmailEvent(hotel.id, res.id, 'checked_out');
+            if (outstandingBalance > 0.01 && hotel.settings?.checkout?.autoGenerateOutstandingInvoice) {
+              void notifyPlatformEvent({
+                hotelId: hotel.id,
+                eventType: 'invoice.issued',
+                entityId: `checkout_inv_${res.id}`,
+                reservationId: res.id,
+                guestId: res.guestId,
+                corporateId: res.corporateId,
+                metadata: {
+                  amount: totalDebits,
+                  outstandingBalance,
+                  roomNumber: res.roomNumber,
+                },
+              });
+            }
+          } catch (emailErr) {
+            console.warn('[FrontDesk] Check-out email trigger skipped:', emailErr);
+          }
+        }
       } else if (status === 'cancelled' || status === 'no_show') {
         // Mark room as clean/vacant
         const roomRef = doc(db, 'hotels', hotel.id, 'rooms', res.roomId);
@@ -3031,12 +3064,18 @@ export function FrontDesk() {
           details: `Room ${res.roomNumber} released due to cancellation`
         });
 
-        // Additive: Trigger transactional booking cancellation email only on transition to cancelled
+        // Additive: Trigger transactional cancellation or no-show notification only on real transition
         if (status === 'cancelled' && res.status !== 'cancelled') {
           try {
-            void notifyReservationEmailEvent(hotel.id, res.id, 'booking_cancellation');
+            void notifyReservationEmailEvent(hotel.id, res.id, 'cancelled');
           } catch (emailErr) {
             console.warn('[FrontDesk] Booking cancellation email trigger skipped:', emailErr);
+          }
+        } else if (status === 'no_show' && res.status !== 'no_show') {
+          try {
+            void notifyReservationEmailEvent(hotel.id, res.id, 'no_show');
+          } catch (emailErr) {
+            console.warn('[FrontDesk] No-show alert trigger skipped:', emailErr);
           }
         }
       }

@@ -17,7 +17,7 @@ import {
 import { cn } from '../utils';
 import { motion } from 'motion/react';
 import { playNotificationSound } from '../utils/notificationSound';
-import { notifyTrackingCodeRequestAlert } from '../services/transactionalEmailClient';
+import { notifyTrackingCodeRequestAlert, notifyPlatformEvent } from '../services/transactionalEmailClient';
 
 export function SubscriptionExpiredPage() {
   const { hotel, profile } = useAuth();
@@ -181,6 +181,21 @@ export function SubscriptionExpiredPage() {
         action: 'TRACKING_CODE_USE',
         details: `Tracking code ${trackingCode.trim()} marked as used by hotel ${hotel.id}`
       });
+
+      // Additive: Trigger subscription renewal notification to hotel admin and platform superadmin
+      try {
+        void notifyPlatformEvent({
+          hotelId: hotel.id,
+          eventType: 'subscription.renewed',
+          entityId: tcDoc.id,
+          metadata: {
+            plan: selectedPlan,
+            status: 'active',
+          },
+        });
+      } catch (emailErr) {
+        console.warn('[SubscriptionExpiredPage] Subscription renewal email trigger skipped:', emailErr);
+      }
 
       showNotification('Subscription renewed successfully! Welcome back.');
       // The AuthContext listener will pick up the changes and redirect automatically

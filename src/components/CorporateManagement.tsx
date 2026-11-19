@@ -5,6 +5,7 @@ import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { CorporateAccount, CorporateRate, Room, OperationType, RoomType, Reservation } from '../types';
 import { printDocument } from '../utils/printUtils';
+import { notifyPlatformEvent } from '../services/transactionalEmailClient';
 import { 
   Building2, 
   Plus, 
@@ -544,6 +545,26 @@ export function CorporateManagement() {
       // Clear selection
       setSelectedAccountIds([]);
       toast.success(`Successfully settled debt across ${settlementsSummary.length} accounts!`);
+      try {
+        for (const item of bulkSettleAccounts) {
+          if ((item.paymentAmount || 0) <= 0) continue;
+          void notifyPlatformEvent({
+            hotelId: hotel.id,
+            eventType: 'corporate.payment_settled',
+            corporateId: item.accountId,
+            entityId: invoiceNumber,
+            idempotencyKey: `corp-bulk-settle:${hotel.id}:${item.accountId}:${invoiceNumber}`,
+            metadata: {
+              corporateName: item.accountName,
+              amount: item.paymentAmount,
+              paymentMethod: bulkPaymentMethod,
+              reference: invoiceNumber,
+            },
+          });
+        }
+      } catch {
+        // Non-blocking email dispatch
+      }
     } catch (err) {
       console.error("Bulk settlement error:", err);
       toast.error('Failed to process bulk settlement');
@@ -567,7 +588,7 @@ export function CorporateManagement() {
           details: `Updated corporate account ${newAccount.name}`
         });
       } else {
-        await database.safeAdd(collection(db, 'hotels', hotel.id, 'corporate_accounts'), {
+        const createdCorpRef = await database.safeAdd(collection(db, 'hotels', hotel.id, 'corporate_accounts'), {
           ...newAccount,
           currentBalance: 0,
           totalDebits: 0,
@@ -578,6 +599,24 @@ export function CorporateManagement() {
           action: 'CORPORATE_ACCOUNT_CREATE',
           details: `Created new corporate account ${newAccount.name}`
         });
+
+        const createdCorpId = (createdCorpRef as any)?.id;
+        if (createdCorpId) {
+          try {
+            void notifyPlatformEvent({
+              hotelId: hotel.id,
+              eventType: 'corporate.account_created',
+              corporateId: createdCorpId,
+              entityId: createdCorpId,
+              idempotencyKey: `corp-created:${hotel.id}:${createdCorpId}`,
+              metadata: {
+                corporateName: newAccount.name,
+              },
+            });
+          } catch {
+            // Non-blocking email dispatch
+          }
+        }
       }
 
       // Log the action for UI visibility

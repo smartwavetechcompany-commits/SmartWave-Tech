@@ -4,6 +4,7 @@ import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { MaintenanceRequest, OperationType, Room, UserProfile } from '../types';
+import { notifyPlatformEvent } from '../services/transactionalEmailClient';
 import { 
   Wrench, 
   AlertTriangle, 
@@ -144,6 +145,22 @@ export function Maintenance() {
       });
 
       toast.success('Maintenance request created');
+      try {
+        void notifyPlatformEvent({
+          hotelId: hotel.id,
+          eventType: 'maintenance.issue_reported',
+          idempotencyKey: `maint-new:${hotel.id}:${newRequest.roomNumber}:${Date.now()}`,
+          metadata: {
+            roomNumber: newRequest.roomNumber,
+            issue: newRequest.issue,
+            priority: newRequest.priority,
+            status: 'pending',
+            notes: newRequest.notes || undefined,
+          },
+        });
+      } catch {
+        // Non-blocking email dispatch
+      }
       setShowAddModal(false);
       setFormErrors({});
       setNewRequest({ roomNumber: '', issue: '', priority: 'medium', notes: '', assignedTo: '', dueDate: format(addDays(new Date(), 1), 'yyyy-MM-dd'), reminderAt: '' });
@@ -184,6 +201,26 @@ export function Maintenance() {
         details: 'Maintenance status update activity'
       });
       toast.success(`Request status updated to ${status.replace('_', ' ')}`);
+      if (status === 'completed') {
+        try {
+          const reqObj = requests.find(r => r.id === requestId);
+          void notifyPlatformEvent({
+            hotelId: hotel.id,
+            eventType: 'maintenance.issue_resolved',
+            entityId: requestId,
+            idempotencyKey: `maint-resolved:${hotel.id}:${requestId}`,
+            metadata: {
+              roomNumber: reqObj?.roomNumber || undefined,
+              issue: reqObj?.issue || undefined,
+              priority: reqObj?.priority || undefined,
+              status: 'completed',
+              notes: reqObj?.notes || undefined,
+            },
+          });
+        } catch {
+          // Non-blocking email dispatch
+        }
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/maintenance/${requestId}`);
       toast.error('Failed to update request status');

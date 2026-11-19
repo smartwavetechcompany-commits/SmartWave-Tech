@@ -16,6 +16,7 @@ import {
   RESTAURANT_POSTING_BLOCKED_MESSAGE,
 } from '../utils/restaurantPostingGuard';
 import { createNotification } from './Notifications';
+import { notifyPlatformEvent } from '../services/transactionalEmailClient';
 import { printDocument } from '../utils/printUtils';
 import { 
   ChefHat, 
@@ -991,6 +992,23 @@ export function FandB() {
       });
 
       toast.success(`Order ${order.billNumber || '#' + order.id.slice(-6)} voided and financials reversed`);
+      try {
+        void notifyPlatformEvent({
+          hotelId: hotel.id,
+          eventType: 'fnb.order_voided',
+          entityId: order.id,
+          reservationId: order.reservationId || undefined,
+          guestId: order.guestId && order.guestId !== 'unknown' ? order.guestId : undefined,
+          metadata: {
+            billNumber: order.billNumber || order.id.slice(-6),
+            roomNumber: order.roomNumber || undefined,
+            amount: order.totalAmount || order.price || 0,
+            reason: voidReason.trim(),
+          },
+        });
+      } catch {
+        // Non-blocking email dispatch
+      }
       setVoidOrderModal(null);
       setVoidReason('');
     } catch (err: any) {
@@ -1178,6 +1196,23 @@ export function FandB() {
         await recalculateReservationAccountFromLedger(hotel.id, res.id).catch(() => {});
 
         toast.success(`Successfully charged ${formatCurrency(settleAmount, currency, exchangeRate)} to Room ${res.roomNumber} folio`);
+        try {
+          void notifyPlatformEvent({
+            hotelId: hotel.id,
+            eventType: 'fnb.order_posted',
+            entityId: settleOrderModal.id,
+            reservationId: res.id,
+            guestId: guestId && guestId !== 'unknown' ? guestId : undefined,
+            metadata: {
+              billNumber: billNo,
+              roomNumber: res.roomNumber || settleOrderModal.roomNumber || undefined,
+              amount: settleAmount,
+              outletName: settleOrderModal.outletName || 'Restaurant',
+            },
+          });
+        } catch {
+          // Non-blocking email dispatch
+        }
         setSettleOrderModal(null);
       } catch (err: any) {
         console.error('Error charging F&B order to room:', err);

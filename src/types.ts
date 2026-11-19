@@ -203,6 +203,33 @@ export interface HotelBranding {
   };
 }
 
+export interface HotelEmailConfig {
+  supportEmail?: string;
+  replyToEmail?: string;
+  senderDisplayName?: string;
+  adminRecipients?: string[];
+  departmentRecipients?: {
+    frontDesk?: string[];
+    finance?: string[];
+    restaurant?: string[];
+    housekeeping?: string[];
+    maintenance?: string[];
+    corporate?: string[];
+    hr?: string[];
+    admin?: string[];
+  };
+  trackingCodeAlertRecipients?: string[];
+  enabledEvents?: Record<string, boolean>;
+}
+
+export interface ReservationEmailsSentMap {
+  confirmation?: string;
+  checkedIn?: string;
+  checkedOut?: string;
+  cancelled?: string;
+  noShow?: string;
+}
+
 export interface BookingSource {
   id: string;
   name: string;
@@ -387,6 +414,7 @@ export interface Hotel {
   overstayFullHours?: number;
   lastAuditDate?: string; // Tracks the last time the global nightly audit was run
   settings?: HotelSettings;
+  emailConfig?: HotelEmailConfig;
   planHistory?: {
     plan: PlanType;
     previousPlan?: PlanType;
@@ -643,6 +671,7 @@ export interface Reservation {
   linkedReservationIds?: string[];
   linkedRoomNumbers?: string[];
   groupBillingPreference?: 'consolidated' | 'separate';
+  emailsSent?: ReservationEmailsSentMap;
 }
 
 export type RateSourceType =

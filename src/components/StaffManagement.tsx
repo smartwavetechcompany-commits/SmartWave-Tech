@@ -13,6 +13,7 @@ import { AccountCreationSummaryModal, UserSummaryData } from './AccountCreationS
 import { AdminResetPasswordModal } from './AdminResetPasswordModal';
 import { generateAccountActivationToken, resendAccountActivationEmail } from '../utils/passwordResetService';
 import { provisionStaffAccount, resendStaffActivation } from '../services/staffProvisionService';
+import { notifyPlatformEvent } from '../services/transactionalEmailClient';
 import { 
   UserPlus, 
   Search, 
@@ -472,6 +473,20 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
       });
       toast.dismiss();
       toast.success(`${member.displayName || member.email} is now Active & Verified!`);
+      try {
+        void notifyPlatformEvent({
+          hotelId: member.hotelId || hotelId,
+          eventType: 'staff.account_status_changed',
+          staffUid: member.uid,
+          entityId: member.uid,
+          idempotencyKey: `staff-status:${member.uid}:active:${Date.now()}`,
+          metadata: {
+            status: 'active',
+          },
+        });
+      } catch {
+        // Non-blocking email dispatch
+      }
     } catch (err: any) {
       toast.dismiss();
       toast.error(`Could not activate staff account: ${err.message}`);
@@ -532,6 +547,20 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
       toast.dismiss();
       toast.success(`Account for ${member.email} ${willSuspend ? 'suspended & all active sessions terminated' : 'successfully reactivated'}`);
+      try {
+        void notifyPlatformEvent({
+          hotelId: member.hotelId || hotelId,
+          eventType: 'staff.account_status_changed',
+          staffUid: member.uid,
+          entityId: member.uid,
+          idempotencyKey: `staff-status:${member.uid}:${targetStatus}:${Date.now()}`,
+          metadata: {
+            status: targetStatus,
+          },
+        });
+      } catch {
+        // Non-blocking email dispatch
+      }
       setShowConfirmSuspend(null);
     } catch (err: any) {
       toast.dismiss();

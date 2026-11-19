@@ -478,6 +478,15 @@ export function QuickCheckInModal({
         { reservationId: res.id, roomNumber: res.roomNumber, guestName: res.guestName }
       );
 
+      // Additive: Trigger transactional check-in email strictly on real transition to checked_in
+      if (res.status !== 'checked_in') {
+        try {
+          void notifyReservationEmailEvent(hotel.id, res.id, 'checked_in');
+        } catch (emailErr) {
+          console.warn('[QuickCheckInModal] Arrival check-in email trigger skipped:', emailErr);
+        }
+      }
+
       toast.success(`Check-In Complete! ${res.guestName} checked in to Room ${res.roomNumber}.`);
       onClose();
     } catch (err: any) {
@@ -733,12 +742,12 @@ export function QuickCheckInModal({
         { reservationId, roomNumber: selectedRoom.roomNumber, guestName: trimmedName, guestId: linkedGuestId }
       );
 
-      // Additive: Trigger transactional booking confirmation email if guest provided an email
+      // Additive: Walk-in is created already checked_in -> send single check-in email (skip separate confirmation)
       if (trimmedEmail) {
         try {
-          void notifyReservationEmailEvent(hotel.id, reservationId, 'booking_confirmation');
+          void notifyReservationEmailEvent(hotel.id, reservationId, 'checked_in');
         } catch (emailErr) {
-          console.warn('[QuickCheckInModal] Walk-in confirmation email trigger skipped:', emailErr);
+          console.warn('[QuickCheckInModal] Walk-in check-in email trigger skipped:', emailErr);
         }
       }
 

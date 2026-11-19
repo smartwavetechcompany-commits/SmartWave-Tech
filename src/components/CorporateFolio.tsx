@@ -29,6 +29,7 @@ import { safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 import { increment, updateDoc, addDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { transferCorporateBalance, reconcileCorporateAccountBalance, settleLedger, postToLedger } from '../services/ledgerService';
+import { notifyPlatformEvent } from '../services/transactionalEmailClient';
 import { getReservationLiveBalance } from '../utils/billingEngine';
 import { calculateCorporateUnpostedStayCharge } from '../utils/financialUtils';
 import { Pagination } from './Pagination';
@@ -253,6 +254,23 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
       await reconcileCorporateAccountBalance(hotel.id, currentAccount.id);
 
       toast.success('Payment settled successfully');
+      try {
+        const methods = Array.from(new Set(settleData.splits.filter(s => s.amount > 0).map(s => s.method))).join(', ');
+        void notifyPlatformEvent({
+          hotelId: hotel.id,
+          eventType: 'corporate.payment_settled',
+          corporateId: currentAccount.id,
+          idempotencyKey: `corp-folio-settle:${hotel.id}:${currentAccount.id}:${Date.now()}`,
+          metadata: {
+            corporateName: currentAccount.name,
+            amount: totalAmount,
+            paymentMethod: methods || 'mixed',
+            reference: settleData.notes || undefined,
+          },
+        });
+      } catch {
+        // Non-blocking email dispatch
+      }
       setShowSettlePayment(false);
       setSettleData({ splits: [{ amount: 0, method: 'cash' }], notes: '' });
     } catch (err) {

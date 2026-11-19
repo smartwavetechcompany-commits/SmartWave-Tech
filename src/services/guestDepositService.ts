@@ -15,6 +15,7 @@ import {
 } from './ledgerService';
 import { getReservationLiveBalance } from '../utils/billingEngine';
 import { hasPermission } from '../utils/permissions';
+import { notifyPlatformEvent } from './transactionalEmailClient';
 
 export const GUEST_DEPOSIT_PERMISSION_DENIED_MESSAGE =
   'Unauthorized: You do not have the "Deposit Money to Guest Account" permission.';
@@ -323,6 +324,24 @@ export async function refundGuestDeposit(
       role: userContext.role || 'staff',
     },
   });
+
+  // Additive: Trigger guest deposit refund confirmation email
+  try {
+    void notifyPlatformEvent({
+      hotelId,
+      eventType: 'refund.processed',
+      entityId: txRef.id,
+      guestId,
+      metadata: {
+        amount: finalAmount,
+        paymentMethod,
+        reason: reason.trim(),
+        reference: options?.referenceCode?.trim() || txRef.id,
+      },
+    });
+  } catch {
+    // Non-blocking
+  }
 
   return { transaction: txRecord, balanceBefore, balanceAfter };
 }

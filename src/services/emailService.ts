@@ -19,6 +19,8 @@ export interface SendEmailParams {
   fromName?: string;
   replyTo?: string;
   idempotencyKey?: string;
+  tags?: { name: string; value: string }[];
+  maxRetries?: number;
 }
 
 export type EmailDeliveryState =
@@ -32,6 +34,7 @@ export interface SendEmailResult {
   deliveryState: EmailDeliveryState;
   provider: "resend";
   statusCode: number;
+  attempts?: number;
   error?: string;
 }
 
@@ -374,6 +377,7 @@ export async function sendEmail(
     html: string;
     text?: string;
     replyTo?: string;
+    tags?: { name: string; value: string }[];
   } = {
     from: fromIdentity.formatted,
     to: recipientCheck.recipients,
@@ -389,61 +393,140 @@ export async function sendEmail(
     payload.replyTo = params.replyTo.trim();
   }
 
-  try {
-    const sendOptions =
-      typeof params.idempotencyKey === "string" && params.idempotencyKey.trim()
-        ? { idempotencyKey: params.idempotencyKey.trim().slice(0, 128) }
-        : undefined;
+  if (Array.isArray(params.tags) && params.tags.length > 0) {
+    const cleanTags = params.tags
+      .filter((t) => t && typeof t.name === "string" && typeof t.value === "string")
+      .map((t) => ({
+        name: t.name.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64),
+        value: t.value.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 128),
+      }))
+      .filter((t) => t.name.length > 0 && t.value.length > 0)
+      .slice(0, 10);
+    if (cleanTags.length > 0) {
+      payload.tags = cleanTags;
+    }
+  }
 
-    const response = await client.emails.send(payload, sendOptions);
+  const maxRetries =
+    typeof params.maxRetries === "number" && Number.isFinite(params.maxRetries)
+      ? Math.max(0, Math.min(3, Math.floor(params.maxRetries)))
+      : 2;
 
-    if (response.error) {
-      const safeErr = redactSecrets(
-        response.error.message || "Resend API rejected the email dispatch request."
+  const isTransientResendError = (errObj: any, message: string): boolean => {
+    const status = Number(errObj?.statusCode || errObj?.status || 0);
+    if (status === 429 || status >= 500) return true;
+    if (status >= 400 && status < 500) return false;
+    const lower = message.toLowerCase();
+    return (
+      lower.includes("timeout") ||
+      lower.includes("timed out") ||
+      lower.includes("rate limit") ||
+      lower.includes("too many requests") ||
+      lower.includes("temporarily unavailable") ||
+      lower.includes("econnreset") ||
+      lower.includes("enotfound") ||
+      lower.includes("fetch failed") ||
+      lower.includes("network")
+    );
+  };
+
+  const sendOptions =
+    typeof params.idempotencyKey === "string" && params.idempotencyKey.trim()
+      ? { idempotencyKey: params.idempotencyKey.trim().slice(0, 128) }
+      : undefined;
+
+  let lastError = "Unexpected error while sending email via Resend.";
+  let attempts = 0;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    attempts = attempt + 1;
+    try {
+      const response = await client.emails.send(payload, sendOptions);
+
+      if (response.error) {
+        const rawErrMsg =
+          response.error.message || "Resend API rejected the email dispatch request.";
+        const safeErr = redactSecrets(rawErrMsg);
+        lastError = safeErr;
+
+        if (attempt < maxRetries && isTransientResendError(response.error, rawErrMsg)) {
+          const delayMs = 250 * Math.pow(2, attempt);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+
+        console.error(`[EMAIL SERVICE] Resend API error (attempt ${attempts}):`, safeErr);
+        return {
+          success: false,
+          deliveryState: "failed",
+          provider: "resend",
+          statusCode: 502,
+          attempts,
+          error: safeErr,
+        };
+      }
+
+      const messageId = response.data?.id;
+      if (!messageId) {
+        lastError = "Resend returned an empty response without a message ID.";
+        if (attempt < maxRetries) {
+          const delayMs = 250 * Math.pow(2, attempt);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+        return {
+          success: false,
+          deliveryState: "failed",
+          provider: "resend",
+          statusCode: 502,
+          attempts,
+          error: lastError,
+        };
+      }
+
+      console.log(
+        `[EMAIL SERVICE] Dispatched via Resend | From: ${fromIdentity.email} | MessageId: ${messageId} | Attempts: ${attempts}`
       );
-      console.error("[EMAIL SERVICE] Resend API error:", safeErr);
+
+      return {
+        success: true,
+        messageId,
+        deliveryState: "accepted_by_provider",
+        provider: "resend",
+        statusCode: 200,
+        attempts,
+      };
+    } catch (err: any) {
+      const rawMsg = err?.message || "Unexpected error while sending email via Resend.";
+      const safeErr = redactSecrets(rawMsg);
+      lastError = safeErr;
+
+      if (attempt < maxRetries && isTransientResendError(err, rawMsg)) {
+        const delayMs = 250 * Math.pow(2, attempt);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+
+      console.error(`[EMAIL SERVICE] Exception during Resend dispatch (attempt ${attempts}):`, safeErr);
       return {
         success: false,
         deliveryState: "failed",
         provider: "resend",
         statusCode: 502,
+        attempts,
         error: safeErr,
       };
     }
-
-    const messageId = response.data?.id;
-    if (!messageId) {
-      return {
-        success: false,
-        deliveryState: "failed",
-        provider: "resend",
-        statusCode: 502,
-        error: "Resend returned an empty response without a message ID.",
-      };
-    }
-
-    console.log(
-      `[EMAIL SERVICE] Dispatched via Resend | From: ${fromIdentity.email} | MessageId: ${messageId}`
-    );
-
-    return {
-      success: true,
-      messageId,
-      deliveryState: "accepted_by_provider",
-      provider: "resend",
-      statusCode: 200,
-    };
-  } catch (err: any) {
-    const safeErr = redactSecrets(err?.message || "Unexpected error while sending email via Resend.");
-    console.error("[EMAIL SERVICE] Exception during Resend dispatch:", safeErr);
-    return {
-      success: false,
-      deliveryState: "failed",
-      provider: "resend",
-      statusCode: 502,
-      error: safeErr,
-    };
   }
+
+  return {
+    success: false,
+    deliveryState: "failed",
+    provider: "resend",
+    statusCode: 502,
+    attempts,
+    error: lastError,
+  };
 }
 
 export interface BookingEmailTemplateData {

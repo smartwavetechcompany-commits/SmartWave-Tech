@@ -3,6 +3,7 @@ import { collection, query, where, doc, onSnapshot, writeBatch, orderBy, limit }
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
+import { notifyPlatformEvent } from '../services/transactionalEmailClient';
 import { 
   Room, 
   OperationType, 
@@ -686,6 +687,21 @@ export function Housekeeping() {
           details: `Room ${room.roomNumber} passed inspection (${score}%) - Ready for guest`
         });
         toast.success(`Room ${room.roomNumber} PASSED! Marked Clean & Ready for Guest.`);
+        try {
+          void notifyPlatformEvent({
+            hotelId: hotel.id,
+            eventType: 'housekeeping.room_ready',
+            entityId: room.id,
+            idempotencyKey: `hk-ready:${hotel.id}:${room.id}:${now}`,
+            metadata: {
+              roomNumber: room.roomNumber,
+              score,
+              remarks: inspectionRemarks || 'Inspected and certified clean',
+            },
+          });
+        } catch {
+          // Non-blocking email dispatch
+        }
       } else {
         // Status: Failed -> Correction Required (Room goes back to Dirty / Correction)
         await database.safeSet(doc(db, 'hotels', hotel.id, 'rooms', room.id), {
@@ -703,6 +719,21 @@ export function Housekeeping() {
           details: `Room ${room.roomNumber} failed inspection (${score}%) - Correction required`
         });
         toast.error(`Room ${room.roomNumber} marked as FAILED. Correction required.`);
+        try {
+          void notifyPlatformEvent({
+            hotelId: hotel.id,
+            eventType: 'housekeeping.inspection_failed',
+            entityId: room.id,
+            idempotencyKey: `hk-failed:${hotel.id}:${room.id}:${now}`,
+            metadata: {
+              roomNumber: room.roomNumber,
+              score,
+              remarks: inspectionRemarks || 'Items failed during inspection',
+            },
+          });
+        } catch {
+          // Non-blocking email dispatch
+        }
       }
 
       // Log Inspection Record
@@ -856,6 +887,22 @@ export function Housekeeping() {
       }
 
       toast.success(`Maintenance ticket created for Room ${maintenanceForm.roomNumber}`);
+      try {
+        void notifyPlatformEvent({
+          hotelId: hotel.id,
+          eventType: 'maintenance.issue_reported',
+          idempotencyKey: `hk-maint:${hotel.id}:${maintenanceForm.roomNumber}:${now}`,
+          metadata: {
+            roomNumber: maintenanceForm.roomNumber,
+            issue: `[${maintenanceForm.category}] ${maintenanceForm.issue}`,
+            priority: maintenanceForm.priority,
+            status: 'pending',
+            notes: `Reported by Housekeeping Department. Category: ${maintenanceForm.category}`,
+          },
+        });
+      } catch {
+        // Non-blocking email dispatch
+      }
       setShowMaintenanceModal(false);
       setMaintenanceForm({
         roomNumber: '',
@@ -930,6 +977,21 @@ export function Housekeeping() {
       });
 
       toast.success(`Request for Room ${guestRequestForm.roomNumber} logged`);
+      try {
+        void notifyPlatformEvent({
+          hotelId: hotel.id,
+          eventType: 'housekeeping.guest_request',
+          idempotencyKey: `hk-req:${hotel.id}:${guestRequestForm.roomNumber}:${now}`,
+          metadata: {
+            roomNumber: guestRequestForm.roomNumber,
+            item: guestRequestForm.item,
+            priority: guestRequestForm.priority,
+            remarks: guestRequestForm.notes || undefined,
+          },
+        });
+      } catch {
+        // Non-blocking email dispatch
+      }
       setShowGuestRequestModal(false);
       setGuestRequestForm({
         roomNumber: '',
