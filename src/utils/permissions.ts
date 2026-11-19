@@ -50,6 +50,7 @@ export type Permission =
   | 'process_refunds'
   | 'reverse_transactions'
   | 'export_financial_data'
+  | 'view_total_revenue_collected'
 
   // --- REPORTS ---
   | 'view_reports'
@@ -240,6 +241,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { id: 'process_refunds', label: 'Process Refunds', description: 'Issue refunds to customers' },
       { id: 'reverse_transactions', label: 'Reverse Transactions', description: 'Reverse accidental or disputed entries' },
       { id: 'export_financial_data', label: 'Export Financial Data', description: 'Download transaction audits' },
+      { id: 'view_total_revenue_collected', label: 'View Total Revenue Collected', description: 'Authorize staff (e.g., Finance) to view the hotel Total Collected revenue amount' },
       { id: 'view_city_ledger', label: 'View City Ledger', description: 'Corporate accounts and receivables' },
       { id: 'view_debt_ledger', label: 'View Outstanding Debt Ledger', description: 'Access guest receivables and aging reports' },
       { id: 'transfer_debt', label: 'Transfer Debt', description: 'Transfer debt to Corporate, City Ledger, or House accounts' },
@@ -430,29 +432,29 @@ export const SYSTEM_ROLE_TEMPLATES: Record<string, { name: string; description: 
     name: 'Hotel Manager',
     description: 'Comprehensive property supervision across operations, staff, and finance',
     permissions: [
-      ...ALL_PERMISSIONS.filter(p => !['access_super_admin'].includes(p))
+      ...ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected'].includes(p))
     ]
   },
   generalManager: {
     name: 'General Manager',
     description: 'Full operational, administrative, and strategic authority over the hotel property',
     permissions: [
-      ...ALL_PERMISSIONS.filter(p => !['access_super_admin'].includes(p))
+      ...ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected'].includes(p))
     ]
   },
   hotelOwner: {
     name: 'Hotel Owner',
     description: 'Executive ownership role with complete configuration and financial authority',
     permissions: [
-      ...ALL_PERMISSIONS.filter(p => !['access_super_admin'].includes(p))
+      ...ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected'].includes(p))
     ]
   }
 };
 
 export const BASE_ROLE_PERMISSIONS: Record<string, Permission[]> = {
   superAdmin: ALL_PERMISSIONS,
-  hotelAdmin: ALL_PERMISSIONS.filter(p => p !== 'access_super_admin'),
-  admin: ALL_PERMISSIONS.filter(p => p !== 'access_super_admin'),
+  hotelAdmin: ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected'].includes(p)),
+  admin: ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected'].includes(p)),
   manager: SYSTEM_ROLE_TEMPLATES.hotelManager.permissions,
   frontDesk: SYSTEM_ROLE_TEMPLATES.frontDeskAgent.permissions,
   receptionist: SYSTEM_ROLE_TEMPLATES.frontDeskAgent.permissions,
@@ -571,6 +573,7 @@ const PERMISSION_FIELD_PATH_MAP: Record<string, { modules: string[]; actions: st
   process_refunds: { modules: ['finance'], actions: ['refunds', 'processRefunds'] },
   void_transaction: { modules: ['finance'], actions: ['void', 'voidTransaction'] },
   export_financial_data: { modules: ['finance'], actions: ['export', 'exportFinancial'] },
+  view_total_revenue_collected: { modules: ['finance', 'dashboard'], actions: ['viewTotalRevenueCollected', 'view_total_revenue_collected'] },
   view_debt_ledger: { modules: ['finance'], actions: ['viewDebtLedger', 'debtLedger'] },
   view_city_ledger: { modules: ['finance'], actions: ['viewCityLedger', 'cityLedger'] },
 
@@ -954,5 +957,58 @@ export const isPrimaryHotelAdminUser = (
   }
   return !profile.activationEmailSentBy && !profile.activationToken && !profile.activationLink;
 };
+
+/**
+ * Determines whether a user is allowed to view the hotel's Total Revenue Collected figure.
+ * - Super Admin and the primary Hotel Admin always have access.
+ * - Created users (including staff and secondary admins created by Hotel Admin) cannot see
+ *   Total Collected unless explicitly granted the 'view_total_revenue_collected' RBAC permission
+ *   (directly or via their assigned custom role).
+ */
+export const canViewTotalRevenueCollected = (
+  profile: any,
+  customRoles: any[] = [],
+  hotel?: { adminUIDs?: string[] } | null
+): boolean => {
+  if (!profile) return false;
+  if (profile.status === 'suspended' || profile.status === 'inactive') return false;
+  if (profile.role === 'superAdmin') return true;
+  if (isPrimaryHotelAdminUser(profile, hotel)) return true;
+
+  if (profile.customRoleId) {
+    if (customRoles.length > 0) {
+      const customRole = customRoles.find(r => r.id === profile.customRoleId);
+      if (customRole) {
+        if (customRole.status === 'disabled' || customRole.status === 'archived') {
+          return false;
+        }
+        return evaluateExplicitPermissions(
+          customRole.permissions || [],
+          'view_total_revenue_collected',
+          ['view_total_revenue_collected']
+        );
+      }
+    }
+    if (profile.permissions !== undefined && profile.permissions !== null) {
+      return evaluateExplicitPermissions(
+        profile.permissions,
+        'view_total_revenue_collected',
+        ['view_total_revenue_collected']
+      );
+    }
+    return false;
+  }
+
+  if (profile.permissions !== undefined && profile.permissions !== null) {
+    return evaluateExplicitPermissions(
+      profile.permissions,
+      'view_total_revenue_collected',
+      ['view_total_revenue_collected']
+    );
+  }
+
+  return false;
+};
+
 
 

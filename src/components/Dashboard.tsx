@@ -8,7 +8,7 @@ import { formatCurrency, cn } from '../utils';
 import { isModuleEnabled } from '../utils/plans';
 import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
 import { getRoomDisplayStatus } from '../utils/roomUtils';
-import { hasFinancialVisibility } from '../utils/permissions';
+import { hasFinancialVisibility, canViewTotalRevenueCollected } from '../utils/permissions';
 import {
   reconcileFinanceRecords,
   reconcileLedgerEntries,
@@ -236,6 +236,7 @@ export function Dashboard() {
 
   // RBAC: Determine if current user has Finance or Hotel Admin permissions
   const canViewFinances = hasFinancialVisibility(profile, customRoles);
+  const canViewTotalCollected = canViewTotalRevenueCollected(profile, customRoles, hotel);
 
   // Proactive safety timeout so UI never hangs in loading state
   useEffect(() => {
@@ -479,7 +480,7 @@ export function Dashboard() {
 
   // Total Collected: Authoritative verified money collected matching Finance -> Overview
   const totalRevenue = useMemo(() => {
-    if (!canViewFinances) return 0;
+    if (!canViewFinances && !canViewTotalCollected) return 0;
 
     const financeIncomeTotal = validFinance
       .filter(f => f.type === 'income')
@@ -489,7 +490,7 @@ export function Dashboard() {
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
 
     return Number((financeIncomeTotal + unlinkedLedgerTotal).toFixed(2));
-  }, [canViewFinances, validFinance, unlinkedPaymentLedgerEntries]);
+  }, [canViewFinances, canViewTotalCollected, validFinance, unlinkedPaymentLedgerEntries]);
 
   const todayRevenue = useMemo(() => {
     if (!canViewFinances) return 0;
@@ -616,13 +617,13 @@ export function Dashboard() {
             color: 'text-amber-500',
             module: 'finance'
           },
-          { 
+          ...(canViewTotalCollected ? [{ 
             label: 'Total Collected', 
             value: formatCurrency(totalRevenue, currency, exchangeRate), 
             icon: DollarSign, 
             color: 'text-emerald-400',
             module: 'finance'
-          },
+          }] : []),
           { 
             label: 'Total Transactions', 
             value: totalTransactionsCount, 
@@ -652,6 +653,12 @@ export function Dashboard() {
             icon: DollarSign, 
             color: 'text-emerald-400' 
           },
+          ...(canViewTotalCollected && isModuleEnabled(hotel, 'finance') ? [{
+            label: 'Total Collected',
+            value: formatCurrency(totalRevenue, currency, exchangeRate),
+            icon: DollarSign,
+            color: 'text-emerald-400'
+          }] : []),
           { 
             label: 'Occupancy', 
             value: `${occupancyRate}%`, 

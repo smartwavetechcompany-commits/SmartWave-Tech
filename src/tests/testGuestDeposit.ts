@@ -4,7 +4,7 @@ import {
   getAvailableGuestDeposit,
   validateDepositApplication,
 } from '../services/guestDepositService';
-import { isPrimaryHotelAdminUser } from '../utils/permissions';
+import { isPrimaryHotelAdminUser, canViewTotalRevenueCollected } from '../utils/permissions';
 import type { Guest } from '../types';
 
 function runGuestDepositTests() {
@@ -157,6 +157,72 @@ function runGuestDepositTests() {
     isPrimaryHotelAdminUser({ uid: 'staff_uid', role: 'staff', staffRole: 'frontDesk' }, hotelStub),
     false,
     'Regular staff does not see countdown'
+  );
+
+  // 6. Total Revenue Collected RBAC visibility
+  assert.equal(
+    canViewTotalRevenueCollected({ uid: 'sa1', role: 'superAdmin' }, [], hotelStub),
+    true,
+    'Super Admin can view Total Collected'
+  );
+  assert.equal(
+    canViewTotalRevenueCollected({ uid: 'primary_admin_uid', role: 'hotelAdmin' }, [], hotelStub),
+    true,
+    'Primary Hotel Admin can view Total Collected'
+  );
+  assert.equal(
+    canViewTotalRevenueCollected(
+      { uid: 'secondary_staff_admin_uid', role: 'hotelAdmin', permissions: ['view_dashboard', 'view_financial_records'] },
+      [],
+      hotelStub
+    ),
+    false,
+    'Created secondary admin without view_total_revenue_collected cannot view Total Collected'
+  );
+  assert.equal(
+    canViewTotalRevenueCollected(
+      { uid: 'fd1', role: 'staff', staffRole: 'frontDesk', permissions: ['view_dashboard', 'view_ledger', 'receive_payments'] },
+      [],
+      hotelStub
+    ),
+    false,
+    'Created Front Desk staff cannot view Total Collected'
+  );
+  assert.equal(
+    canViewTotalRevenueCollected(
+      { uid: 'acc1', role: 'staff', staffRole: 'accountant', permissions: ['view_dashboard', 'view_financial_records', 'view_ledger'] },
+      [],
+      hotelStub
+    ),
+    false,
+    'Created staff without explicit view_total_revenue_collected permission cannot view Total Collected'
+  );
+  assert.equal(
+    canViewTotalRevenueCollected(
+      { uid: 'fin1', role: 'staff', staffRole: 'accountant', permissions: ['view_dashboard', 'view_financial_records', 'view_total_revenue_collected'] },
+      [],
+      hotelStub
+    ),
+    true,
+    'Finance staff explicitly granted view_total_revenue_collected can view Total Collected'
+  );
+  assert.equal(
+    canViewTotalRevenueCollected(
+      { uid: 'fin2', role: 'staff', customRoleId: 'role_finance_lead', permissions: [] },
+      [{ id: 'role_finance_lead', status: 'active', permissions: ['view_financial_records', 'view_total_revenue_collected'] }],
+      hotelStub
+    ),
+    true,
+    'Staff with custom Finance role granting view_total_revenue_collected can view Total Collected'
+  );
+  assert.equal(
+    canViewTotalRevenueCollected(
+      { uid: 'fin3', role: 'staff', status: 'suspended', permissions: ['view_total_revenue_collected'] },
+      [],
+      hotelStub
+    ),
+    false,
+    'Suspended staff cannot view Total Collected'
   );
 
   console.log('ALL GUEST DEPOSIT TESTS PASSED');

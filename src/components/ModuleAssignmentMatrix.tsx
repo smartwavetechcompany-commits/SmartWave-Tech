@@ -226,6 +226,7 @@ export const PMS_MODULES: ModuleDefinition[] = [
       { id: 'adjust_debt', name: 'Adjust Debt', description: 'Post approved balance adjustments and credit notes' },
       { id: 'write_off_debt', name: 'Write-Off Bad Debt', description: 'Authorize debt write-offs with mandatory reason' },
       { id: 'export_financial_data', name: 'Export Financial Data', description: 'Download CSV and Excel files of accounting ledgers' },
+      { id: 'view_total_revenue_collected', name: 'View Total Revenue Collected', description: 'Authorize staff (e.g., Finance) to view the hotel Total Collected revenue amount' },
     ]
   },
   {
@@ -422,7 +423,8 @@ export function ModuleAssignmentMatrix({
       case 'manager':
         targetPerms = PMS_MODULES
           .filter(m => m.id !== 'settings')
-          .flatMap(m => [...m.primaryPermissions, ...m.granularPermissions.map(p => p.id)]);
+          .flatMap(m => [...m.primaryPermissions, ...m.granularPermissions.map(p => p.id)])
+          .filter(p => p !== 'view_total_revenue_collected');
         break;
 
       case 'all':
