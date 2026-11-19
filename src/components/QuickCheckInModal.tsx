@@ -31,6 +31,7 @@ import { logActivity } from '../utils/activityLogger';
 import { postToLedger, settleLedger } from '../services/ledgerService';
 import { buildInitialRateSnapshot, ensureBaseRateSnapshot } from '../utils/rateSnapshot';
 import { toast } from 'sonner';
+import { notifyReservationEmailEvent } from '../services/transactionalEmailClient';
 
 export function isRoomDirtyOrUnprepared(room: Room | undefined | null): boolean {
   if (!room) return false;
@@ -731,6 +732,15 @@ export function QuickCheckInModal({
         { status: 'checked_in', roomNumber: selectedRoom.roomNumber, totalAmount: walkInTotalAmount, guestId: linkedGuestId },
         { reservationId, roomNumber: selectedRoom.roomNumber, guestName: trimmedName, guestId: linkedGuestId }
       );
+
+      // Additive: Trigger transactional booking confirmation email if guest provided an email
+      if (trimmedEmail) {
+        try {
+          void notifyReservationEmailEvent(hotel.id, reservationId, 'booking_confirmation');
+        } catch (emailErr) {
+          console.warn('[QuickCheckInModal] Walk-in confirmation email trigger skipped:', emailErr);
+        }
+      }
 
       toast.success(`Express Check-In Successful! ${trimmedName} checked in to Room ${selectedRoom.roomNumber}.`);
       onClose();

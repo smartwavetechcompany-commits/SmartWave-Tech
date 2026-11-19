@@ -27,7 +27,14 @@ import {
   isResendConfigured,
   getResendFromIdentity,
 } from "./src/services/resendEmailService.ts";
-import { sendEmail } from "./src/services/emailService.ts";
+import {
+  sendEmail,
+  validateEmailConfig,
+  getAppUrl,
+  buildBookingConfirmationEmail,
+  buildBookingCancellationEmail,
+  buildTrackingCodeRequestAlertEmail,
+} from "./src/services/emailService.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -95,6 +102,8 @@ async function startServer() {
     "/auth/resend-activation-link",
     "/admin/send-tracking-code",
     "/emails/send",
+    "/emails/reservation-event",
+    "/emails/tracking-code-request-alert",
   ]);
   app.use("/api/", (req, res, next) => {
     // Exempt health check
@@ -3566,6 +3575,394 @@ async function startServer() {
       return res.status(500).json({
         success: false,
         error: sanitizeErrorForClient(err, "Failed to dispatch email."),
+      });
+    }
+  });
+
+  // Helper: Read a Firestore document server-side (Firestore REST API with optional caller token, falling back to SDK)
+  async function readFirestoreDocServerSide(
+    docPath: string,
+    bearerToken?: string
+  ): Promise<Record<string, any> | null> {
+    if (firebaseConfig?.projectId) {
+      try {
+        const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+        const encodedPath = docPath
+          .split("/")
+          .filter(Boolean)
+          .map((seg) => encodeURIComponent(seg))
+          .join("/");
+        const restUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents/${encodedPath}`;
+        const headers: Record<string, string> = {};
+        if (bearerToken) {
+          headers.Authorization = `Bearer ${bearerToken}`;
+        }
+        const fsResp = await fetch(restUrl, { headers });
+        if (fsResp.ok) {
+          const fsDoc = await fsResp.json();
+          if (fsDoc?.fields) {
+            const decoded: Record<string, any> = {};
+            for (const [k, v] of Object.entries(fsDoc.fields)) {
+              decoded[k] = decodeFirestoreValue(v);
+            }
+            return decoded;
+          }
+        }
+      } catch {
+        // Fall through to Firestore client SDK fallback
+      }
+    }
+
+    if (db) {
+      try {
+        const segments = docPath.split("/").filter(Boolean);
+        if (segments.length >= 2 && segments.length % 2 === 0) {
+          const { doc, getDoc } = await import("firebase/firestore");
+          const snap = await getDoc(doc(db, segments[0], ...segments.slice(1)));
+          if (snap.exists()) {
+            return snap.data() as Record<string, any>;
+          }
+        }
+      } catch {
+        // Return null when inaccessible
+      }
+    }
+
+    return null;
+  }
+
+  // Bounded in-memory deduplication for transactional email events (defense-in-depth alongside Resend idempotency keys)
+  const sentTransactionalEventKeys = new Map<string, number>();
+  const TRANSACTIONAL_DEDUPE_TTL_MS = 24 * 60 * 60 * 1000;
+  function markTransactionalEventIfNew(eventKey: string): boolean {
+    const now = Date.now();
+    const existing = sentTransactionalEventKeys.get(eventKey);
+    if (existing && now - existing < TRANSACTIONAL_DEDUPE_TTL_MS) {
+      return false;
+    }
+    if (sentTransactionalEventKeys.size >= 5000) {
+      const oldestKey = sentTransactionalEventKeys.keys().next().value;
+      if (oldestKey) sentTransactionalEventKeys.delete(oldestKey);
+    }
+    sentTransactionalEventKeys.set(eventKey, now);
+    return true;
+  }
+
+  // API Route: Dedicated Server-Built Transactional Reservation Email (Confirmation & Cancellation)
+  app.post("/api/emails/reservation-event", async (req, res) => {
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
+    const { hotelId, reservationId, eventType } = req.body || {};
+
+    if (!isSafeIdentifier(hotelId) || !isSafeIdentifier(reservationId)) {
+      return res.status(400).json({ error: "Valid hotelId and reservationId are required." });
+    }
+
+    if (eventType !== "booking_confirmation" && eventType !== "booking_cancellation") {
+      return res.status(400).json({ error: "Unsupported reservation email eventType." });
+    }
+
+    if (!isSuperAdminCaller(caller) && !callerIsHotelStaff(caller, hotelId)) {
+      return res.status(403).json({
+        error: "Forbidden: You are not authorized to trigger reservation emails for this hotel.",
+      });
+    }
+
+    const configCheck = validateEmailConfig();
+    if (!configCheck.ok) {
+      return res.status(503).json({
+        success: false,
+        deliveryState: "unconfigured",
+        error: configCheck.error,
+      });
+    }
+
+    try {
+      const reservation = await readFirestoreDocServerSide(
+        `hotels/${hotelId}/reservations/${reservationId}`,
+        caller.idToken
+      );
+
+      if (!reservation) {
+        return res.status(404).json({ error: "Reservation not found." });
+      }
+
+      if (reservation.hotelId && String(reservation.hotelId) !== hotelId) {
+        return res.status(403).json({ error: "Forbidden: Reservation does not belong to the specified hotel." });
+      }
+
+      const currentStatus = String(reservation.status || "").toLowerCase();
+      if (eventType === "booking_cancellation" && currentStatus !== "cancelled") {
+        return res.status(409).json({
+          success: false,
+          skipped: true,
+          error: "Cancellation email can only be sent for a cancelled reservation.",
+        });
+      }
+      if (
+        eventType === "booking_confirmation" &&
+        (currentStatus === "cancelled" || currentStatus === "no_show")
+      ) {
+        return res.status(409).json({
+          success: false,
+          skipped: true,
+          error: "Confirmation email cannot be sent for a cancelled or no-show reservation.",
+        });
+      }
+
+      let guestEmail = typeof reservation.guestEmail === "string" ? reservation.guestEmail.trim() : "";
+      if (!guestEmail && typeof reservation.guestId === "string" && isSafeIdentifier(reservation.guestId)) {
+        const guestDoc = await readFirestoreDocServerSide(
+          `hotels/${hotelId}/guests/${reservation.guestId}`,
+          caller.idToken
+        );
+        if (guestDoc && typeof guestDoc.email === "string") {
+          guestEmail = guestDoc.email.trim();
+        }
+      }
+
+      if (!guestEmail || !isValidEmailAddress(guestEmail)) {
+        return res.status(200).json({
+          success: true,
+          skipped: true,
+          reason: "Guest does not have a valid email address on file.",
+        });
+      }
+
+      const dedupeKey = `${eventType}:${hotelId}:${reservationId}`;
+      if (!markTransactionalEventIfNew(dedupeKey)) {
+        return res.status(200).json({
+          success: true,
+          skipped: true,
+          reason: "Notification already dispatched for this reservation event.",
+        });
+      }
+
+      const hotelDoc = await readFirestoreDocServerSide(`hotels/${hotelId}`, caller.idToken);
+      const hotelName =
+        (hotelDoc && typeof hotelDoc.name === "string" && hotelDoc.name.trim()) ||
+        "Hotel";
+      const hotelEmail =
+        hotelDoc && typeof hotelDoc.email === "string" && isValidEmailAddress(hotelDoc.email.trim())
+          ? hotelDoc.email.trim()
+          : undefined;
+      const hotelPhone =
+        hotelDoc && typeof hotelDoc.phone === "string" && hotelDoc.phone.trim()
+          ? hotelDoc.phone.trim()
+          : undefined;
+      const hotelAddress =
+        hotelDoc && typeof hotelDoc.address === "string" && hotelDoc.address.trim()
+          ? hotelDoc.address.trim()
+          : undefined;
+
+      const guestName =
+        (typeof reservation.guestName === "string" && reservation.guestName.trim()) || "Guest";
+      const roomLabel = reservation.roomNumber
+        ? `Room ${String(reservation.roomNumber).trim()}`
+        : reservation.roomTypeName
+          ? String(reservation.roomTypeName).trim()
+          : "Assigned Room";
+      const checkIn = [
+        typeof reservation.checkIn === "string" ? reservation.checkIn.trim() : "",
+        typeof reservation.checkInTime === "string" && reservation.checkInTime.trim()
+          ? `(${reservation.checkInTime.trim()})`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ") || "N/A";
+      const checkOut = [
+        typeof reservation.checkOut === "string" ? reservation.checkOut.trim() : "",
+        typeof reservation.checkOutTime === "string" && reservation.checkOutTime.trim()
+          ? `(${reservation.checkOutTime.trim()})`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ") || "N/A";
+      const bookingRef = reservationId.slice(0, 8).toUpperCase();
+      const appUrl = getAppUrl();
+
+      const templateData = {
+        hotelName,
+        guestName,
+        roomLabel,
+        checkIn,
+        checkOut,
+        bookingRef,
+        hotelEmail,
+        hotelPhone,
+        hotelAddress,
+        appUrl,
+      };
+
+      const built =
+        eventType === "booking_cancellation"
+          ? buildBookingCancellationEmail(templateData)
+          : buildBookingConfirmationEmail(templateData);
+
+      const result = await sendEmail({
+        to: guestEmail,
+        subject: built.subject,
+        html: built.html,
+        text: built.text,
+        replyTo: hotelEmail,
+        idempotencyKey: dedupeKey,
+      });
+
+      if (!result.success) {
+        sentTransactionalEventKeys.delete(dedupeKey);
+        return res.status(result.statusCode || 502).json({
+          success: false,
+          deliveryState: result.deliveryState,
+          provider: result.provider,
+          error: result.error || "Failed to dispatch transactional reservation email.",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        messageId: result.messageId,
+        deliveryState: result.deliveryState,
+        provider: result.provider,
+      });
+    } catch (err: any) {
+      console.error(
+        "[API /api/emails/reservation-event] Error:",
+        sanitizeErrorForClient(err, "Reservation email dispatch failed.")
+      );
+      return res.status(500).json({
+        success: false,
+        error: sanitizeErrorForClient(err, "Failed to process reservation email notification."),
+      });
+    }
+  });
+
+  // API Route: Dedicated Server-Built Admin Alert for New Tracking Code Requests
+  app.post("/api/emails/tracking-code-request-alert", async (req, res) => {
+    const { requestId } = req.body || {};
+
+    if (!isSafeIdentifier(requestId)) {
+      return res.status(400).json({ error: "Valid requestId is required." });
+    }
+
+    const configCheck = validateEmailConfig();
+    if (!configCheck.ok) {
+      return res.status(503).json({
+        success: false,
+        deliveryState: "unconfigured",
+        error: configCheck.error,
+      });
+    }
+
+    try {
+      const requestDoc = await readFirestoreDocServerSide(`trackingCodeRequests/${requestId}`);
+      if (!requestDoc) {
+        return res.status(404).json({ error: "Tracking code request not found." });
+      }
+
+      const requestStatus = String(requestDoc.status || "pending").toLowerCase();
+      if (requestStatus !== "pending") {
+        return res.status(200).json({
+          success: true,
+          skipped: true,
+          reason: "Tracking code request is no longer pending.",
+        });
+      }
+
+      const dedupeKey = `tracking-code-req:${requestId}`;
+      if (!markTransactionalEventIfNew(dedupeKey)) {
+        return res.status(200).json({
+          success: true,
+          skipped: true,
+          reason: "Admin alert already dispatched for this request.",
+        });
+      }
+
+      const systemSettings = await readFirestoreDocServerSide("system/settings");
+      const candidates = [
+        typeof systemSettings?.supportEmail === "string" ? systemSettings.supportEmail.trim() : "",
+        typeof process.env.ADMIN_ALERT_EMAIL === "string" ? process.env.ADMIN_ALERT_EMAIL.trim() : "",
+      ];
+      const adminEmail = candidates.find((addr) => addr && isValidEmailAddress(addr));
+
+      if (!adminEmail) {
+        sentTransactionalEventKeys.delete(dedupeKey);
+        return res.status(200).json({
+          success: true,
+          skipped: true,
+          reason: "No valid admin supportEmail configured.",
+        });
+      }
+
+      const appUrl = getAppUrl();
+      const built = buildTrackingCodeRequestAlertEmail({
+        requestId,
+        hotelName:
+          (typeof requestDoc.hotelName === "string" && requestDoc.hotelName.trim()) ||
+          "Unnamed Hotel",
+        requesterEmail:
+          (typeof requestDoc.email === "string" && requestDoc.email.trim()) || "Not provided",
+        requesterPhone:
+          typeof requestDoc.phone === "string" && requestDoc.phone.trim()
+            ? requestDoc.phone.trim()
+            : undefined,
+        plan:
+          typeof requestDoc.plan === "string" && requestDoc.plan.trim()
+            ? requestDoc.plan.trim()
+            : undefined,
+        requestType:
+          typeof requestDoc.type === "string" && requestDoc.type.trim()
+            ? requestDoc.type.trim()
+            : undefined,
+        message:
+          typeof requestDoc.message === "string" && requestDoc.message.trim()
+            ? requestDoc.message.trim()
+            : undefined,
+        requestedAt:
+          typeof requestDoc.timestamp === "string" && requestDoc.timestamp.trim()
+            ? requestDoc.timestamp.trim()
+            : undefined,
+        appUrl,
+      });
+
+      const requesterReplyTo =
+        typeof requestDoc.email === "string" && isValidEmailAddress(requestDoc.email.trim())
+          ? requestDoc.email.trim()
+          : undefined;
+
+      const result = await sendEmail({
+        to: adminEmail,
+        subject: built.subject,
+        html: built.html,
+        text: built.text,
+        replyTo: requesterReplyTo,
+        idempotencyKey: dedupeKey,
+      });
+
+      if (!result.success) {
+        sentTransactionalEventKeys.delete(dedupeKey);
+        return res.status(result.statusCode || 502).json({
+          success: false,
+          deliveryState: result.deliveryState,
+          provider: result.provider,
+          error: result.error || "Failed to dispatch admin alert email.",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        messageId: result.messageId,
+        deliveryState: result.deliveryState,
+        provider: result.provider,
+      });
+    } catch (err: any) {
+      console.error(
+        "[API /api/emails/tracking-code-request-alert] Error:",
+        sanitizeErrorForClient(err, "Tracking code alert failed.")
+      );
+      return res.status(500).json({
+        success: false,
+        error: sanitizeErrorForClient(err, "Failed to process tracking code request alert."),
       });
     }
   });

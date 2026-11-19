@@ -10,6 +10,7 @@ import { DEFAULT_SETTINGS } from '../constants';
 import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle, Mail, ShieldAlert, Building2 } from 'lucide-react';
 import { cn } from '../utils';
 import { playNotificationSound } from '../utils/notificationSound';
+import { notifyTrackingCodeRequestAlert } from '../services/transactionalEmailClient';
 
 interface AuthPageProps {
   initialEmail?: string;
@@ -150,7 +151,7 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
     setSuccess('');
 
     try {
-      await database.safeAdd(collection(db, 'trackingCodeRequests'), {
+      const createdRequestRef = await database.safeAdd(collection(db, 'trackingCodeRequests'), {
         hotelName: formData.hotelName,
         email: formData.email,
         phone: formData.phone,
@@ -163,6 +164,13 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
         action: 'CODE_REQUEST',
         details: `New tracking code request for ${formData.hotelName}`
       });
+      if (createdRequestRef?.id) {
+        try {
+          void notifyTrackingCodeRequestAlert(createdRequestRef.id);
+        } catch (emailErr) {
+          console.warn('[AuthPage] Admin alert trigger skipped:', emailErr);
+        }
+      }
       showNotification('Request submitted! Our team will contact you with payment instructions shortly.');
       
       setFormData({ ...formData, hotelName: '', email: '', phone: '' });

@@ -17,6 +17,7 @@ import {
 import { cn } from '../utils';
 import { motion } from 'motion/react';
 import { playNotificationSound } from '../utils/notificationSound';
+import { notifyTrackingCodeRequestAlert } from '../services/transactionalEmailClient';
 
 export function SubscriptionExpiredPage() {
   const { hotel, profile } = useAuth();
@@ -55,7 +56,7 @@ export function SubscriptionExpiredPage() {
     setLoading(true);
 
     try {
-      await database.safeAdd(collection(db, 'trackingCodeRequests'), {
+      const createdRequestRef = await database.safeAdd(collection(db, 'trackingCodeRequests'), {
         hotelName: formData.hotelName,
         email: formData.email,
         message: formData.message,
@@ -69,6 +70,14 @@ export function SubscriptionExpiredPage() {
         action: 'RENEWAL_REQUEST_CREATE',
         details: `Renewal request submitted for ${formData.hotelName}`
       });
+
+      if (createdRequestRef?.id) {
+        try {
+          void notifyTrackingCodeRequestAlert(createdRequestRef.id);
+        } catch (emailErr) {
+          console.warn('[SubscriptionExpiredPage] Renewal admin alert trigger skipped:', emailErr);
+        }
+      }
 
       showNotification('Renewal request submitted! We will review your payment and issue your renewal code.');
       setIsRequesting(false);

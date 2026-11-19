@@ -20,6 +20,7 @@ import {
   validateDepositApplication,
 } from '../services/guestDepositService';
 import { printDocument } from '../utils/printUtils';
+import { notifyReservationEmailEvent } from '../services/transactionalEmailClient';
 import { QrCode, Key as SmartKeyIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -1680,6 +1681,17 @@ export function FrontDesk() {
         );
       }
 
+      // Additive: Trigger transactional booking confirmation email if guest has an email address
+      if (newBooking.guestEmail?.trim() && createdStays.length > 0) {
+        try {
+          for (const stay of createdStays) {
+            void notifyReservationEmailEvent(hotel.id, stay.resId, 'booking_confirmation');
+          }
+        } catch (emailErr) {
+          console.warn('[FrontDesk] Booking confirmation email trigger skipped:', emailErr);
+        }
+      }
+
       setIsBooking(false);
       setSelectedRateType('auto');
       setCustomRateAmount(0);
@@ -3018,6 +3030,15 @@ export function FrontDesk() {
           action: 'ROOM_RELEASE',
           details: `Room ${res.roomNumber} released due to cancellation`
         });
+
+        // Additive: Trigger transactional booking cancellation email only on transition to cancelled
+        if (status === 'cancelled' && res.status !== 'cancelled') {
+          try {
+            void notifyReservationEmailEvent(hotel.id, res.id, 'booking_cancellation');
+          } catch (emailErr) {
+            console.warn('[FrontDesk] Booking cancellation email trigger skipped:', emailErr);
+          }
+        }
       }
 
       // 3. Log action is handled by safeUpdate calls above

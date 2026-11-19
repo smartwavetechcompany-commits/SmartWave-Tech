@@ -35,8 +35,6 @@ export interface SendEmailResult {
   error?: string;
 }
 
-const DEFAULT_FROM_EMAIL = "onboarding@resend.dev";
-const DEFAULT_FROM_NAME = "Tidé Hotels & Resorts";
 const MAX_RECIPIENTS = 10;
 const MAX_SUBJECT_LENGTH = 200;
 const MAX_BODY_BYTES = 100 * 1024; // 100 KB
@@ -56,15 +54,89 @@ function readResendFromEnv(): string {
     : "";
 }
 
-export function isEmailServiceConfigured(): boolean {
-  return readResendApiKey().length > 0;
+function readAppUrlEnv(): string {
+  return typeof process !== "undefined" && typeof process.env?.APP_URL === "string"
+    ? process.env.APP_URL.trim().replace(/\/+$/, "")
+    : "";
+}
+
+export interface EmailConfigValidation {
+  ok: boolean;
+  missing: string[];
+  error?: string;
 }
 
 /**
- * Safely resolves the sender address from process.env.RESEND_FROM_EMAIL.
- * Supports plain addresses ("no-reply@tidehotels.de") and named addresses
- * ("Tidé Hotels <no-reply@tidehotels.de>"), falling back to Resend's default
- * sender if unset or malformed.
+ * Validates required server-side email environment variables without exposing any secret values.
+ * Requires RESEND_API_KEY, RESEND_FROM_EMAIL (valid mailbox), and APP_URL (valid http/https URL).
+ */
+export function validateEmailConfig(): EmailConfigValidation {
+  const missing: string[] = [];
+
+  const apiKey = readResendApiKey();
+  if (!apiKey) {
+    missing.push("RESEND_API_KEY");
+  }
+
+  const rawFrom = readResendFromEnv();
+  const parsedFrom = parseMailboxString(rawFrom);
+  if (!rawFrom || !parsedFrom.email) {
+    missing.push("RESEND_FROM_EMAIL");
+  }
+
+  const rawAppUrl = readAppUrlEnv();
+  let validAppUrl = false;
+  if (rawAppUrl) {
+    try {
+      const parsed = new URL(rawAppUrl);
+      validAppUrl = parsed.protocol === "https:" || parsed.protocol === "http:";
+    } catch {
+      validAppUrl = false;
+    }
+  }
+  if (!validAppUrl) {
+    missing.push("APP_URL");
+  }
+
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      missing,
+      error: `Email service is not configured. Missing or invalid server environment variable(s): ${missing.join(", ")}.`,
+    };
+  }
+
+  return { ok: true, missing: [] };
+}
+
+/**
+ * Returns APP_URL with any trailing slashes stripped.
+ * Throws a clear, non-secret error if APP_URL is missing or invalid.
+ */
+export function getAppUrl(): string {
+  const rawAppUrl = readAppUrlEnv();
+  if (!rawAppUrl) {
+    throw new Error("Email service configuration error: APP_URL is missing in server environment.");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(rawAppUrl);
+  } catch {
+    throw new Error("Email service configuration error: APP_URL must be a valid http(s) URL.");
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error("Email service configuration error: APP_URL must use http or https.");
+  }
+  return rawAppUrl.replace(/\/+$/, "");
+}
+
+export function isEmailServiceConfigured(): boolean {
+  return validateEmailConfig().ok;
+}
+
+/**
+ * Resolves the verified sender address strictly from process.env.RESEND_FROM_EMAIL.
+ * Never falls back to onboarding@resend.dev; throws a clear non-secret error if unset or invalid.
  */
 export function getConfiguredFromAddress(overrideName?: string): {
   email: string;
@@ -73,16 +145,22 @@ export function getConfiguredFromAddress(overrideName?: string): {
 } {
   const envFrom = readResendFromEnv();
   const parsed = parseMailboxString(envFrom);
-  const email = parsed.email || DEFAULT_FROM_EMAIL;
-  const displayName = sanitizeEmailHeaderValue(
-    overrideName || parsed.displayName || DEFAULT_FROM_NAME,
-    DEFAULT_FROM_NAME
-  );
+  if (!parsed.email) {
+    throw new Error(
+      "Email service configuration error: RESEND_FROM_EMAIL is missing or not a valid email address."
+    );
+  }
+
+  const displayName = overrideName
+    ? sanitizeEmailHeaderValue(overrideName, parsed.displayName || "Hotel Notifications")
+    : parsed.displayName
+      ? sanitizeEmailHeaderValue(parsed.displayName, "Hotel Notifications")
+      : "";
 
   return {
-    email,
+    email: parsed.email,
     displayName,
-    formatted: `"${displayName}" <${email}>`,
+    formatted: displayName ? `${displayName} <${parsed.email}>` : parsed.email,
   };
 }
 
@@ -193,8 +271,8 @@ function buildEmailContent(params: SendEmailParams): {
 
 /**
  * Server-side email dispatch function powered by the official Resend SDK.
- * Safely accesses process.env.RESEND_API_KEY and process.env.RESEND_FROM_EMAIL
- * and returns structured results without throwing unhandled exceptions.
+ * Strictly requires RESEND_API_KEY, RESEND_FROM_EMAIL, and APP_URL in server env
+ * and returns structured results without exposing secrets.
  */
 export async function sendEmail(
   params: SendEmailParams
@@ -253,6 +331,17 @@ export async function sendEmail(
     }
   }
 
+  const configCheck = validateEmailConfig();
+  if (!configCheck.ok) {
+    return {
+      success: false,
+      deliveryState: "unconfigured",
+      provider: "resend",
+      statusCode: 503,
+      error: configCheck.error,
+    };
+  }
+
   const client = getResendClient();
   if (!client) {
     return {
@@ -265,7 +354,18 @@ export async function sendEmail(
   }
 
   const safeSubject = sanitizeEmailHeaderValue(rawSubject, "Notification");
-  const fromIdentity = getConfiguredFromAddress(params.fromName);
+  let fromIdentity: { email: string; displayName: string; formatted: string };
+  try {
+    fromIdentity = getConfiguredFromAddress(params.fromName);
+  } catch (cfgErr: any) {
+    return {
+      success: false,
+      deliveryState: "unconfigured",
+      provider: "resend",
+      statusCode: 503,
+      error: redactSecrets(cfgErr?.message),
+    };
+  }
 
   const payload: {
     from: string;
@@ -323,7 +423,7 @@ export async function sendEmail(
     }
 
     console.log(
-      `[EMAIL SERVICE] Dispatched via Resend | To: ${recipientCheck.recipients.join(", ")} | From: ${fromIdentity.email} | MessageId: ${messageId}`
+      `[EMAIL SERVICE] Dispatched via Resend | From: ${fromIdentity.email} | MessageId: ${messageId}`
     );
 
     return {
@@ -344,4 +444,208 @@ export async function sendEmail(
       error: safeErr,
     };
   }
+}
+
+export interface BookingEmailTemplateData {
+  hotelName: string;
+  guestName: string;
+  roomLabel: string;
+  checkIn: string;
+  checkOut: string;
+  bookingRef: string;
+  hotelEmail?: string;
+  hotelPhone?: string;
+  hotelAddress?: string;
+  appUrl: string;
+}
+
+export interface TrackingCodeRequestAlertData {
+  hotelName: string;
+  requesterEmail: string;
+  requesterPhone?: string;
+  plan?: string;
+  requestType?: string;
+  message?: string;
+  requestId: string;
+  requestedAt?: string;
+  appUrl: string;
+}
+
+function buildHotelContactBlock(data: BookingEmailTemplateData): { html: string; text: string } {
+  const htmlParts: string[] = [];
+  const textParts: string[] = [];
+
+  if (data.hotelAddress) {
+    htmlParts.push(`<div>Address: ${escapeHtml(data.hotelAddress)}</div>`);
+    textParts.push(`Address: ${data.hotelAddress}`);
+  }
+  if (data.hotelPhone) {
+    htmlParts.push(`<div>Phone: ${escapeHtml(data.hotelPhone)}</div>`);
+    textParts.push(`Phone: ${data.hotelPhone}`);
+  }
+  if (data.hotelEmail) {
+    htmlParts.push(`<div>Email: ${escapeHtml(data.hotelEmail)}</div>`);
+    textParts.push(`Email: ${data.hotelEmail}`);
+  }
+
+  return {
+    html: htmlParts.length > 0
+      ? `<div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid #e4e4e7; font-size: 13px; color: #52525b;"><strong>Hotel Contact</strong>${htmlParts.join("")}</div>`
+      : "",
+    text: textParts.length > 0 ? `\nHotel Contact:\n${textParts.join("\n")}` : "",
+  };
+}
+
+export function buildBookingConfirmationEmail(data: BookingEmailTemplateData): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const cleanUrl = data.appUrl.replace(/\/+$/, "");
+  const contact = buildHotelContactBlock(data);
+  const subject = `Booking Confirmation - ${data.hotelName} (${data.bookingRef})`;
+
+  const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin: 0; padding: 24px; background-color: #f4f4f5; font-family: Arial, Helvetica, sans-serif; color: #18181b;">
+  <div style="max-width: 580px; margin: 0 auto; background: #ffffff; border: 1px solid #e4e4e7; border-radius: 8px; padding: 28px;">
+    <h2 style="margin: 0 0 8px; font-size: 20px; color: #18181b;">Booking Confirmation</h2>
+    <p style="margin: 0 0 16px; font-size: 14px; color: #52525b;">${escapeHtml(data.hotelName)}</p>
+    <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.6;">Hello ${escapeHtml(data.guestName)},</p>
+    <p style="margin: 0 0 20px; font-size: 14px; line-height: 1.6;">Your reservation at <strong>${escapeHtml(data.hotelName)}</strong> has been confirmed. Below are your booking details:</p>
+    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse: collapse; border: 1px solid #e4e4e7; font-size: 14px;">
+      <tr style="border-bottom: 1px solid #e4e4e7;"><td style="color: #71717a; width: 40%;">Booking Reference</td><td style="font-weight: 700;">${escapeHtml(data.bookingRef)}</td></tr>
+      <tr style="border-bottom: 1px solid #e4e4e7;"><td style="color: #71717a;">Guest Name</td><td>${escapeHtml(data.guestName)}</td></tr>
+      <tr style="border-bottom: 1px solid #e4e4e7;"><td style="color: #71717a;">Room</td><td>${escapeHtml(data.roomLabel)}</td></tr>
+      <tr style="border-bottom: 1px solid #e4e4e7;"><td style="color: #71717a;">Check-In</td><td>${escapeHtml(data.checkIn)}</td></tr>
+      <tr><td style="color: #71717a;">Check-Out</td><td>${escapeHtml(data.checkOut)}</td></tr>
+    </table>
+    <p style="margin: 20px 0 0; font-size: 14px;">Portal: <a href="${escapeHtml(cleanUrl)}" style="color: #059669;">${escapeHtml(cleanUrl)}</a></p>
+    ${contact.html}
+  </div>
+</body>
+</html>`;
+
+  const text = [
+    `Booking Confirmation - ${data.hotelName}`,
+    ``,
+    `Hello ${data.guestName},`,
+    ``,
+    `Your reservation at ${data.hotelName} has been confirmed.`,
+    ``,
+    `Booking Reference: ${data.bookingRef}`,
+    `Guest Name: ${data.guestName}`,
+    `Room: ${data.roomLabel}`,
+    `Check-In: ${data.checkIn}`,
+    `Check-Out: ${data.checkOut}`,
+    ``,
+    `Website: ${cleanUrl}`,
+    contact.text,
+  ].join("\n").trim();
+
+  return { subject, html, text };
+}
+
+export function buildBookingCancellationEmail(data: BookingEmailTemplateData): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const cleanUrl = data.appUrl.replace(/\/+$/, "");
+  const contact = buildHotelContactBlock(data);
+  const subject = `Booking Cancellation - ${data.hotelName} (${data.bookingRef})`;
+
+  const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin: 0; padding: 24px; background-color: #f4f4f5; font-family: Arial, Helvetica, sans-serif; color: #18181b;">
+  <div style="max-width: 580px; margin: 0 auto; background: #ffffff; border: 1px solid #e4e4e7; border-radius: 8px; padding: 28px;">
+    <h2 style="margin: 0 0 8px; font-size: 20px; color: #18181b;">Booking Cancellation</h2>
+    <p style="margin: 0 0 16px; font-size: 14px; color: #52525b;">${escapeHtml(data.hotelName)}</p>
+    <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.6;">Hello ${escapeHtml(data.guestName)},</p>
+    <p style="margin: 0 0 20px; font-size: 14px; line-height: 1.6;">Your reservation at <strong>${escapeHtml(data.hotelName)}</strong> has been cancelled. Cancelled booking details:</p>
+    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse: collapse; border: 1px solid #e4e4e7; font-size: 14px;">
+      <tr style="border-bottom: 1px solid #e4e4e7;"><td style="color: #71717a; width: 40%;">Booking Reference</td><td style="font-weight: 700;">${escapeHtml(data.bookingRef)}</td></tr>
+      <tr style="border-bottom: 1px solid #e4e4e7;"><td style="color: #71717a;">Guest Name</td><td>${escapeHtml(data.guestName)}</td></tr>
+      <tr style="border-bottom: 1px solid #e4e4e7;"><td style="color: #71717a;">Room</td><td>${escapeHtml(data.roomLabel)}</td></tr>
+      <tr style="border-bottom: 1px solid #e4e4e7;"><td style="color: #71717a;">Check-In</td><td>${escapeHtml(data.checkIn)}</td></tr>
+      <tr><td style="color: #71717a;">Check-Out</td><td>${escapeHtml(data.checkOut)}</td></tr>
+    </table>
+    <p style="margin: 20px 0 0; font-size: 14px;">If this cancellation was unexpected, please reply to this email or contact the hotel directly.</p>
+    <p style="margin: 12px 0 0; font-size: 14px;">Portal: <a href="${escapeHtml(cleanUrl)}" style="color: #059669;">${escapeHtml(cleanUrl)}</a></p>
+    ${contact.html}
+  </div>
+</body>
+</html>`;
+
+  const text = [
+    `Booking Cancellation - ${data.hotelName}`,
+    ``,
+    `Hello ${data.guestName},`,
+    ``,
+    `Your reservation at ${data.hotelName} has been cancelled.`,
+    ``,
+    `Booking Reference: ${data.bookingRef}`,
+    `Guest Name: ${data.guestName}`,
+    `Room: ${data.roomLabel}`,
+    `Check-In: ${data.checkIn}`,
+    `Check-Out: ${data.checkOut}`,
+    ``,
+    `If this cancellation was unexpected, please contact the hotel directly.`,
+    `Website: ${cleanUrl}`,
+    contact.text,
+  ].join("\n").trim();
+
+  return { subject, html, text };
+}
+
+export function buildTrackingCodeRequestAlertEmail(data: TrackingCodeRequestAlertData): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const cleanUrl = data.appUrl.replace(/\/+$/, "");
+  const isRenewal = (data.requestType || "").toLowerCase() === "renewal";
+  const label = isRenewal ? "Subscription Renewal Code Request" : "New Tracking Code Request";
+  const subject = `[Admin Alert] ${label} - ${data.hotelName}`;
+
+  const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin: 0; padding: 24px; background-color: #f4f4f5; font-family: Arial, Helvetica, sans-serif; color: #18181b;">
+  <div style="max-width: 580px; margin: 0 auto; background: #ffffff; border: 1px solid #e4e4e7; border-radius: 8px; padding: 28px;">
+    <h2 style="margin: 0 0 12px; font-size: 20px; color: #18181b;">${escapeHtml(label)}</h2>
+    <p style="margin: 0 0 18px; font-size: 14px; line-height: 1.6;">A new tracking code request has been submitted and is awaiting administrator review.</p>
+    <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse: collapse; border: 1px solid #e4e4e7; font-size: 14px;">
+      <tr style="border-bottom: 1px solid #e4e4e7;"><td style="color: #71717a; width: 38%;">Request ID</td><td style="font-weight: 700;">${escapeHtml(data.requestId)}</td></tr>
+      <tr style="border-bottom: 1px solid #e4e4e7;"><td style="color: #71717a;">Hotel Name</td><td>${escapeHtml(data.hotelName)}</td></tr>
+      <tr style="border-bottom: 1px solid #e4e4e7;"><td style="color: #71717a;">Email</td><td>${escapeHtml(data.requesterEmail)}</td></tr>
+      ${data.requesterPhone ? `<tr style="border-bottom: 1px solid #e4e4e7;"><td style="color: #71717a;">Phone</td><td>${escapeHtml(data.requesterPhone)}</td></tr>` : ""}
+      ${data.plan ? `<tr style="border-bottom: 1px solid #e4e4e7;"><td style="color: #71717a;">Plan</td><td>${escapeHtml(data.plan)}</td></tr>` : ""}
+      ${data.message ? `<tr style="border-bottom: 1px solid #e4e4e7;"><td style="color: #71717a;">Notes</td><td>${escapeHtml(data.message)}</td></tr>` : ""}
+      ${data.requestedAt ? `<tr><td style="color: #71717a;">Submitted At</td><td>${escapeHtml(data.requestedAt)}</td></tr>` : ""}
+    </table>
+    <p style="margin: 20px 0 0; font-size: 14px;">Review requests in the admin portal: <a href="${escapeHtml(cleanUrl)}" style="color: #059669;">${escapeHtml(cleanUrl)}</a></p>
+  </div>
+</body>
+</html>`;
+
+  const text = [
+    label,
+    ``,
+    `A new tracking code request has been submitted and is awaiting review.`,
+    ``,
+    `Request ID: ${data.requestId}`,
+    `Hotel Name: ${data.hotelName}`,
+    `Email: ${data.requesterEmail}`,
+    ...(data.requesterPhone ? [`Phone: ${data.requesterPhone}`] : []),
+    ...(data.plan ? [`Plan: ${data.plan}`] : []),
+    ...(data.message ? [`Notes: ${data.message}`] : []),
+    ...(data.requestedAt ? [`Submitted At: ${data.requestedAt}`] : []),
+    ``,
+    `Admin Portal: ${cleanUrl}`,
+  ].join("\n");
+
+  return { subject, html, text };
 }
