@@ -4,6 +4,7 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
+import dotenv from "dotenv";
 import {
   escapeHtml,
   sanitizeEmailHeaderValue,
@@ -21,9 +22,19 @@ import {
   callerHasStaffManagement,
   callerIsHotelStaff,
 } from "./src/utils/serverSecurity.ts";
+import {
+  sendEmailWithResend,
+  isResendConfigured,
+  getResendFromIdentity,
+} from "./src/services/resendEmailService.ts";
+import { sendEmail } from "./src/services/emailService.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Load server-only .env from repository root (never exposed to frontend)
+dotenv.config({ path: path.join(__dirname, ".env") });
+dotenv.config();
 
 async function startServer() {
   const app = express();
@@ -79,6 +90,11 @@ async function startServer() {
     "/auth/validate-reset-token",
     "/auth/activate-staff-user",
     "/auth/complete-password-reset",
+    "/auth/send-account-activation-email",
+    "/auth/send-password-reset-email",
+    "/auth/resend-activation-link",
+    "/admin/send-tracking-code",
+    "/emails/send",
   ]);
   app.use("/api/", (req, res, next) => {
     // Exempt health check
@@ -644,26 +660,69 @@ async function startServer() {
   // Cached Ethereal test account for fast, persistent email dispatch
   let cachedEtherealAccount: any = null;
 
-  // Email Dispatch Helper (Production SMTP with Ethereal Test Confirmation)
+  // Email Dispatch Helper (Primary: Resend API, Fallback: Production SMTP, then Ethereal Test)
   async function dispatchEmailMessage({
     to,
     subject,
     html,
     fromName,
+    replyTo,
+    idempotencyKey,
   }: {
     to: string;
     subject: string;
     html: string;
     fromName: string;
-  }): Promise<{ emailDispatched: boolean; method: string; previewUrl: string | false }> {
-    const safeFromName = sanitizeEmailHeaderValue(fromName, "PMS Administration");
+    replyTo?: string;
+    idempotencyKey?: string;
+  }): Promise<{
+    emailDispatched: boolean;
+    method: string;
+    previewUrl: string | false;
+    messageId?: string;
+    deliveryState?: string;
+    errorSummary?: string;
+  }> {
+    const safeFromName = sanitizeEmailHeaderValue(fromName, "Tidé Hotels & Resorts");
     const safeSubject = sanitizeEmailHeaderValue(subject, "PMS Notification");
     let emailDispatched = false;
     let method = 'simulated';
     let previewUrl: string | false = false;
+    let lastErrorSummary: string | undefined;
 
-    const emailPromise: Promise<{ emailDispatched: boolean; method: string; previewUrl: string | false }> = (async () => {
-      // 1. Try production SMTP if credentials provided
+    const emailPromise: Promise<{
+      emailDispatched: boolean;
+      method: string;
+      previewUrl: string | false;
+      messageId?: string;
+      deliveryState?: string;
+      errorSummary?: string;
+    }> = (async () => {
+      // 1. Primary: Resend API (server-side only via process.env.RESEND_API_KEY)
+      if (isResendConfigured()) {
+        const resendResult = await sendEmailWithResend({
+          to,
+          subject: safeSubject,
+          html,
+          fromName: safeFromName,
+          replyTo,
+          idempotencyKey,
+        });
+        if (resendResult.emailDispatched) {
+          emailDispatched = true;
+          method = 'resend';
+          return {
+            emailDispatched: true,
+            method: 'resend',
+            previewUrl: false,
+            messageId: resendResult.messageId,
+            deliveryState: resendResult.deliveryState,
+          };
+        }
+        lastErrorSummary = resendResult.error;
+      }
+
+      // 2. Fallback: Production SMTP if credentials provided
       if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
         try {
           const nodemailer = await import('nodemailer');
@@ -731,14 +790,27 @@ async function startServer() {
         method = 'simulated';
       }
 
-      return { emailDispatched, method, previewUrl };
+      return {
+        emailDispatched,
+        method,
+        previewUrl,
+        deliveryState: emailDispatched ? 'accepted_by_provider' : 'failed',
+        ...(lastErrorSummary ? { errorSummary: lastErrorSummary } : {}),
+      };
     })();
 
-    // Race with a 2500ms timeout so external network delays never block API responses or drop HTTP connections
-    const timeoutPromise = new Promise<{ emailDispatched: boolean; method: string; previewUrl: string | false }>((resolve) => {
+    // Race with a 6000ms timeout so external network delays never block API responses or drop HTTP connections
+    const timeoutPromise = new Promise<{
+      emailDispatched: boolean;
+      method: string;
+      previewUrl: string | false;
+      messageId?: string;
+      deliveryState?: string;
+      errorSummary?: string;
+    }>((resolve) => {
       setTimeout(() => {
-        resolve({ emailDispatched: false, method: 'queued', previewUrl: false });
-      }, 2500);
+        resolve({ emailDispatched: false, method: 'queued', previewUrl: false, deliveryState: 'queued' });
+      }, 6000);
     });
 
     return await Promise.race([emailPromise, timeoutPromise]);
@@ -1355,7 +1427,9 @@ async function startServer() {
           ? `[ACTION REQUIRED] Activate your Administrator account - ${hotelName}`
           : `[ACTION REQUIRED] Activate your staff account - ${hotelName}`,
         html: emailHtml,
-        fromName: `${hotelName} Administration`
+        fromName: `${hotelName} Administration`,
+        replyTo: isValidEmailAddress(effectiveAdminEmail) ? effectiveAdminEmail : undefined,
+        idempotencyKey: `staff-activation:${tokenId}`,
       });
 
       // 6. Record Audit Log in Firestore
@@ -1645,7 +1719,9 @@ async function startServer() {
         to: normalizedEmail,
         subject: `[ACTION REQUIRED] Activate your staff account - ${hotelName}`,
         html: emailHtml,
-        fromName: `${hotelName} Administration`
+        fromName: `${hotelName} Administration`,
+        replyTo: isValidEmailAddress(effectiveAdminEmail) ? effectiveAdminEmail : undefined,
+        idempotencyKey: `staff-resend:${tokenId}`,
       });
 
       // 4. Audit Log
@@ -2419,7 +2495,9 @@ async function startServer() {
         to: normalizedEmail,
         subject: `[INVITATION] Hotel Registration & Administrator Setup - Code: ${cleanCode}`,
         html: htmlContent,
-        fromName: "PMS System Administration"
+        fromName: "PMS System Administration",
+        replyTo: isValidEmailAddress(caller.email || adminEmail) ? (caller.email || adminEmail) : undefined,
+        idempotencyKey: `tracking-code:${cleanCode}:${normalizedEmail}`,
       });
 
       return res.status(200).json({
@@ -2596,11 +2674,13 @@ async function startServer() {
         note
       });
 
-      const { emailDispatched, method, previewUrl } = await dispatchEmailMessage({
+      const { emailDispatched, method, previewUrl, messageId, deliveryState, errorSummary } = await dispatchEmailMessage({
         to: targetEmail,
         subject: `[ACTION REQUIRED] Activate your staff account - ${hotelName}`,
         html: htmlContent,
-        fromName: `${hotelName} Administration`
+        fromName: `${hotelName} Administration`,
+        replyTo: isValidEmailAddress(effectiveAdminEmail) ? effectiveAdminEmail : undefined,
+        idempotencyKey: `account-activation:${activationToken}`,
       });
 
       // Record in Firestore outbox
@@ -2618,6 +2698,9 @@ async function startServer() {
             sentBy: effectiveAdminEmail,
             status: emailDispatched ? 'sent' : 'queued',
             deliveryMethod: method,
+            deliveryState: deliveryState || (emailDispatched ? 'accepted_by_provider' : 'queued'),
+            providerMessageId: messageId || null,
+            ...(errorSummary ? { errorSummary } : {}),
             previewUrl: previewUrl || null,
             timestamp: serverTimestamp()
           });
@@ -2809,11 +2892,13 @@ async function startServer() {
         </html>
       `;
 
-      const { emailDispatched, method, previewUrl } = await dispatchEmailMessage({
+      const { emailDispatched, method, previewUrl, messageId, deliveryState, errorSummary } = await dispatchEmailMessage({
         to: targetEmail,
         subject: `[ACTION REQUIRED] Password Reset for ${targetEmail} - ${hotelName}`,
         html: htmlContent,
-        fromName: `${hotelName} Security`
+        fromName: `${hotelName} Security`,
+        replyTo: isValidEmailAddress(effectiveAdminEmail) ? effectiveAdminEmail : undefined,
+        idempotencyKey: `password-reset:${resetToken}`,
       });
 
       // Record in Firestore outbox / notification log for live PMS visibility
@@ -2831,6 +2916,9 @@ async function startServer() {
             sentBy: effectiveAdminEmail,
             status: emailDispatched ? 'sent' : 'queued',
             deliveryMethod: method,
+            deliveryState: deliveryState || (emailDispatched ? 'accepted_by_provider' : 'queued'),
+            providerMessageId: messageId || null,
+            ...(errorSummary ? { errorSummary } : {}),
             previewUrl: previewUrl || null,
             timestamp: serverTimestamp()
           });
@@ -3399,12 +3487,100 @@ async function startServer() {
   app.post("/api/auth/delete-staff-user", handleUserDeletion);
   app.post("/api/auth/delete-user", handleUserDeletion);
 
+  // API Route: Generic Server-Side Email Dispatch via Resend (emailService.ts)
+  app.post("/api/emails/send", async (req, res) => {
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
+    const {
+      recipient,
+      to,
+      subject,
+      body,
+      html,
+      text,
+      fromName,
+      replyTo,
+      idempotencyKey,
+      hotelId,
+    } = req.body || {};
+
+    if (hotelId !== undefined && hotelId !== null && hotelId !== "") {
+      if (!isSafeIdentifier(hotelId)) {
+        return res.status(400).json({ error: "Invalid hotelId format." });
+      }
+      if (!isSuperAdminCaller(caller) && !callerIsHotelStaff(caller, hotelId)) {
+        return res.status(403).json({ error: "Forbidden: You are not authorized to send emails for this hotel." });
+      }
+    } else if (!isSuperAdminCaller(caller) && !caller.profile?.hotelId) {
+      return res.status(403).json({ error: "Forbidden: Active hotel account required to dispatch emails." });
+    }
+
+    const targetRecipient = to ?? recipient;
+    if (!targetRecipient || (Array.isArray(targetRecipient) && targetRecipient.length === 0)) {
+      return res.status(400).json({ error: "Recipient email address is required." });
+    }
+
+    if (typeof subject !== "string" || !subject.trim()) {
+      return res.status(400).json({ error: "Email subject is required." });
+    }
+
+    const hasBodyContent =
+      (typeof body === "string" && body.trim().length > 0) ||
+      (typeof html === "string" && html.trim().length > 0) ||
+      (typeof text === "string" && text.trim().length > 0);
+
+    if (!hasBodyContent) {
+      return res.status(400).json({ error: "Email body content (body, html, or text) is required." });
+    }
+
+    try {
+      const result = await sendEmail({
+        recipient: targetRecipient,
+        subject,
+        body,
+        html,
+        text,
+        fromName: typeof fromName === "string" ? fromName : undefined,
+        replyTo: typeof replyTo === "string" ? replyTo : undefined,
+        idempotencyKey: typeof idempotencyKey === "string" ? idempotencyKey : undefined,
+      });
+
+      if (!result.success) {
+        return res.status(result.statusCode || 502).json({
+          success: false,
+          deliveryState: result.deliveryState,
+          provider: result.provider,
+          error: result.error || "Failed to dispatch email.",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        messageId: result.messageId,
+        deliveryState: result.deliveryState,
+        provider: result.provider,
+      });
+    } catch (err: any) {
+      console.error("[API /api/emails/send] Unexpected error:", sanitizeErrorForClient(err, "Email dispatch failed."));
+      return res.status(500).json({
+        success: false,
+        error: sanitizeErrorForClient(err, "Failed to dispatch email."),
+      });
+    }
+  });
+
   // API Route: Verify Email System Status (Diagnostic & Validation)
   app.get("/api/auth/verify-email-system", (req, res) => {
+    const resendConfigured = isResendConfigured();
+    const fromIdentity = getResendFromIdentity();
     const smtpConfigured = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
     res.json({
       status: "ready",
+      resendConfigured,
+      verifiedDomainSenderConfigured: fromIdentity.isCustomDomain,
       smtpConfigured,
+      activeProvider: resendConfigured ? "resend" : smtpConfigured ? "smtp" : "ethereal_test",
       testTransportAvailable: true,
       emailServiceReady: true,
       timestamp: new Date().toISOString()
