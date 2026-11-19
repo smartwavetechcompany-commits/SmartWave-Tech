@@ -19,6 +19,7 @@ export type Permission =
   | 'edit_guests'
   | 'delete_guests'
   | 'export_guests'
+  | 'deposit_guest_account'
 
   // --- ROOM MANAGEMENT ---
   | 'view_rooms'
@@ -187,6 +188,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { id: 'edit_guests', label: 'Edit Guests', description: 'Update contact details, ID, preferences' },
       { id: 'delete_guests', label: 'Delete Guests', description: 'Remove guest CRM records' },
       { id: 'export_guests', label: 'Export Guest Data', description: 'Export customer list' },
+      { id: 'deposit_guest_account', label: 'Deposit Money to Guest Account', description: 'Authorize staff to deposit money into an individual guest account wallet' },
     ]
   },
   {
@@ -532,6 +534,7 @@ const PERMISSION_FIELD_PATH_MAP: Record<string, { modules: string[]; actions: st
   edit_guest_profiles: { modules: ['guests'], actions: ['editProfiles', 'editGuestProfiles', 'edit'] },
   delete_guests: { modules: ['guests'], actions: ['delete', 'deleteGuests'] },
   export_guests: { modules: ['guests'], actions: ['export', 'exportGuests'] },
+  deposit_guest_account: { modules: ['guests', 'finance', 'reservations', 'frontDesk'], actions: ['depositGuestAccount', 'deposit_guest_account'] },
 
   // Housekeeping
   view_housekeeping: { modules: ['housekeeping'], actions: ['view', 'viewHousekeeping', 'read'] },
@@ -768,7 +771,8 @@ const MODULE_ACTION_PERMISSIONS: Record<string, Permission[]> = {
     'add_guests', 
     'edit_guests', 
     'delete_guests', 
-    'export_guests'
+    'export_guests',
+    'deposit_guest_account'
   ],
   rooms: [
     'view_rooms', 
@@ -935,4 +939,20 @@ export const hasFinancialVisibility = (
   
   return false;
 };
+
+/**
+ * Returns true only for the primary Hotel Admin registered on SuperAdmin / hotel signup,
+ * and false for any staff accounts created by Hotel Admin (including staff assigned an admin role).
+ */
+export const isPrimaryHotelAdminUser = (
+  profile: any,
+  hotel?: { adminUIDs?: string[] } | null
+): boolean => {
+  if (!profile || profile.role !== 'hotelAdmin') return false;
+  if (Array.isArray(hotel?.adminUIDs) && hotel.adminUIDs.length > 0) {
+    return hotel.adminUIDs[0] === profile.uid;
+  }
+  return !profile.activationEmailSentBy && !profile.activationToken && !profile.activationLink;
+};
+
 

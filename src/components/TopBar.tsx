@@ -12,6 +12,7 @@ import { db } from '../firebase';
 import { cn } from '../utils';
 import { toast } from 'sonner';
 import { GlobalSearchModal } from './GlobalSearchModal';
+import { isPrimaryHotelAdminUser } from '../utils/permissions';
 
 export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const navigate = useNavigate();
@@ -34,6 +35,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
 
   const isSuperAdmin = profile?.role === 'superAdmin';
   const isManaging = isSuperAdmin && hotel?.id;
+  const canSeeSubscriptionCountdown = isSuperAdmin || isPrimaryHotelAdminUser(profile, hotel);
 
   useEffect(() => {
     if (!isSuperAdmin) return;
@@ -174,7 +176,7 @@ export function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
             <span className="text-xs sm:text-sm font-bold text-zinc-100 tracking-tight truncate max-w-[110px] xs:max-w-[150px] sm:max-w-[240px]">{hotel?.name || 'Hotel PMS'}</span>
           </div>
 
-          {hotel?.subscriptionExpiry && (
+          {canSeeSubscriptionCountdown && hotel?.subscriptionExpiry && (
             (() => {
               const expiryTime = new Date(hotel.subscriptionExpiry).getTime();
               if (isNaN(expiryTime)) return null;

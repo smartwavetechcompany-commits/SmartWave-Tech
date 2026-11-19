@@ -14,6 +14,17 @@ import {
   syncKitchenOrdersForReservation,
 } from './ledgerService';
 import { getReservationLiveBalance } from '../utils/billingEngine';
+import { hasPermission } from '../utils/permissions';
+
+export const GUEST_DEPOSIT_PERMISSION_DENIED_MESSAGE =
+  'Unauthorized: You do not have the "Deposit Money to Guest Account" permission.';
+
+export function canDepositToGuestAccount(
+  profile: any,
+  customRoles: any[] = []
+): boolean {
+  return hasPermission(profile, 'deposit_guest_account', customRoles);
+}
 
 export interface DepositUserContext {
   uid: string;
@@ -78,8 +89,13 @@ export async function depositToGuestAccount(
     referenceCode?: string;
     description?: string;
     timestamp?: string;
+    profile?: any;
+    customRoles?: any[];
   }
 ): Promise<{ transaction: GuestDepositTransaction; balanceBefore: number; balanceAfter: number }> {
+  if (options?.profile && !canDepositToGuestAccount(options.profile, options.customRoles || [])) {
+    throw new Error(GUEST_DEPOSIT_PERMISSION_DENIED_MESSAGE);
+  }
   if (!hotelId || !guestId) {
     throw new Error('Hotel and guest identifiers are required.');
   }

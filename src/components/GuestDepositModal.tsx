@@ -5,8 +5,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { Guest, GuestDepositTransaction, LedgerEntry, Reservation } from '../types';
 import {
   applyGuestDepositToReservation,
+  canDepositToGuestAccount,
   depositToGuestAccount,
   getAvailableGuestDeposit,
+  GUEST_DEPOSIT_PERMISSION_DENIED_MESSAGE,
   refundGuestDeposit,
 } from '../services/guestDepositService';
 import { getReservationLiveBalance } from '../utils/billingEngine';
@@ -41,7 +43,8 @@ interface GuestDepositModalProps {
 }
 
 export function GuestDepositModal({ guest, onClose, defaultReservationId }: GuestDepositModalProps) {
-  const { hotel, currency, exchangeRate, profile } = useAuth();
+  const { hotel, currency, exchangeRate, profile, customRoles } = useAuth();
+  const canDepositMoney = canDepositToGuestAccount(profile, customRoles);
   const [currentGuest, setCurrentGuest] = useState<Guest>(guest);
   const [transactions, setTransactions] = useState<GuestDepositTransaction[]>([]);
   const [guestReservations, setGuestReservations] = useState<Reservation[]>([]);
@@ -171,6 +174,10 @@ export function GuestDepositModal({ guest, onClose, defaultReservationId }: Gues
   const handleRecordDeposit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id || !profile || isSaving) return;
+    if (!canDepositMoney) {
+      toast.error(GUEST_DEPOSIT_PERMISSION_DENIED_MESSAGE);
+      return;
+    }
     if (depositForm.amount <= 0) {
       toast.error('Please enter a deposit amount greater than zero.');
       return;
@@ -187,6 +194,8 @@ export function GuestDepositModal({ guest, onClose, defaultReservationId }: Gues
         {
           referenceCode: depositForm.referenceCode,
           description: depositForm.description,
+          profile,
+          customRoles,
         }
       );
       toast.success(
@@ -406,19 +415,21 @@ export function GuestDepositModal({ guest, onClose, defaultReservationId }: Gues
 
           {/* Action Buttons Bar */}
           <div className="flex flex-wrap items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => setActiveAction(activeAction === 'deposit' ? 'none' : 'deposit')}
-              className={cn(
-                'px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all active:scale-95',
-                activeAction === 'deposit'
-                  ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
-                  : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500 hover:text-black'
-              )}
-            >
-              <PlusCircle size={15} />
-              <span>Deposit Money into Account</span>
-            </button>
+            {canDepositMoney && (
+              <button
+                type="button"
+                onClick={() => setActiveAction(activeAction === 'deposit' ? 'none' : 'deposit')}
+                className={cn(
+                  'px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all active:scale-95',
+                  activeAction === 'deposit'
+                    ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
+                    : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500 hover:text-black'
+                )}
+              >
+                <PlusCircle size={15} />
+                <span>Deposit Money into Account</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -454,7 +465,7 @@ export function GuestDepositModal({ guest, onClose, defaultReservationId }: Gues
           </div>
 
           {/* Deposit Money Form */}
-          {activeAction === 'deposit' && (
+          {activeAction === 'deposit' && canDepositMoney && (
             <form
               onSubmit={handleRecordDeposit}
               className="bg-zinc-950 border border-emerald-500/30 rounded-2xl p-4 sm:p-5 space-y-4"

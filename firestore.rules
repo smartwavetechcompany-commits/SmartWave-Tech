@@ -126,6 +126,27 @@ service cloud.firestore {
       );
     }
 
+    function canDepositGuestAccount(hotelId) {
+      let data = getUserData();
+      let roleId = data != null ? data.get('customRoleId', '') : '';
+      let hasCustomRoleDoc = roleId is string && roleId != '' && exists(/databases/$(database)/documents/hotels/$(hotelId)/customRoles/$(roleId));
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        (exists(/databases/$(database)/documents/hotels/$(hotelId)) &&
+         get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs != null &&
+         get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs is list &&
+         get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid])) ||
+        (sameHotel(hotelId) && data != null && data.get('status', 'active') != "suspended" && data.get('status', 'active') != "inactive" && (
+          data.role == "hotelAdmin" ||
+          data.role == "admin" ||
+          data.role == "hotel_admin" ||
+          (hasCustomRoleDoc
+            ? customRoleHasPermission(hotelId, roleId, 'deposit_guest_account')
+            : (data.get('permissions', []) is list && data.get('permissions', []).hasAny(['deposit_guest_account', 'all'])))
+        ))
+      );
+    }
+
     function roomHasPostingBlocked(hotelId, roomId) {
       return roomId is string &&
         roomId != '' &&
@@ -410,6 +431,31 @@ service cloud.firestore {
                                   get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs != null &&
                                   get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs is list &&
                                   get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid]));
+        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin() || isStaffOf(hotelId))) || isAuthenticated();
+      }
+
+      // Guest Account Deposit Transactions: Enforce deposit_guest_account RBAC on creating new deposit entries
+      match /guest_deposit_transactions/{txId} {
+        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
+                       isAuthenticated() ||
+                       (resource != null && resource.data.hotelId == hotelId);
+        allow create: if (
+          isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
+          isAuthenticated() ||
+          (exists(/databases/$(database)/documents/hotels/$(hotelId)) &&
+           get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs != null &&
+           get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs is list &&
+           get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid]))
+        ) && (
+          request.resource.data.get('type', '') != 'deposit' ||
+          canDepositGuestAccount(hotelId)
+        );
+        allow update: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
+                         isAuthenticated() ||
+                         (exists(/databases/$(database)/documents/hotels/$(hotelId)) &&
+                          get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs != null &&
+                          get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs is list &&
+                          get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid]));
         allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin() || isStaffOf(hotelId))) || isAuthenticated();
       }
 

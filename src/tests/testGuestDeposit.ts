@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import {
+  canDepositToGuestAccount,
   getAvailableGuestDeposit,
   validateDepositApplication,
 } from '../services/guestDepositService';
+import { isPrimaryHotelAdminUser } from '../utils/permissions';
 import type { Guest } from '../types';
 
 function runGuestDepositTests() {
@@ -110,6 +112,51 @@ function runGuestDepositTests() {
     (wallet.totalDeposited || 0) - (wallet.totalDepositUsed || 0) - (wallet.totalDepositRefunded || 0),
     wallet.depositBalance,
     'Wallet conservation invariant holds across deposit, usage across stays/F&B, and refund'
+  );
+
+  // 4. RBAC tests for deposit_guest_account
+  assert.equal(canDepositToGuestAccount({ uid: 'sa1', role: 'superAdmin' }), true);
+  assert.equal(canDepositToGuestAccount({ uid: 'ha1', role: 'hotelAdmin' }), true);
+  assert.equal(
+    canDepositToGuestAccount({ uid: 'fd1', role: 'staff', staffRole: 'frontDesk', permissions: ['view_guests', 'receive_payments'] }),
+    false,
+    'Front desk staff without deposit_guest_account cannot deposit money'
+  );
+  assert.equal(
+    canDepositToGuestAccount({ uid: 'fd2', role: 'staff', staffRole: 'frontDesk', permissions: ['view_guests', 'deposit_guest_account'] }),
+    true,
+    'Staff granted deposit_guest_account can deposit money'
+  );
+  assert.equal(
+    canDepositToGuestAccount(
+      { uid: 'cashier1', role: 'staff', customRoleId: 'role_cashier', permissions: [] },
+      [{ id: 'role_cashier', status: 'active', permissions: ['deposit_guest_account'] }]
+    ),
+    true,
+    'Staff with custom role granting deposit_guest_account can deposit money'
+  );
+  assert.equal(
+    canDepositToGuestAccount({ uid: 's1', role: 'staff', status: 'suspended', permissions: ['deposit_guest_account'] }),
+    false,
+    'Suspended staff cannot deposit money'
+  );
+
+  // 5. Primary HotelAdmin vs Created Staff subscription countdown visibility
+  const hotelStub = { adminUIDs: ['primary_admin_uid', 'secondary_staff_admin_uid'] };
+  assert.equal(
+    isPrimaryHotelAdminUser({ uid: 'primary_admin_uid', role: 'hotelAdmin' }, hotelStub),
+    true,
+    'Primary Hotel Admin sees countdown'
+  );
+  assert.equal(
+    isPrimaryHotelAdminUser({ uid: 'secondary_staff_admin_uid', role: 'hotelAdmin', activationEmailSentBy: 'primary_admin_uid' }, hotelStub),
+    false,
+    'Staff created by Hotel Admin (even with admin role) does not see countdown'
+  );
+  assert.equal(
+    isPrimaryHotelAdminUser({ uid: 'staff_uid', role: 'staff', staffRole: 'frontDesk' }, hotelStub),
+    false,
+    'Regular staff does not see countdown'
   );
 
   console.log('ALL GUEST DEPOSIT TESTS PASSED');

@@ -100,6 +100,7 @@ export const PMS_MODULES: ModuleDefinition[] = [
       { id: 'edit_guests', name: 'Edit Guest Details', description: 'Update contact info, preferences, and documents' },
       { id: 'delete_guests', name: 'Delete Guest Profiles', description: 'Permanently delete guest CRM records' },
       { id: 'export_guests', name: 'Export Guest List', description: 'Download CSV file of hotel guests' },
+      { id: 'deposit_guest_account', name: 'Deposit Money to Guest Account', description: 'Authorize staff to deposit funds into individual guest account wallets' },
     ]
   },
   {
