@@ -39,6 +39,10 @@ export const CUSTOMIZABLE_EMAIL_EVENTS: CustomizableEmailEventType[] = [
   "post_stay_feedback_request",
 ];
 
+export const SYSTEM_FIXED_EMAIL_EVENTS: SystemFixedEmailEventType[] = [
+  "tracking_code_request_alert",
+];
+
 /**
  * Strict merge-tag allow-list. Unknown variables are rejected at save time and never rendered raw.
  */
@@ -427,4 +431,15 @@ export const IMAGE_LIMITS = {
   maxWidthPx: 2000,
   maxImagesPerHotel: 30,
   maxTotalBytesPerHotel: 20 * 1024 * 1024, // 20 MB total per hotel
+} as const;
+
+export const EMAIL_MODULE_BASE_CONFIG = {
+  moduleId: "email_templates",
+  featureFlagEnvVar: "EMAIL_CUSTOMIZATION_ENABLED",
+  defaultLanguage: "en" as SupportedEmailLanguage,
+  supportedLanguages: SUPPORTED_EMAIL_LANGUAGES,
+  defaultCurrency: "NGN",
+  maxVersionHistory: 10,
+  defaultSettings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+  imageLimits: IMAGE_LIMITS,
 } as const;

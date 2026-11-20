@@ -982,6 +982,54 @@ async function run() {
     );
   });
 
+  // 19. Resolver failure gracefully falls back to default template and sends via Resend
+  await test("19. Dispatcher falls back to default hotel template if resolver throws unexpectedly", async () => {
+    const sent: SendEmailParams[] = [];
+    const res = await sendHotelEmail("hotel_alpha", "booking_confirmation", {
+      reservationId: "RES_FALLBACK_01",
+      preloaded: {
+        hotel: SAMPLE_HOTEL,
+        reservation: {
+          id: "RES_FALLBACK_01",
+          hotelId: "hotel_alpha",
+          guestName: "Alex Morgan",
+          guestEmail: "alex@example.com",
+          roomNumber: "402",
+          checkIn: "2026-12-15",
+          checkOut: "2026-12-17",
+          status: "confirmed",
+        },
+        guest: null,
+        room: null,
+      },
+      overrides: {
+        appUrl: "https://tidehotels.de",
+        resolveTemplateFn: async () => {
+          throw new Error("Simulated transient Firestore timeout");
+        },
+        sendEmailFn: async (p) => {
+          sent.push(p);
+          return {
+            success: true,
+            messageId: "msg_fallback_1",
+            deliveryState: "accepted_by_provider",
+            provider: "resend",
+            statusCode: 200,
+          };
+        },
+        persistMarkerFn: async () => true,
+      },
+    });
+
+    assert.strictEqual(res.ok, true);
+    assert.strictEqual(res.sent, true);
+    assert.strictEqual(res.usedDefaultLayout, true);
+    assert.strictEqual(sent.length, 1);
+    assert.strictEqual(sent[0].subject, "Booking Confirmation - Harborview Suites (RES_FALL)");
+    assert.ok(sent[0].html.includes("Harborview Suites"));
+    assert.ok(sent[0].html.includes("Room 402"));
+  });
+
   if (process.exitCode && process.exitCode !== 0) {
     console.error(`\nFAILED: ${passed} tests passed, failures occurred.`);
     process.exit(1);

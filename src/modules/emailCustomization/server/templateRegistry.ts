@@ -1,6 +1,9 @@
 import {
   ALLOWED_TEMPLATE_VARIABLES,
   CUSTOMIZABLE_EMAIL_EVENTS,
+  EMAIL_MODULE_BASE_CONFIG,
+  SYSTEM_FIXED_EMAIL_EVENTS,
+  type AllowedTemplateVariable,
   type CustomizableEmailEventType,
   type EventCatalogEntry,
   type HotelEmailEventType,
@@ -16,6 +19,8 @@ export {
   ALLOWED_TEMPLATE_VARIABLES,
   CUSTOMIZABLE_EMAIL_EVENTS,
   EMAIL_EVENT_CATALOG,
+  EMAIL_MODULE_BASE_CONFIG,
+  SYSTEM_FIXED_EMAIL_EVENTS,
 };
 
 const EVENT_ALIASES: Record<string, HotelEmailEventType> = {
@@ -56,6 +61,12 @@ export function isCustomizableEvent(eventType: string): eventType is Customizabl
 
 export function getEventCatalogEntry(eventType: CustomizableEmailEventType): EventCatalogEntry {
   return EMAIL_EVENT_CATALOG[eventType];
+}
+
+export function getAllowedVariablesForEvent(
+  eventType: CustomizableEmailEventType
+): AllowedTemplateVariable[] {
+  return EMAIL_EVENT_CATALOG[eventType]?.allowedVariables || [...ALLOWED_TEMPLATE_VARIABLES];
 }
 
 /**

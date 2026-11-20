@@ -15,12 +15,13 @@ import {
   type MultiTenantEmailEventType,
 } from "../../../services/multiTenantEmailService.ts";
 import {
+  DEFAULT_HOTEL_EMAIL_SETTINGS,
   type CustomizableEmailEventType,
   type EmailRenderContext,
   type HotelEmailEventType,
 } from "../shared/types.ts";
 import { isValidEmail } from "../shared/validation.ts";
-import { EMAIL_EVENT_CATALOG } from "./defaultTemplates.ts";
+import { EMAIL_EVENT_CATALOG, buildDefaultTemplateForHotel } from "./defaultTemplates.ts";
 import {
   fsListCollection,
   fsPatchFields,
@@ -587,15 +588,27 @@ export async function sendHotelEmail(
       };
     }
 
-    // Resolve template & per-event toggle
+    // Resolve template & per-event toggle with safe fallback to hotel default template
     const resolveFn = context.overrides?.resolveTemplateFn || resolveEffectiveTemplate;
-    const resolved = await resolveFn(
-      hotelId,
-      normalizedEvent,
-      hotelDoc,
-      renderCtx.guestLanguage,
-      bearer
-    );
+    let resolved;
+    try {
+      resolved = await resolveFn(
+        hotelId,
+        normalizedEvent,
+        hotelDoc,
+        renderCtx.guestLanguage,
+        bearer
+      );
+    } catch {
+      resolved = {
+        enabled: true,
+        language: "en" as const,
+        variant: buildDefaultTemplateForHotel(normalizedEvent, hotelDoc, "en"),
+        settings: { ...DEFAULT_HOTEL_EMAIL_SETTINGS },
+        usedDefaultLayout: true,
+        publishedVersion: 0,
+      };
+    }
 
     if (!resolved.enabled) {
       return {
