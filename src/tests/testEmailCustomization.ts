@@ -3,6 +3,8 @@ import sharp from "sharp";
 import {
   CUSTOMIZABLE_EMAIL_EVENTS,
   DEFAULT_HOTEL_EMAIL_SETTINGS,
+  EMAIL_ICON_NAMES,
+  EMAIL_ICON_TONES,
   type CustomizableEmailEventType,
   type EmailRenderContext,
   type EmailTemplateVariant,
@@ -13,14 +15,25 @@ import {
   OPTIONAL_SECTION_PRESETS,
 } from "../modules/emailCustomization/shared/defaultTemplates.ts";
 import {
+  EMAIL_PLACEHOLDER_IMAGES,
+  STARTER_LAYOUT_PRESETS,
+  buildStarterPresetVariant,
+} from "../modules/emailCustomization/shared/presets.ts";
+import { isModernV2Variant } from "../modules/emailCustomization/shared/renderer.ts";
+import {
   formatEmailCurrency,
   formatEmailDate,
   formatEmailTime,
+  measureEmailHtmlBytes,
   validateEmailUrl,
   validateHotelEmailSettings,
   validateTemplateVariant,
   validateTemplateVariables,
 } from "../modules/emailCustomization/shared/validation.ts";
+import {
+  createEmailAssetsMiddleware,
+  resolveSafeBundledIconPath,
+} from "../modules/emailCustomization/server/assetService.ts";
 import {
   buildDefaultTemplateForHotel,
   buildSamplePreviewContext,
@@ -670,19 +683,21 @@ async function run() {
   });
 
   // 15. Image security tests (magic bytes, resize > 2000px, EXIF strip, path traversal, reference tracking)
-  await test("15. Image security: reject SVG/GIF/PDF/MP4/renamed files, resize >2000px, strip EXIF, neutralize filenames, track refs", async () => {
-    // Reject SVG, GIF, PDF, MP4, fake renamed .png
+  await test("15. Image security: reject SVG/AVIF/PDF/MP4/WebM/renamed files, resize >2000px, strip EXIF, neutralize filenames, track refs", async () => {
+    // Reject SVG, AVIF, PDF, MP4, WebM, fake renamed .png
     const svgBuf = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
-    const gifBuf = Buffer.from("GIF89a\x01\x00\x01\x00\x00\x00\x00;");
+    const avifBuf = Buffer.from("\x00\x00\x00\x1cftypavif\x00\x00\x00\x00avifmif1");
     const pdfBuf = Buffer.from("%PDF-1.7\n1 0 obj\n<<>>\nendobj");
     const mp4Buf = Buffer.from("\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom");
+    const webmBuf = Buffer.from("\x1a\x45\xdf\xa3\x01\x00\x00\x00webm");
     const fakePng = Buffer.from("<html><body>not a png</body></html>");
 
     for (const [label, buf] of [
       ["SVG", svgBuf],
-      ["GIF", gifBuf],
+      ["AVIF", avifBuf],
       ["PDF", pdfBuf],
       ["MP4", mp4Buf],
+      ["WebM", webmBuf],
       ["Fake HTML", fakePng],
     ] as const) {
       assert.strictEqual(detectAllowedImageMagicBytes(buf), null, `${label} must fail magic-byte check`);
@@ -1316,6 +1331,616 @@ async function run() {
     assert.strictEqual(delRes.ok, true);
     assert.strictEqual(requests.length, 2);
     assert.ok(requests[1].url.endsWith("/image/destroy"));
+  });
+
+  // 22. Byte-for-byte v1 default & legacy saved template parity (no v2 CSS leak)
+  await test("22. Legacy v1 defaults and saved templates remain untouched (no v2 responsive shell leak)", () => {
+    for (const ev of CUSTOMIZABLE_EMAIL_EVENTS) {
+      const v1 = buildDefaultTemplateForHotel(ev, SAMPLE_HOTEL, "en");
+      assert.strictEqual(v1.schemaVersion, undefined, `Default ${ev} must stay v1 (no schemaVersion)`);
+      assert.strictEqual(isModernV2Variant(v1), false, `Default ${ev} must use legacy v1 renderer`);
+
+      const rendered = renderHotelEmailServerSide({
+        variant: v1,
+        context: BASE_CONTEXT,
+        settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+        language: "en",
+        usedDefaultLayout: true,
+      });
+
+      assert.ok(!rendered.html.includes("em-stack"), `Legacy v1 ${ev} must not include v2 CSS classes`);
+      assert.ok(!rendered.html.includes("v:roundrect"), `Legacy v1 ${ev} must not include v2 VML markup`);
+      assert.ok(rendered.html.includes("max-width:600px"), `Legacy v1 ${ev} must retain exact 600px shell`);
+    }
+  });
+
+  // 23. All 13 new modern blocks render valid email-safe tables, VML buttons, mobile stacking, decorative PNG icons (no SVG/data URI)
+  await test("23. All 13 modern blocks render table HTML, VML buttons, dir=rtl stacking, PNG icons (alt=''), plain text, zero SVG/data URIs", () => {
+    const v2AllBlocks: EmailTemplateVariant = {
+      schemaVersion: 2,
+      subject: "Welcome to {{hotel_name}} ({{booking_reference}})",
+      preheader: "Your upcoming stay details",
+      branding: {
+        ...buildDefaultTemplateVariant("booking_confirmation", "en").branding,
+        primaryColor: "#991b1b",
+        secondaryColor: "#18181b",
+        buttonColor: "#991b1b",
+        accentBarEnabled: false,
+        showEyebrow: false,
+      },
+      blocks: [
+        {
+          id: "m1",
+          type: "brand_header",
+          showHotelName: true,
+          showAddress: true,
+          showPhone: true,
+          iconTone: "muted",
+        },
+        {
+          id: "m2",
+          type: "promo_banner",
+          imageUrl: "https://tidehotels.de/uploads/email-assets/placeholders/business_banner.png",
+          imageAlt: "Guest portal preview",
+          text: "Manage your stay online anytime.",
+          buttonLabel: "Open Portal",
+          buttonUrl: "{{portal_link}}",
+          buttonStyle: "outlined",
+          buttonCorner: "pill",
+        },
+        {
+          id: "m3",
+          type: "membership_strip",
+          condition: "has_loyalty",
+          tierTemplate: "{{loyalty_tier}} Member",
+          pointsTemplate: "{{loyalty_points_balance}} Points",
+        },
+        {
+          id: "m4",
+          type: "icon_divider",
+          icon: "calendar",
+          iconTone: "muted",
+        },
+        {
+          id: "m5",
+          type: "hero_text",
+          headline: "We Look Forward to Welcoming You",
+          body: "Dear {{guest_name}}, your reservation is confirmed.",
+          buttonLabel: "Manage Stay",
+          buttonUrl: "{{portal_link}}",
+          buttonStyle: "outlined",
+          buttonCorner: "square",
+          style: { align: "center" },
+        },
+        {
+          id: "m6",
+          type: "confirmation_number",
+          label: "CONFIRMATION NUMBER",
+          valueTemplate: "{{booking_reference}}",
+        },
+        {
+          id: "m7",
+          type: "stay_dates",
+          checkInLabel: "CHECK-IN",
+          checkInDateTemplate: "{{check_in_date}}",
+          checkInTimeTemplate: "{{check_in_time}}",
+          checkOutLabel: "CHECK-OUT",
+          checkOutDateTemplate: "{{check_out_date}}",
+          checkOutTimeTemplate: "{{check_out_time}}",
+        },
+        {
+          id: "m8",
+          type: "feature_card",
+          imagePosition: "right",
+          imageUrl: "https://tidehotels.de/uploads/email-assets/placeholders/spa_card.png",
+          imageAlt: "Wellness lounge",
+          title: "Unwind at the Spa",
+          body: "Reserve a massage or sauna session before you arrive.",
+          buttonLabel: "Book Spa",
+          buttonUrl: "{{portal_link}}",
+          buttonStyle: "filled",
+          buttonCorner: "rounded",
+          style: { borderRadius: 12, borderColor: "#e4e4e7" },
+        },
+        {
+          id: "m9",
+          type: "benefits_list",
+          condition: "has_loyalty",
+          badgeText: "{{loyalty_tier}}",
+          heading: "Your {{loyalty_tier}} Benefits",
+          listStyle: "icon",
+          itemIcon: "check",
+          iconTone: "emerald",
+          items: [
+            { id: "b1", text: "Late check-out subject to availability" },
+            { id: "b2", text: "Points earned: {{loyalty_points_earned}}" },
+          ],
+          footnote: "*Subject to property availability.",
+          buttonLabel: "See Benefits",
+          buttonUrl: "{{portal_link}}",
+          buttonStyle: "outlined",
+          buttonCorner: "square",
+        },
+        {
+          id: "m10",
+          type: "icon_link_grid",
+          heading: "Explore the Area",
+          subheading: "Dining and activities nearby.",
+          iconTone: "dark",
+          items: [
+            { id: "g1", icon: "dining", label: "Hotel Dining", url: "{{hotel_website}}" },
+            { id: "g2", icon: "activities", label: "Activities", url: "{{hotel_website}}" },
+            { id: "g3", icon: "wifi", label: "Property Wi-Fi", url: "{{hotel_website}}" },
+          ],
+        },
+        {
+          id: "m11",
+          type: "image_with_list",
+          imagePosition: "left",
+          imageUrl: "https://tidehotels.de/uploads/email-assets/placeholders/suite_card.png",
+          imageAlt: "Guest portal checklist",
+          heading: "Everything ready for your arrival",
+          iconTone: "dark",
+          items: [
+            { id: "i1", icon: "key", text: "Review check-in details" },
+            { id: "i2", icon: "parking", text: "Reserve on-site parking" },
+            { id: "i3", icon: "chat", text: "Message the front desk" },
+          ],
+          buttonLabel: "Go Now",
+          buttonUrl: "{{portal_link}}",
+          buttonStyle: "dark",
+          buttonCorner: "square",
+        },
+        {
+          id: "m12",
+          type: "footer_nav",
+          links: [
+            { id: "fn1", label: "Hotel Website", url: "{{hotel_website}}" },
+            { id: "fn2", label: "Contact Us", url: "{{portal_link}}" },
+          ],
+        },
+        {
+          id: "m13",
+          type: "legal_section",
+          sections: [
+            { id: "lg1", heading: "Contact Us", body: "Call {{hotel_phone}} or email {{hotel_email}}." },
+          ],
+          copyrightText: "© {{hotel_name}}",
+        },
+      ],
+    };
+
+    const issues = validateTemplateVariant(v2AllBlocks);
+    assert.strictEqual(issues.length, 0, `Valid v2 template must have 0 issues, got: ${JSON.stringify(issues)}`);
+    assert.strictEqual(isModernV2Variant(v2AllBlocks), true);
+
+    const rendered = renderHotelEmailServerSide({
+      variant: v2AllBlocks,
+      context: {
+        ...BASE_CONTEXT,
+        loyaltyTier: "Gold",
+        loyaltyPointsBalance: 2400,
+        loyaltyPointsEarned: 450,
+      },
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+
+    assert.ok(!rendered.html.includes("undefined"), "Rendered v2 HTML must not contain literal undefined");
+    assert.ok(!rendered.html.includes("<svg"), "Email HTML must never contain inline <svg>");
+    assert.ok(!rendered.html.includes("data:image/"), "Email HTML must never embed data:image URIs");
+    assert.ok(rendered.html.includes("v:roundrect"), "Modern buttons must render Outlook VML v:roundrect");
+    assert.ok(rendered.html.includes('dir="rtl"'), "Right-aligned feature card must use dir=rtl for mobile image-on-top stacking");
+    assert.ok(rendered.html.includes('alt=""'), "Decorative built-in PNG icons must have empty alt=''");
+    assert.ok(rendered.html.includes("/uploads/email-assets/icons/"), "Icons must load via module PNG assets URL");
+    assert.ok(rendered.html.includes("Gold Member") && rendered.html.includes("2400 Points"));
+    assert.ok(rendered.html.includes("RES8A4F2") && rendered.html.includes("CHECK-IN") && rendered.html.includes("CHECK-OUT"));
+    assert.ok(rendered.text.includes("RES8A4F2") && rendered.text.includes("Unwind at the Spa") && rendered.text.includes("Hotel Dining"));
+  });
+
+  // 24. Loyalty hiding, XSS & style/URL validation, and multi-block image reference tracking
+  await test("24. Loyalty hides when absent, XSS & unsafe URLs/styles blocked on v2 blocks, extractReferencedImages covers all new blocks", () => {
+    const preset = buildStarterPresetVariant("modern_resort", "booking_confirmation", "en", "https://tidehotels.de");
+
+    // Loyalty OFF -> membership_strip & benefits_list hidden, never invented
+    const withoutLoyalty = renderHotelEmailServerSide({
+      variant: preset,
+      context: { ...BASE_CONTEXT, loyaltyTier: null, loyaltyPointsBalance: null, loyaltyPointsEarned: null },
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+    assert.ok(!withoutLoyalty.html.includes("Points"), "Loyalty points must not be invented when absent");
+    assert.ok(!withoutLoyalty.html.includes("Member Benefits"), "Loyalty benefits block must hide when absent");
+
+    // Loyalty ON -> shown
+    const withLoyalty = renderHotelEmailServerSide({
+      variant: preset,
+      context: { ...BASE_CONTEXT, loyaltyTier: "Platinum", loyaltyPointsBalance: 5120, loyaltyPointsEarned: 600 },
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+    assert.ok(withLoyalty.html.includes("Platinum") && withLoyalty.html.includes("5120"));
+
+    // Invalid hex color, borderRadius > 16, javascript: URL, missing alt text all rejected on validation
+    const invalidV2: EmailTemplateVariant = {
+      ...preset,
+      blocks: [
+        {
+          id: "bad_card",
+          type: "feature_card",
+          imagePosition: "left",
+          imageUrl: "http://insecure.example/pic.png",
+          imageAlt: "",
+          title: '<script>alert("xss")</script>Suite',
+          body: "Enjoy {{unknown_var}}",
+          buttonLabel: "Click",
+          buttonUrl: "javascript:alert(1)",
+          style: {
+            backgroundColor: "url(javascript:evil)",
+            borderRadius: 99,
+            paddingY: 200,
+          },
+        },
+      ],
+    };
+    const badIssues = validateTemplateVariant(invalidV2);
+    assert.ok(badIssues.some((i) => i.path.includes("imageUrl")), "Non-HTTPS imageUrl must be rejected");
+    assert.ok(badIssues.some((i) => i.path.includes("imageAlt")), "Missing imageAlt must be rejected");
+    assert.ok(badIssues.some((i) => i.path.includes("buttonUrl")), "javascript: buttonUrl must be rejected");
+    assert.ok(badIssues.some((i) => i.path.includes("body")), "Unknown variable must be rejected");
+    assert.ok(badIssues.some((i) => i.path.includes("backgroundColor")), "Non-hex color must be rejected");
+    assert.ok(badIssues.some((i) => i.path.includes("borderRadius")), "borderRadius > 16 must be rejected");
+    assert.ok(badIssues.some((i) => i.path.includes("paddingY")), "paddingY > 40 must be rejected");
+
+    // Even if rendered directly, XSS and unsafe URLs/styles are escaped/neutralized
+    const safeRendered = renderHotelEmailServerSide({
+      variant: invalidV2,
+      context: BASE_CONTEXT,
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+    assert.ok(!safeRendered.html.includes("<script>"), "Script tags must be HTML-escaped on render");
+    assert.ok(!safeRendered.html.includes("javascript:"), "javascript: URLs must be stripped on render");
+
+    // extractReferencedImages tracks IDs & URLs across all new image-bearing blocks
+    const refVariant: EmailTemplateVariant = {
+      ...preset,
+      blocks: [
+        { id: "r1", type: "brand_header", showHotelName: true, showAddress: true, showPhone: true, logoImageId: "id_hdr", logoUrl: "https://cdn.example/hdr.webp" },
+        { id: "r2", type: "promo_banner", imageId: "id_promo", imageUrl: "https://cdn.example/promo.webp", imageAlt: "Promo", text: "Hi", buttonLabel: "Go", buttonUrl: "{{portal_link}}" },
+        { id: "r3", type: "feature_card", imagePosition: "left", imageId: "id_card", imageUrl: "https://cdn.example/card.gif", imageAlt: "Card", title: "T", body: "B" },
+        { id: "r4", type: "benefits_list", listStyle: "bullet", badgeImageId: "id_ben", badgeImageUrl: "https://cdn.example/ben.png", heading: "H", items: [{ id: "1", text: "x" }] },
+        { id: "r5", type: "image_with_list", imagePosition: "left", imageId: "id_iwl", imageUrl: "https://cdn.example/iwl.webp", imageAlt: "List", heading: "H", items: [{ id: "1", icon: "key", text: "x" }] },
+        { id: "r6", type: "legal_section", footerLogoImageId: "id_leg", footerLogoUrl: "https://cdn.example/leg.png", sections: [{ id: "1", heading: "H", body: "B" }] },
+      ],
+    };
+    const refs = extractReferencedImages(refVariant);
+    for (const expectedId of ["id_hdr", "id_promo", "id_card", "id_ben", "id_iwl", "id_leg"]) {
+      assert.ok(refs.imageIds.has(expectedId), `extractReferencedImages missing ${expectedId}`);
+    }
+    assert.ok(refs.urls.has("https://cdn.example/card.gif"));
+  });
+
+  // 25. Built-in PNG icons, neutral placeholder PNGs, and sample animated GIF middleware
+  await test("25. Built-in email assets middleware serves all 15 PNG icons, 6 placeholders, sample GIF, and blocks traversal/SVG/POST", async () => {
+    const assetApp = express();
+    assetApp.use("/uploads/email-assets", createEmailAssetsMiddleware());
+    const server = http.createServer(assetApp);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const addr = server.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    const baseHttp = `http://127.0.0.1:${port}`;
+
+    try {
+      // Every built-in icon across all 7 tones exists as a pre-rendered PNG on disk
+      for (const tone of EMAIL_ICON_TONES) {
+        for (const icon of EMAIL_ICON_NAMES) {
+          const diskPath = resolveSafeBundledIconPath(tone, icon);
+          assert.ok(diskPath && fs.existsSync(diskPath), `Bundled PNG missing on disk: ${tone}/${icon}.png`);
+        }
+      }
+
+      // Every built-in icon serves valid PNG with ETag, 304 support, nosniff, CORS, and immutable cache
+      for (const icon of EMAIL_ICON_NAMES) {
+        const resp = await fetch(`${baseHttp}/uploads/email-assets/icons/dark/${icon}.png`);
+        assert.strictEqual(resp.status, 200, `Icon ${icon} should return 200`);
+        assert.strictEqual(resp.headers.get("content-type"), "image/png");
+        assert.strictEqual(resp.headers.get("x-content-type-options"), "nosniff");
+        assert.strictEqual(resp.headers.get("access-control-allow-origin"), "*");
+        assert.ok((resp.headers.get("cache-control") || "").includes("max-age=31536000"));
+        const etag = resp.headers.get("etag");
+        assert.ok(etag && etag.length > 4, `Icon ${icon} must include ETag header`);
+        const buf = Buffer.from(await resp.arrayBuffer());
+        assert.strictEqual(detectAllowedImageMagicBytes(buf)?.mimeType, "image/png", `Icon ${icon} must have valid PNG magic bytes`);
+
+        if (icon === "location_pin") {
+          const notMod = await fetch(`${baseHttp}/uploads/email-assets/icons/dark/${icon}.png`, {
+            headers: { "If-None-Match": etag },
+          });
+          assert.strictEqual(notMod.status, 304, "Matching If-None-Match ETag should return 304");
+          const shorthand = await fetch(`${baseHttp}/uploads/email-assets/icons/${icon}.png`);
+          assert.strictEqual(shorthand.status, 200, "Shorthand /icons/{icon}.png should resolve default dark PNG");
+        }
+      }
+
+      // Every neutral placeholder serves valid PNG
+      for (const name of EMAIL_PLACEHOLDER_IMAGES) {
+        const resp = await fetch(`${baseHttp}/uploads/email-assets/placeholders/${name}.png`);
+        assert.strictEqual(resp.status, 200, `Placeholder ${name} should return 200`);
+        assert.strictEqual(resp.headers.get("content-type"), "image/png");
+        const buf = Buffer.from(await resp.arrayBuffer());
+        assert.strictEqual(detectAllowedImageMagicBytes(buf)?.mimeType, "image/png");
+      }
+
+      // Sample animated GIF serves valid multi-frame GIF
+      const gifResp = await fetch(`${baseHttp}/uploads/email-assets/samples/welcome.gif`);
+      assert.strictEqual(gifResp.status, 200);
+      assert.strictEqual(gifResp.headers.get("content-type"), "image/gif");
+      const gifBuf = Buffer.from(await gifResp.arrayBuffer());
+      assert.strictEqual(detectAllowedImageMagicBytes(gifBuf)?.mimeType, "image/gif");
+      const gifMeta = await sharp(gifBuf, { animated: true }).metadata();
+      assert.ok((gifMeta.pages || 1) >= 2, "Sample welcome.gif must be multi-frame animated");
+
+      // Security checks: traversal 400, SVG/unknown 404, POST 405
+      const travStatus = await new Promise<number>((resolve, reject) => {
+        const req = http.get(
+          { hostname: "127.0.0.1", port, path: "/uploads/email-assets/icons/%2e%2e/etc/passwd" },
+          (res) => {
+            res.resume();
+            resolve(res.statusCode || 0);
+          }
+        );
+        req.on("error", reject);
+      });
+      assert.strictEqual(travStatus, 400);
+
+      const svgResp = await fetch(`${baseHttp}/uploads/email-assets/icons/dark/location_pin.svg`);
+      assert.strictEqual(svgResp.status, 404);
+
+      const postResp = await fetch(`${baseHttp}/uploads/email-assets/icons/dark/location_pin.png`, { method: "POST" });
+      assert.strictEqual(postResp.status, 405);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  // 26. All 4 starter layout presets (EN & DE) validate with 0 issues, render < 90 KB, and contain zero third-party brands
+  await test("26. All 4 starter layout presets (EN & DE) validate cleanly, stay under 90 KB HTML, and contain zero third-party trademarks", () => {
+    const forbiddenTerms = ["marriott", "bonvoy", "hilton", "hyatt", "airbnb"];
+    for (const preset of STARTER_LAYOUT_PRESETS) {
+      for (const lang of ["en", "de"] as const) {
+        const variant = buildStarterPresetVariant(preset.id, "booking_confirmation", lang, "https://tidehotels.de");
+        assert.strictEqual(variant.schemaVersion, 2);
+        const issues = validateTemplateVariant(variant);
+        assert.strictEqual(issues.length, 0, `Preset ${preset.id} (${lang}) failed validation: ${JSON.stringify(issues)}`);
+
+        const rendered = renderHotelEmailServerSide({
+          variant,
+          context: { ...BASE_CONTEXT, loyaltyTier: "Gold", loyaltyPointsBalance: 1850, loyaltyPointsEarned: 320 },
+          settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+          language: lang,
+          usedDefaultLayout: false,
+        });
+        const size = measureEmailHtmlBytes(rendered.html);
+        assert.ok(size.bytes < 90 * 1024, `Preset ${preset.id} (${lang}) HTML (${size.kb} KB) must stay under 90 KB`);
+        assert.ok(!rendered.html.includes("undefined"));
+
+        const lowerHtml = rendered.html.toLowerCase();
+        for (const term of forbiddenTerms) {
+          assert.ok(!lowerHtml.includes(term), `Preset ${preset.id} (${lang}) must not contain third-party brand '${term}'`);
+        }
+      }
+    }
+  });
+
+  // 27. Animated & static GIF security, animation preservation, resize <= 640px, frame/duration/size caps, and local/Cloudinary storage
+  await test("27. GIF pipeline: preserves animation, resizes >640px, strips comments, enforces frame/duration/size limits, and stores/deletes cleanly", async () => {
+    // Helper to build a synthetic N-frame animated GIF via Sharp
+    async function makeAnimatedGif(
+      width: number,
+      height: number,
+      frames: number,
+      delayMs: number
+    ): Promise<Buffer> {
+      const frameBytes = width * height * 4;
+      const raw = Buffer.alloc(frameBytes * frames);
+      for (let f = 0; f < frames; f++) {
+        const r = (f * 67 + 20) % 255;
+        const g = (f * 41 + 90) % 255;
+        const b = (f * 29 + 140) % 255;
+        const offset = f * frameBytes;
+        for (let p = 0; p < width * height; p++) {
+          const i = offset + p * 4;
+          raw[i] = r;
+          raw[i + 1] = g;
+          raw[i + 2] = b;
+          raw[i + 3] = 255;
+        }
+      }
+      return sharp(raw, {
+        raw: { width, height: height * frames, channels: 4, pageHeight: height },
+      })
+        .gif({ delay: Array(frames).fill(delayMs), loop: 0 })
+        .toBuffer();
+    }
+
+    // 27a. Multi-frame animated GIF (3 frames, 900px wide -> resized <= 640px, stays animated)
+    const wideAnimGif = await makeAnimatedGif(900, 120, 3, 250);
+    assert.strictEqual(detectAllowedImageMagicBytes(wideAnimGif)?.mimeType, "image/gif");
+
+    const procAnim = await validateAndProcessImageBuffer(wideAnimGif);
+    assert.strictEqual(procAnim.ok, true, `Valid animated GIF failed: ${"error" in procAnim ? procAnim.error : ""}`);
+    if (procAnim.ok) {
+      assert.strictEqual(procAnim.result.mimeType, "image/gif");
+      assert.ok(/^[0-9a-f]{32}\.gif$/.test(procAnim.result.randomFilename));
+      assert.ok(procAnim.result.width <= 640, `Expected GIF width <= 640, got ${procAnim.result.width}`);
+      assert.strictEqual(procAnim.result.isAnimated, true);
+      assert.strictEqual(procAnim.result.frameCount, 3);
+      assert.ok((procAnim.result.durationMs || 0) >= 600);
+
+      const postMeta = await sharp(procAnim.result.buffer, { animated: true }).metadata();
+      assert.strictEqual(postMeta.pages, 3, "Re-encoded GIF must preserve all 3 animation frames");
+      assert.ok(!postMeta.exif && !postMeta.xmp, "Metadata must be stripped from GIF");
+    }
+
+    // 27b. Static 1-frame GIF accepted with isAnimated === false
+    const staticGif = await makeAnimatedGif(120, 80, 1, 100);
+    const procStatic = await validateAndProcessImageBuffer(staticGif);
+    assert.strictEqual(procStatic.ok, true);
+    if (procStatic.ok) {
+      assert.strictEqual(procStatic.result.isAnimated, false);
+      assert.strictEqual(procStatic.result.frameCount, 1);
+    }
+
+    // 27c. Reject > 100 frames with optimization tip
+    const tooManyFramesGif = await makeAnimatedGif(16, 16, 105, 50);
+    const resTooMany = await validateAndProcessImageBuffer(tooManyFramesGif);
+    assert.strictEqual(resTooMany.ok, false);
+    if (!resTooMany.ok) {
+      assert.ok(resTooMany.error.includes("100-frame"), `Expected frame limit error, got: ${resTooMany.error}`);
+    }
+
+    // 27d. Reject > 15s total duration with optimization tip
+    const tooLongGif = await makeAnimatedGif(16, 16, 20, 1000); // 20s
+    const resTooLong = await validateAndProcessImageBuffer(tooLongGif);
+    assert.strictEqual(resTooLong.ok, false);
+    if (!resTooLong.ok) {
+      assert.ok(resTooLong.error.includes("15s"), `Expected duration limit error, got: ${resTooLong.error}`);
+    }
+
+    // 27e. Reject > 2 MB raw GIF with optimization tip
+    const fakeHugeGif = Buffer.concat([Buffer.from("GIF89a"), Buffer.alloc(2 * 1024 * 1024 + 128, 0x20)]);
+    const resHuge = await validateAndProcessImageBuffer(fakeHugeGif);
+    assert.strictEqual(resHuge.ok, false);
+    if (!resHuge.ok) {
+      assert.ok(resHuge.error.includes("2 MB"), `Expected 2 MB limit error, got: ${resHuge.error}`);
+    }
+
+    // 27f. Local storage serves uploaded .gif with Content-Type: image/gif + nosniff and deletes cleanly
+    const tmpUploadDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pms-email-gif-test-"));
+    const memoryStore = new Map<string, any>();
+    try {
+      const localProvider = resolveImageStorageProvider({
+        env: { IMAGE_STORAGE_PROVIDER: "local", IMAGE_UPLOAD_DIR: tmpUploadDir, APP_URL: "https://tidehotels.de" },
+      });
+      const smallAnimGif = await makeAnimatedGif(200, 100, 3, 200);
+      const up = await uploadHotelImage(
+        "hotel_alpha",
+        { base64Data: `data:image/gif;base64,${smallAnimGif.toString("base64")}`, label: "Welcome Wave" },
+        "admin@harborview.example",
+        undefined,
+        {
+          storageProvider: localProvider,
+          listDocsFn: async () => Array.from(memoryStore.values()),
+          setDocFn: async (_h, id, asset) => {
+            memoryStore.set(id, asset);
+            return { ok: true };
+          },
+        }
+      );
+      assert.strictEqual(up.ok, true, `GIF upload failed: ${up.error}`);
+      assert.ok(up.image!.url.endsWith(".gif"));
+      assert.strictEqual(up.image!.isAnimated, true);
+      assert.strictEqual(up.image!.frameCount, 3);
+
+      const testApp = express();
+      testApp.use("/uploads/email-images", createLocalEmailImageMiddleware({ uploadDir: tmpUploadDir }));
+      const server = http.createServer(testApp);
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+      const addr = server.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      const urlPath = new URL(up.image!.url).pathname;
+
+      try {
+        const resp = await fetch(`http://127.0.0.1:${port}${urlPath}`);
+        assert.strictEqual(resp.status, 200);
+        assert.strictEqual(resp.headers.get("content-type"), "image/gif");
+        assert.strictEqual(resp.headers.get("x-content-type-options"), "nosniff");
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+
+      const del = await deleteHotelImage("hotel_alpha", up.image!.id, undefined, {
+        storageProvider: localProvider,
+        readDocFn: async (_h, id) => memoryStore.get(id) || null,
+        findRefsFn: async () => ({ publishedTemplates: [], draftTemplates: [] }),
+        deleteDocFn: async (_h, id) => {
+          memoryStore.delete(id);
+          return { ok: true };
+        },
+      });
+      assert.strictEqual(del.ok, true);
+    } finally {
+      await fs.promises.rm(tmpUploadDir, { recursive: true, force: true });
+    }
+  });
+
+  // 28. HTML size meter thresholds & EMAIL_CUSTOMIZATION_ENABLED=false instant rollback to v1 defaults
+  await test("28. HTML size meter thresholds (ok / warning > 80KB / over > 90KB) & feature flag rollback from v2 to v1 default", async () => {
+    const okSize = measureEmailHtmlBytes("<html><body>Small email</body></html>");
+    assert.strictEqual(okSize.status, "ok");
+
+    const warnSize = measureEmailHtmlBytes("a".repeat(82 * 1024));
+    assert.strictEqual(warnSize.status, "warning");
+
+    const overSize = measureEmailHtmlBytes("a".repeat(92 * 1024));
+    assert.strictEqual(overSize.status, "over");
+
+    // Feature flag OFF -> instant rollback to v1 defaults even if a v2 preset would otherwise be active
+    const prevFlag = process.env.EMAIL_CUSTOMIZATION_ENABLED;
+    process.env.EMAIL_CUSTOMIZATION_ENABLED = "false";
+    const sentPayloads: SendEmailParams[] = [];
+    try {
+      assert.strictEqual(isEmailCustomizationEnabled(), false);
+      const res = await sendHotelEmail("hotel_alpha", "booking_confirmation", {
+        reservationId: "RES_ROLLBACK_V2",
+        preloaded: {
+          hotel: SAMPLE_HOTEL,
+          reservation: {
+            id: "RES_ROLLBACK_V2",
+            hotelId: "hotel_alpha",
+            guestName: "Alex Morgan",
+            guestEmail: "alex@example.com",
+            roomNumber: "204",
+            checkIn: "2026-11-24",
+            checkOut: "2026-11-27",
+            status: "confirmed",
+          },
+          guest: null,
+          room: null,
+        },
+        overrides: {
+          appUrl: "https://tidehotels.de",
+          resolveTemplateFn: async () => {
+            throw new Error("Resolver must NOT be called when EMAIL_CUSTOMIZATION_ENABLED=false");
+          },
+          sendEmailFn: async (p) => {
+            sentPayloads.push(p);
+            return {
+              success: true,
+              messageId: "msg_rollback_v2",
+              deliveryState: "accepted_by_provider",
+              provider: "resend",
+              statusCode: 200,
+            };
+          },
+          persistMarkerFn: async () => true,
+        },
+      });
+      assert.strictEqual(res.ok, true);
+      assert.strictEqual(res.sent, true);
+      assert.strictEqual(res.usedDefaultLayout, true);
+      assert.strictEqual(sentPayloads.length, 1);
+      assert.ok(!sentPayloads[0].html.includes("v:roundrect"), "Rollback must render classic v1 default HTML");
+      assert.ok(sentPayloads[0].html.includes("Harborview Suites"));
+    } finally {
+      if (prevFlag === undefined) delete process.env.EMAIL_CUSTOMIZATION_ENABLED;
+      else process.env.EMAIL_CUSTOMIZATION_ENABLED = prevFlag;
+    }
   });
 
   if (process.exitCode && process.exitCode !== 0) {

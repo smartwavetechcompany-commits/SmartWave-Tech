@@ -16,6 +16,12 @@ import {
   buildSamplePreviewContext,
   EMAIL_EVENT_CATALOG,
 } from "../src/modules/emailCustomization/server/defaultTemplates.ts";
+import {
+  buildSampleGifUrl,
+  buildStarterPresetVariant,
+  STARTER_LAYOUT_PRESETS,
+} from "../src/modules/emailCustomization/shared/presets.ts";
+import { measureEmailHtmlBytes } from "../src/modules/emailCustomization/shared/validation.ts";
 import { renderHotelEmailServerSide } from "../src/modules/emailCustomization/server/renderer.ts";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -40,6 +46,7 @@ async function main() {
   const appUrl = getAppUrl();
   const filterEvent = (process.env.TEST_EMAIL_EVENT || "").trim().toLowerCase();
   const lang = (process.env.TEST_EMAIL_LANG || "en").trim().toLowerCase() === "de" ? "de" : "en";
+  const presetsMode = String(process.env.TEST_EMAIL_PRESETS || "").trim().toLowerCase() === "true";
 
   const sampleHotel = {
     id: "sample-hotel-custom",
@@ -72,6 +79,80 @@ async function main() {
     },
     legalImprint: "Harborview Suites GmbH · HRB 123456 Berlin",
   };
+
+  if (presetsMode) {
+    const targetEvent: CustomizableEmailEventType =
+      filterEvent && (CUSTOMIZABLE_EMAIL_EVENTS as readonly string[]).includes(filterEvent)
+        ? (filterEvent as CustomizableEmailEventType)
+        : "booking_confirmation";
+
+    const ctxLoyaltyOn = buildSamplePreviewContext(sampleHotel.id, sampleHotel, appUrl, {
+      includeLoyaltySample: true,
+    });
+    const ctxLoyaltyOff = buildSamplePreviewContext(sampleHotel.id, sampleHotel, appUrl, {
+      includeLoyaltySample: false,
+    });
+    const sampleGifUrl = buildSampleGifUrl(appUrl);
+
+    let hasFailure = false;
+    for (const preset of STARTER_LAYOUT_PRESETS) {
+      for (const loyaltyOn of [true, false]) {
+        const variant = buildStarterPresetVariant(preset.id, targetEvent, lang, appUrl, {
+          primaryColor: preset.accentColor,
+          secondaryColor: preset.secondaryColor,
+        });
+        variant.subject = `[Preset: ${preset.name} | Loyalty ${loyaltyOn ? "ON" : "OFF"}] ${variant.subject}`;
+
+        // Inject a lightweight sample animated GIF block right after the confirmation/hero area
+        const insertAt = Math.min(4, variant.blocks.length);
+        variant.blocks.splice(insertAt, 0, {
+          id: `sample_gif_${preset.id}`,
+          type: "image",
+          src: sampleGifUrl,
+          alt: "Animated welcome visual from Harborview Suites",
+          widthPx: 540,
+          align: "center",
+        });
+
+        const rendered = renderHotelEmailServerSide({
+          variant,
+          context: loyaltyOn ? ctxLoyaltyOn : ctxLoyaltyOff,
+          settings: sampleSettings,
+          language: lang,
+          usedDefaultLayout: false,
+        });
+        const size = measureEmailHtmlBytes(rendered.html);
+
+        const result = await sendEmail({
+          to: testRecipient,
+          subject: rendered.subject,
+          html: rendered.html,
+          text: rendered.text,
+          fromName: rendered.fromName,
+          replyTo: rendered.replyTo,
+          tags: [
+            { name: "hotelId", value: sampleHotel.id },
+            { name: "event", value: targetEvent },
+            { name: "preset", value: preset.id },
+            { name: "loyalty", value: loyaltyOn ? "on" : "off" },
+          ],
+        });
+
+        if (result.success) {
+          console.log(
+            `SUCCESS | preset=${preset.id} | loyalty=${loyaltyOn ? "ON" : "OFF"} | htmlKB=${size.kb} | messageId=${result.messageId}`
+          );
+        } else {
+          hasFailure = true;
+          console.error(
+            `FAILURE | preset=${preset.id} | loyalty=${loyaltyOn ? "ON" : "OFF"} | error=${result.error || "Unknown error"}`
+          );
+        }
+      }
+    }
+
+    process.exit(hasFailure ? 1 : 0);
+  }
 
   const eventsToSend: CustomizableEmailEventType[] = filterEvent
     ? CUSTOMIZABLE_EMAIL_EVENTS.filter((e) => e === filterEvent)

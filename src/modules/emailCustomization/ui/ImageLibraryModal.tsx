@@ -22,7 +22,7 @@ interface ImageLibraryProps {
   onClose?: () => void;
 }
 
-const ACCEPTED_MIME = new Set(["image/png", "image/jpeg", "image/webp"]);
+const ACCEPTED_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -74,15 +74,22 @@ export function ImageLibraryPanel({
 
   const handleFile = async (file: File) => {
     setErrorMsg(null);
-    const hasAllowedExt = /\.(png|jpe?g|webp)$/i.test(file.name || "");
+    const hasAllowedExt = /\.(png|jpe?g|webp|gif)$/i.test(file.name || "");
     if (file.type ? !ACCEPTED_MIME.has(file.type) : !hasAllowedExt) {
       setErrorMsg(
-        "Only PNG, JPEG, and WebP images are supported. SVG, GIF, PDF, and video files are not permitted."
+        "Only PNG, JPEG, WebP, and GIF images are supported. SVG, PDF, AVIF, and video files are not permitted."
       );
       return;
     }
-    if (file.size > IMAGE_LIMITS.maxFileSizeBytes * 2) {
-      setErrorMsg("File is too large. Please upload a PNG, JPEG, or WebP image under 2 MB.");
+    const isGif = file.type === "image/gif" || /\.gif$/i.test(file.name || "");
+    if (isGif && file.size > IMAGE_LIMITS.maxFileSizeBytes) {
+      setErrorMsg(
+        "GIF exceeds the 2 MB limit. Tip: resize to 600px wide, use fewer colors, or shorten the animation before uploading."
+      );
+      return;
+    }
+    if (!isGif && file.size > IMAGE_LIMITS.maxFileSizeBytes * 2) {
+      setErrorMsg("File is too large. Please upload an image under 2 MB.");
       return;
     }
 
@@ -167,7 +174,7 @@ export function ImageLibraryPanel({
         <div>
           <h2 className="text-base font-semibold text-zinc-100">Hotel Email Image Library</h2>
           <p className="text-xs text-zinc-400 mt-0.5">
-            PNG, JPEG, or WebP only · Max 2 MB per image · Automatically resized to 2000px wide and EXIF-stripped.
+            PNG, JPEG, WebP, or GIF (max 2 MB) · Photos resized to 2000px &amp; EXIF-stripped; GIFs resized to 640px wide (max 100 frames, 15s).
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -241,7 +248,7 @@ export function ImageLibraryPanel({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/png,image/jpeg,image/webp"
+          accept="image/png,image/jpeg,image/webp,image/gif"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
@@ -256,10 +263,13 @@ export function ImageLibraryPanel({
             <Upload size={22} className="text-zinc-400" />
           )}
           <div className="text-sm text-zinc-200 font-medium">
-            {uploading ? "Validating & optimizing image..." : "Drag an image here, or browse to upload"}
+            {uploading ? "Validating & optimizing image..." : "Drag an image or GIF here, or browse to upload"}
           </div>
           <div className="text-xs text-zinc-500">
-            Logos, header banners, or property photos (PNG, JPG, WebP up to 2 MB)
+            Logos, banners, photos, or animated GIFs (PNG, JPG, WebP, GIF up to 2 MB)
+          </div>
+          <div className="text-[11px] text-zinc-500">
+            Outlook desktop displays only the first frame of GIFs — keep your key message on frame 1.
           </div>
           <button
             type="button"
@@ -267,7 +277,7 @@ export function ImageLibraryPanel({
             onClick={() => fileInputRef.current?.click()}
             className="mt-2 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold whitespace-nowrap transition-colors"
           >
-            Choose Image
+            Choose Image or GIF
           </button>
         </div>
       </div>
@@ -304,6 +314,11 @@ export function ImageLibraryPanel({
                     className="max-h-full max-w-full object-contain"
                     loading="lazy"
                   />
+                  {img.mimeType === "image/gif" && (
+                    <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-zinc-900/90 border border-zinc-700 text-[10px] font-semibold tracking-wide text-amber-300 tabular-nums">
+                      GIF{img.frameCount && img.frameCount > 1 ? ` · ${img.frameCount}f` : ""}
+                    </span>
+                  )}
                 </div>
                 <div className="p-3 flex-1 flex flex-col justify-between gap-2">
                   <div>
@@ -337,6 +352,9 @@ export function ImageLibraryPanel({
                     )}
                     <div className="text-[11px] text-zinc-500 mt-0.5 tabular-nums">
                       {img.width} × {img.height}px · {formatBytes(img.sizeBytes)}
+                      {img.mimeType === "image/gif" && img.isAnimated
+                        ? ` · Animated`
+                        : ""}
                     </div>
                   </div>
 

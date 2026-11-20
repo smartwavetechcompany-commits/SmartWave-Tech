@@ -50,13 +50,35 @@ export function extractReferencedImages(variant: EmailTemplateVariant | undefine
   const urls = new Set<string>();
   if (!variant) return { imageIds, urls };
 
-  if (variant.branding?.logoImageId) imageIds.add(variant.branding.logoImageId);
-  if (variant.branding?.logoUrl) urls.add(variant.branding.logoUrl.trim());
+  const record = (id?: string, url?: string) => {
+    if (id && id.trim()) imageIds.add(id.trim());
+    if (url && url.trim()) urls.add(url.trim());
+  };
+
+  record(variant.branding?.logoImageId, variant.branding?.logoUrl);
 
   for (const block of variant.blocks || []) {
-    if (block?.type === "image") {
-      if (block.imageId) imageIds.add(block.imageId);
-      if (block.src) urls.add(block.src.trim());
+    if (!block) continue;
+    switch (block.type) {
+      case "image":
+        record(block.imageId, block.src);
+        break;
+      case "brand_header":
+        record(block.logoImageId, block.logoUrl);
+        break;
+      case "promo_banner":
+      case "feature_card":
+      case "image_with_list":
+        record(block.imageId, block.imageUrl);
+        break;
+      case "benefits_list":
+        record(block.badgeImageId, block.badgeImageUrl);
+        break;
+      case "legal_section":
+        record(block.footerLogoImageId, block.footerLogoUrl);
+        break;
+      default:
+        break;
     }
   }
   return { imageIds, urls };

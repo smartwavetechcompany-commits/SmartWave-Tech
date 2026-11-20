@@ -1,18 +1,15 @@
 import React, { useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
-  ArrowDown,
+  AlertTriangle,
   ArrowLeft,
-  ArrowUp,
   ChevronDown,
   ChevronRight,
-  Eye,
-  EyeOff,
   History,
   Image as ImageIcon,
+  LayoutTemplate,
   Loader2,
   Monitor,
-  Plus,
   RotateCcw,
   Save,
   Send,
@@ -25,11 +22,10 @@ import {
 import { toast } from "sonner";
 import {
   ALLOWED_TEMPLATE_VARIABLES,
+  MODERN_EMAIL_BLOCK_TYPES,
   SUPPORTED_EMAIL_LANGUAGES,
   VARIABLE_DESCRIPTIONS,
   WEB_SAFE_FONTS,
-  type BlockCondition,
-  type BookingDetailsRowConfig,
   type CustomizableEmailEventType,
   type EmailBlock,
   type EmailBlockType,
@@ -37,16 +33,30 @@ import {
   type EmailRenderContext,
   type EmailTemplateDocument,
   type EmailTemplateVariant,
-  type FooterContactField,
   type HotelEmailSettings,
   type SupportedEmailLanguage,
   type WebSafeFontId,
 } from "../shared/types";
 import { OPTIONAL_SECTION_PRESETS } from "../shared/defaultTemplates";
+import {
+  buildStarterPresetVariant,
+  STARTER_LAYOUT_PRESETS,
+  type StarterLayoutPresetId,
+} from "../shared/presets";
 import { renderEmailTemplate } from "../shared/renderer";
-import { validateEmailUrl, validateTemplateVariant } from "../shared/validation";
+import {
+  measureEmailHtmlBytes,
+  validateEmailUrl,
+  validateTemplateVariant,
+} from "../shared/validation";
 import { emailCustomizationApi } from "./apiClient";
 import { ImageLibraryPanel } from "./ImageLibraryModal";
+import { StarterLayoutPickerModal } from "./BlockPaletteModal";
+import {
+  applyImageAssetToEmailBlock,
+  BlockEditor,
+  createEmailBlock,
+} from "./components/BlockEditor";
 
 interface TemplateBlockEditorProps {
   hotelId?: string;
@@ -61,102 +71,10 @@ interface TemplateBlockEditorProps {
   onDocumentUpdated: (doc: EmailTemplateDocument) => void;
 }
 
-const BLOCK_TYPE_LABELS: Record<EmailBlockType, string> = {
-  heading: "Heading",
-  paragraph: "Paragraph",
-  image: "Image",
-  button: "Button / Link",
-  divider: "Divider",
-  spacer: "Spacer",
-  booking_details_table: "Booking Details Table",
-  two_column_text: "Two-Column Text",
-  social_links: "Social Links",
-  footer: "Contact & Footer",
-};
-
-const CONDITION_LABELS: Record<BlockCondition, string> = {
-  always: "Always show",
-  has_loyalty: "Show only if guest has loyalty data",
-  has_balance_due: "Show only if balance is due",
-  has_deposit: "Show only if deposit/payment exists",
-};
+const MODERN_BLOCK_SET = new Set<string>(MODERN_EMAIL_BLOCK_TYPES);
 
 function makeId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-}
-
-function createNewBlock(type: EmailBlockType): EmailBlock {
-  const id = makeId("blk");
-  switch (type) {
-    case "heading":
-      return { id, type: "heading", level: 2, text: "Section Heading", align: "left" };
-    case "paragraph":
-      return { id, type: "paragraph", text: "Add your message text here.", align: "left", tone: "default" };
-    case "image":
-      return {
-        id,
-        type: "image",
-        src: "",
-        alt: "{{hotel_name}} image",
-        widthPx: 540,
-        align: "center",
-      };
-    case "button":
-      return {
-        id,
-        type: "button",
-        label: "View Booking Details",
-        url: "{{portal_link}}",
-        displayStyle: "solid",
-        align: "left",
-      };
-    case "divider":
-      return { id, type: "divider", color: "#e4e4e7", thicknessPx: 1 };
-    case "spacer":
-      return { id, type: "spacer", heightPx: 16 };
-    case "booking_details_table":
-      return {
-        id,
-        type: "booking_details_table",
-        title: "Reservation Summary",
-        rows: [
-          { id: makeId("row"), label: "Booking Reference", valueTemplate: "{{booking_reference}}", visible: true },
-          { id: makeId("row"), label: "Guest Name", valueTemplate: "{{guest_name}}", visible: true },
-          { id: makeId("row"), label: "Room", valueTemplate: "{{room_name}}", visible: true },
-          { id: makeId("row"), label: "Check-In", valueTemplate: "{{check_in_date}}", visible: true },
-          { id: makeId("row"), label: "Check-Out", valueTemplate: "{{check_out_date}}", visible: true },
-        ],
-      };
-    case "two_column_text":
-      return {
-        id,
-        type: "two_column_text",
-        leftTitle: "Check-In",
-        leftText: "{{check_in_date}} {{check_in_time}}",
-        rightTitle: "Check-Out",
-        rightText: "{{check_out_date}} {{check_out_time}}",
-      };
-    case "social_links":
-      return {
-        id,
-        type: "social_links",
-        title: "Connect with us",
-        align: "left",
-        links: [{ id: makeId("soc"), label: "Website", url: "{{hotel_website}}" }],
-      };
-    case "footer":
-      return {
-        id,
-        type: "footer",
-        showContactBlock: true,
-        contactTitle: "{{hotel_name}} Contact",
-        fields: [
-          { id: makeId("cf"), key: "address", label: "Address", valueTemplate: "{{hotel_address}}", visible: true },
-          { id: makeId("cf"), key: "phone", label: "Phone", valueTemplate: "{{hotel_phone}}", visible: true },
-          { id: makeId("cf"), key: "email", label: "Email", valueTemplate: "{{hotel_email}}", visible: true },
-        ],
-      };
-  }
 }
 
 export function TemplateBlockEditor({
@@ -189,13 +107,21 @@ export function TemplateBlockEditor({
   const [brandingOpen, setBrandingOpen] = useState(false);
   const [variablesOpen, setVariablesOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [starterPickerOpen, setStarterPickerOpen] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+
+  const [expandedBlockId, setExpandedBlockId] = useState<string | null>(
+    () => (initialDoc.draft.en || initialDoc.published.en)?.blocks[0]?.id || null
+  );
+
   const [imagePickerTarget, setImagePickerTarget] = useState<
-    null | { kind: "logo" } | { kind: "block"; blockId: string; removeIfEmptyOnClose?: boolean }
+    | null
+    | { kind: "logo" }
+    | { kind: "block"; blockId: string; field: string; removeIfEmptyOnClose?: boolean }
   >(null);
-  const [uploadingBlockId, setUploadingBlockId] = useState<string | null>(null);
-  const directUploadBlockIdRef = useRef<string | null>(null);
+  const [uploadingKey, setUploadingKey] = useState<string | null>(null);
+  const directUploadTargetRef = useRef<{ blockId: string; field: string } | null>(null);
   const directFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [saving, setSaving] = useState<"draft" | "publish" | null>(null);
@@ -205,6 +131,7 @@ export function TemplateBlockEditor({
   const [serverErrors, setServerErrors] = useState<string[]>([]);
 
   const variant = (variantsByLang[language] || variantsByLang.en)!;
+  const appUrl = (sampleContext.appUrl || "https://tidehotels.de").replace(/\/+$/, "");
 
   const updateVariant = (updater: (prev: EmailTemplateVariant) => EmailTemplateVariant) => {
     setVariantsByLang((prev) => {
@@ -237,8 +164,12 @@ export function TemplateBlockEditor({
     });
   }, [variant, effectiveSampleContext, settings, language, doc.isCustomized, dirty]);
 
+  const htmlSizeMetrics = useMemo(
+    () => measureEmailHtmlBytes(liveRendered.html),
+    [liveRendered.html]
+  );
+
   const resolvedPortalUrl = useMemo(() => {
-    const cleanApp = (sampleContext.appUrl || "https://tidehotels.de").replace(/\/+$/, "");
     if (variant.portalUrlOverride?.trim()) {
       const c = validateEmailUrl(variant.portalUrlOverride.trim());
       if (c.valid && c.normalized) return c.normalized;
@@ -247,8 +178,8 @@ export function TemplateBlockEditor({
       const c = validateEmailUrl(settings.portalUrl.trim());
       if (c.valid && c.normalized) return c.normalized;
     }
-    return cleanApp;
-  }, [variant.portalUrlOverride, settings.portalUrl, sampleContext.appUrl]);
+    return appUrl;
+  }, [variant.portalUrlOverride, settings.portalUrl, appUrl]);
 
   const handleSave = async (publish: boolean) => {
     setServerErrors([]);
@@ -354,6 +285,54 @@ export function TemplateBlockEditor({
     }
   };
 
+  const handleApplyStarterPreset = (
+    presetId: StarterLayoutPresetId,
+    applyBothLanguages: boolean
+  ) => {
+    const brandingOverrides = {
+      primaryColor: sampleContext.hotelPrimaryColor || variant.branding.primaryColor,
+      secondaryColor: sampleContext.hotelSecondaryColor || variant.branding.secondaryColor,
+      logoUrl: variant.branding.logoUrl,
+      logoImageId: variant.branding.logoImageId,
+      logoAlt: variant.branding.logoAlt,
+    };
+
+    const nextEn = buildStarterPresetVariant(
+      presetId,
+      eventType,
+      "en",
+      appUrl,
+      brandingOverrides
+    );
+    const nextDe = buildStarterPresetVariant(
+      presetId,
+      eventType,
+      "de",
+      appUrl,
+      brandingOverrides
+    );
+
+    setVariantsByLang((prev) => {
+      if (applyBothLanguages) {
+        return { en: nextEn, de: nextDe };
+      }
+      return {
+        ...prev,
+        [language]: language === "de" ? nextDe : nextEn,
+      };
+    });
+
+    const activePreset = language === "de" ? nextDe : nextEn;
+    setExpandedBlockId(activePreset.blocks[0]?.id || null);
+    setDirty(true);
+    setServerErrors([]);
+
+    const presetMeta = STARTER_LAYOUT_PRESETS.find((p) => p.id === presetId);
+    toast.success(
+      `Applied "${presetMeta?.name || presetId}" to your draft only. Review and click Publish when ready.`
+    );
+  };
+
   const updateBlock = (blockId: string, fn: (b: EmailBlock) => EmailBlock) => {
     updateVariant((prev) => ({
       ...prev,
@@ -372,30 +351,75 @@ export function TemplateBlockEditor({
     });
   };
 
+  const reorderBlock = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+    updateVariant((prev) => {
+      if (fromIndex >= prev.blocks.length || toIndex >= prev.blocks.length) return prev;
+      const copy = [...prev.blocks];
+      const [moved] = copy.splice(fromIndex, 1);
+      copy.splice(toIndex, 0, moved);
+      return { ...prev, blocks: copy };
+    });
+  };
+
+  const duplicateBlock = (index: number) => {
+    const source = variant.blocks[index];
+    if (!source) return;
+    const cloned: EmailBlock = { ...JSON.parse(JSON.stringify(source)), id: makeId("blk") };
+    updateVariant((prev) => {
+      const copy = [...prev.blocks];
+      copy.splice(index + 1, 0, cloned);
+      return { ...prev, blocks: copy };
+    });
+    setExpandedBlockId(cloned.id);
+  };
+
   const removeBlock = (blockId: string) => {
     updateVariant((prev) => ({
       ...prev,
       blocks: prev.blocks.filter((b) => b.id !== blockId),
     }));
-  };
-
-  const addBlock = (type: EmailBlockType) => {
-    const newBlock = createNewBlock(type);
-    updateVariant((prev) => {
-      // Insert before footer if last block is footer
-      const last = prev.blocks[prev.blocks.length - 1];
-      if (last?.type === "footer" && type !== "footer") {
-        return { ...prev, blocks: [...prev.blocks.slice(0, -1), newBlock, last] };
-      }
-      return { ...prev, blocks: [...prev.blocks, newBlock] };
-    });
-    if (type === "image") {
-      // Immediately open the picker/uploader so the admin never gets stuck with an empty image URL error
-      setImagePickerTarget({ kind: "block", blockId: newBlock.id, removeIfEmptyOnClose: true });
+    if (expandedBlockId === blockId) {
+      setExpandedBlockId(null);
     }
   };
 
-  const addPreset = (presetId: string) => {
+  const addBlock = (type: EmailBlockType) => {
+    const newBlock = createEmailBlock(type, appUrl);
+    const upgradesToV2 = MODERN_BLOCK_SET.has(type);
+    updateVariant((prev) => {
+      const nextSchema = upgradesToV2 ? 2 : prev.schemaVersion;
+      const last = prev.blocks[prev.blocks.length - 1];
+      if (
+        (last?.type === "footer" || last?.type === "legal_section") &&
+        type !== "footer" &&
+        type !== "legal_section" &&
+        type !== "footer_nav"
+      ) {
+        return {
+          ...prev,
+          ...(nextSchema ? { schemaVersion: nextSchema } : {}),
+          blocks: [...prev.blocks.slice(0, -1), newBlock, last],
+        };
+      }
+      return {
+        ...prev,
+        ...(nextSchema ? { schemaVersion: nextSchema } : {}),
+        blocks: [...prev.blocks, newBlock],
+      };
+    });
+    setExpandedBlockId(newBlock.id);
+    if (type === "image") {
+      setImagePickerTarget({
+        kind: "block",
+        blockId: newBlock.id,
+        field: "src",
+        removeIfEmptyOnClose: true,
+      });
+    }
+  };
+
+  const addOptionalSection = (presetId: string) => {
     const preset = OPTIONAL_SECTION_PRESETS.find((p) => p.id === presetId);
     if (!preset) return;
     const cloned = preset
@@ -403,11 +427,12 @@ export function TemplateBlockEditor({
       .map((b) => ({ ...JSON.parse(JSON.stringify(b)), id: makeId("blk") }));
     updateVariant((prev) => {
       const last = prev.blocks[prev.blocks.length - 1];
-      if (last?.type === "footer") {
+      if (last?.type === "footer" || last?.type === "legal_section") {
         return { ...prev, blocks: [...prev.blocks.slice(0, -1), ...cloned, last] };
       }
       return { ...prev, blocks: [...prev.blocks, ...cloned] };
     });
+    if (cloned[0]?.id) setExpandedBlockId(cloned[0].id);
     toast.success(`Added "${preset.label}" section.`);
   };
 
@@ -426,21 +451,18 @@ export function TemplateBlockEditor({
       }));
     } else {
       updateBlock(imagePickerTarget.blockId, (b) =>
-        b.type === "image"
-          ? {
-              ...b,
-              imageId: img.id,
-              src: img.url,
-              alt: !b.alt || b.alt === "{{hotel_name}} image" ? img.label : b.alt,
-            }
-          : b
+        applyImageAssetToEmailBlock(b, imagePickerTarget.field, img)
       );
     }
     setImagePickerTarget(null);
   };
 
   const handleCloseImagePicker = () => {
-    if (imagePickerTarget && imagePickerTarget.kind === "block" && imagePickerTarget.removeIfEmptyOnClose) {
+    if (
+      imagePickerTarget &&
+      imagePickerTarget.kind === "block" &&
+      imagePickerTarget.removeIfEmptyOnClose
+    ) {
       const targetBlock = variant.blocks.find((b) => b.id === imagePickerTarget.blockId);
       if (targetBlock && targetBlock.type === "image" && !targetBlock.src.trim()) {
         removeBlock(imagePickerTarget.blockId);
@@ -449,51 +471,56 @@ export function TemplateBlockEditor({
     setImagePickerTarget(null);
   };
 
-  const triggerDirectBlockImageUpload = (blockId: string) => {
-    directUploadBlockIdRef.current = blockId;
+  const triggerDirectBlockImageUpload = (blockId: string, field = "src") => {
+    directUploadTargetRef.current = { blockId, field };
     directFileInputRef.current?.click();
   };
 
   const handleDirectBlockFileSelected = (file: File) => {
-    const blockId = directUploadBlockIdRef.current;
-    if (!blockId) return;
-    const hasAllowedExt = /\.(png|jpe?g|webp)$/i.test(file.name || "");
-    const allowedMime = new Set(["image/png", "image/jpeg", "image/webp"]);
+    const target = directUploadTargetRef.current;
+    if (!target) return;
+    const hasAllowedExt = /\.(png|jpe?g|webp|gif)$/i.test(file.name || "");
+    const allowedMime = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
     if (file.type ? !allowedMime.has(file.type) : !hasAllowedExt) {
-      toast.error("Only PNG, JPEG, and WebP images are supported.");
+      toast.error("Only PNG, JPEG, WebP, and GIF images are supported.");
       return;
     }
-    if (file.size > 4 * 1024 * 1024) {
-      toast.error("File is too large. Please upload a PNG, JPEG, or WebP image under 2 MB.");
+    const isGif = file.type === "image/gif" || /\.gif$/i.test(file.name || "");
+    if (isGif && file.size > 2 * 1024 * 1024) {
+      toast.error(
+        "GIF exceeds 2 MB. Trim frames, reduce dimensions to <= 640px wide, or lower colors and try again."
+      );
+      return;
+    }
+    if (!isGif && file.size > 4 * 1024 * 1024) {
+      toast.error("File is too large. Please upload an image under 2 MB.");
       return;
     }
 
+    const key = `${target.blockId}:${target.field}`;
     const reader = new FileReader();
     reader.onload = async () => {
       try {
-        setUploadingBlockId(blockId);
+        setUploadingKey(key);
         const base64Data = String(reader.result || "");
         const defaultLabel = file.name.replace(/\.[^.]+$/, "").slice(0, 60) || "Hotel Image";
         const res = await emailCustomizationApi.uploadImage(base64Data, defaultLabel, hotelId);
         if (res.image) {
           const uploaded = res.image;
-          updateBlock(blockId, (b) =>
-            b.type === "image"
-              ? {
-                  ...b,
-                  imageId: uploaded.id,
-                  src: uploaded.url,
-                  alt: !b.alt || b.alt === "{{hotel_name}} image" ? uploaded.label : b.alt,
-                }
-              : b
+          updateBlock(target.blockId, (b) =>
+            applyImageAssetToEmailBlock(b, target.field, uploaded)
           );
-          toast.success("Image uploaded and inserted into block.");
+          toast.success(
+            uploaded.isAnimated
+              ? `Animated GIF uploaded (${uploaded.frameCount || 1} frames) and inserted.`
+              : "Image uploaded and inserted into block."
+          );
         }
       } catch (err: any) {
         toast.error(err?.message || "Image upload failed.");
       } finally {
-        setUploadingBlockId(null);
-        directUploadBlockIdRef.current = null;
+        setUploadingKey(null);
+        directUploadTargetRef.current = null;
       }
     };
     reader.onerror = () => {
@@ -558,6 +585,14 @@ export function TemplateBlockEditor({
 
           <button
             type="button"
+            onClick={() => setStarterPickerOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-xs font-medium text-emerald-300 whitespace-nowrap"
+          >
+            <LayoutTemplate size={13} /> Start from a Layout
+          </button>
+
+          <button
+            type="button"
             onClick={() => setHistoryOpen(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-xs font-medium text-zinc-300 whitespace-nowrap"
           >
@@ -602,11 +637,11 @@ export function TemplateBlockEditor({
         </div>
       </div>
 
-      {/* Hidden direct file input for instant one-click image block upload */}
+      {/* Hidden direct file input for instant one-click image/GIF upload */}
       <input
         ref={directFileInputRef}
         type="file"
-        accept="image/png,image/jpeg,image/webp"
+        accept="image/png,image/jpeg,image/webp,image/gif"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -625,12 +660,14 @@ export function TemplateBlockEditor({
             {serverErrors.length > 0
               ? serverErrors.slice(0, 6).map((msg, idx) => <li key={idx}>{msg}</li>)
               : validationIssues.slice(0, 6).map((issue, idx) => {
-                  const imgMatch = issue.path.match(/^blocks\[(\d+)\]\.src$/);
+                  const imgMatch = issue.path.match(
+                    /^blocks\[(\d+)\]\.(src|imageUrl|logoUrl|footerLogoUrl)$/
+                  );
                   const imgBlockIdx = imgMatch ? Number(imgMatch[1]) : -1;
+                  const imgField = imgMatch ? imgMatch[2] : "src";
                   const targetBlock =
-                    imgBlockIdx >= 0 && variant.blocks[imgBlockIdx]?.type === "image"
-                      ? variant.blocks[imgBlockIdx]
-                      : null;
+                    imgBlockIdx >= 0 ? variant.blocks[imgBlockIdx] || null : null;
+                  const key = targetBlock ? `${targetBlock.id}:${imgField}` : "";
                   return (
                     <li key={idx} className="leading-relaxed">
                       <div className="flex flex-wrap items-center gap-2">
@@ -639,21 +676,27 @@ export function TemplateBlockEditor({
                           <span className="inline-flex items-center gap-1.5">
                             <button
                               type="button"
-                              disabled={uploadingBlockId === targetBlock.id}
-                              onClick={() => triggerDirectBlockImageUpload(targetBlock.id)}
+                              disabled={uploadingKey === key}
+                              onClick={() =>
+                                triggerDirectBlockImageUpload(targetBlock.id, imgField)
+                              }
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-medium whitespace-nowrap"
                             >
-                              {uploadingBlockId === targetBlock.id ? (
+                              {uploadingKey === key ? (
                                 <Loader2 size={11} className="animate-spin" />
                               ) : (
                                 <Upload size={11} />
                               )}
-                              Upload Image
+                              Upload Image / GIF
                             </button>
                             <button
                               type="button"
                               onClick={() =>
-                                setImagePickerTarget({ kind: "block", blockId: targetBlock.id })
+                                setImagePickerTarget({
+                                  kind: "block",
+                                  blockId: targetBlock.id,
+                                  field: imgField,
+                                })
                               }
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-[11px] font-medium whitespace-nowrap"
                             >
@@ -678,7 +721,7 @@ export function TemplateBlockEditor({
 
       {/* Split Workspace: Left Editor / Right Live Sandboxed Preview */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
-        {/* LEFT PANE: Editor Controls */}
+        {/* LEFT PANE: Metadata, Branding, and Modular BlockEditor */}
         <div className="xl:col-span-6 space-y-4">
           {/* Enable Toggle + Subject + Preheader */}
           <div className="rounded-xl bg-zinc-900/60 border border-zinc-800 p-4 space-y-3">
@@ -752,7 +795,8 @@ export function TemplateBlockEditor({
             {variablesOpen && (
               <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-3 space-y-2">
                 <div className="text-[11px] text-zinc-400">
-                  Click any allowed variable to copy it. Unknown variables or code syntax are blocked automatically.
+                  Click any allowed variable to copy it. Unknown variables or code syntax are
+                  blocked automatically.
                 </div>
                 <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
                   {ALLOWED_TEMPLATE_VARIABLES.map((v) => (
@@ -780,10 +824,11 @@ export function TemplateBlockEditor({
             >
               <div>
                 <div className="text-xs font-semibold text-zinc-200">
-                  Branding, Colors, Font, Logo & Portal URL
+                  Branding, Colors, Font, Logo &amp; Portal URL
                 </div>
                 <div className="text-[11px] text-zinc-500">
-                  Top accent bar, eyebrow text, button colors, web-safe font, logo image, and link override
+                  Top accent bar, eyebrow text, button colors, web-safe font, logo image, and
+                  link override
                 </div>
               </div>
               {brandingOpen ? (
@@ -839,7 +884,9 @@ export function TemplateBlockEditor({
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] text-zinc-400 mb-1">Secondary Color</label>
+                    <label className="block text-[11px] text-zinc-400 mb-1">
+                      Secondary Color
+                    </label>
                     <input
                       type="color"
                       value={variant.branding.secondaryColor}
@@ -969,761 +1016,29 @@ export function TemplateBlockEditor({
             )}
           </div>
 
-          {/* Reorderable Content Blocks */}
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">
-                Email Content Blocks ({variant.blocks.length})
-              </h3>
-              <div className="flex items-center gap-2">
-                <select
-                  defaultValue=""
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      addPreset(e.target.value);
-                      e.target.value = "";
-                    }
-                  }}
-                  className="rounded-lg bg-zinc-900 border border-zinc-800 px-2.5 py-1 text-xs text-emerald-400 focus:outline-none focus:border-emerald-500"
-                >
-                  <option value="" disabled>
-                    + Insert Optional Section...
-                  </option>
-                  {OPTIONAL_SECTION_PRESETS.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {variant.blocks.map((block, idx) => {
-              const blockHasError = validationIssues.some((i) =>
-                i.path.startsWith(`blocks[${idx}]`)
-              );
-              return (
-              <div
-                key={block.id}
-                className={`rounded-xl bg-zinc-900/60 border p-3.5 space-y-2.5 transition-colors ${
-                  blockHasError ? "border-red-500/60" : "border-zinc-800"
-                }`}
-              >
-                {/* Block Header Controls */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-[11px] font-mono text-zinc-500 tabular-nums">
-                      #{idx + 1}
-                    </span>
-                    <span className="text-xs font-semibold text-zinc-200">
-                      {BLOCK_TYPE_LABELS[block.type]}
-                    </span>
-                    <select
-                      value={block.condition || "always"}
-                      onChange={(e) =>
-                        updateBlock(block.id, (b) => ({
-                          ...b,
-                          condition: e.target.value as BlockCondition,
-                        }))
-                      }
-                      className="rounded bg-zinc-950 border border-zinc-800 px-2 py-0.5 text-[11px] text-zinc-400 focus:outline-none focus:border-emerald-500"
-                    >
-                      {(Object.keys(CONDITION_LABELS) as BlockCondition[]).map((c) => (
-                        <option key={c} value={c}>
-                          {CONDITION_LABELS[c]}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      disabled={idx === 0}
-                      onClick={() => moveBlock(idx, -1)}
-                      className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 disabled:opacity-30"
-                      aria-label="Move block up"
-                    >
-                      <ArrowUp size={13} />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={idx === variant.blocks.length - 1}
-                      onClick={() => moveBlock(idx, 1)}
-                      className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 disabled:opacity-30"
-                      aria-label="Move block down"
-                    >
-                      <ArrowDown size={13} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeBlock(block.id)}
-                      className="p-1 rounded text-zinc-400 hover:text-red-400 hover:bg-red-500/10"
-                      aria-label="Delete block"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Typed Block Body Controls */}
-                {block.type === "heading" && (
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-                    <div className="sm:col-span-3">
-                      <input
-                        type="text"
-                        value={block.text}
-                        onChange={(e) =>
-                          updateBlock(block.id, (b) =>
-                            b.type === "heading" ? { ...b, text: e.target.value } : b
-                          )
-                        }
-                        className={inputClass}
-                      />
-                    </div>
-                    <select
-                      value={String(block.level)}
-                      onChange={(e) =>
-                        updateBlock(block.id, (b) =>
-                          b.type === "heading"
-                            ? { ...b, level: Number(e.target.value) as 1 | 2 | 3 }
-                            : b
-                        )
-                      }
-                      className={inputClass}
-                    >
-                      <option value="1">H1 (22px)</option>
-                      <option value="2">H2 (18px)</option>
-                      <option value="3">H3 (15px)</option>
-                    </select>
-                  </div>
-                )}
-
-                {block.type === "paragraph" && (
-                  <div className="space-y-2">
-                    <textarea
-                      rows={3}
-                      value={block.text}
-                      onChange={(e) =>
-                        updateBlock(block.id, (b) =>
-                          b.type === "paragraph" ? { ...b, text: e.target.value } : b
-                        )
-                      }
-                      className={inputClass}
-                    />
-                    <div className="flex items-center gap-2">
-                      <select
-                        value={block.tone || "default"}
-                        onChange={(e) =>
-                          updateBlock(block.id, (b) =>
-                            b.type === "paragraph"
-                              ? { ...b, tone: e.target.value as "default" | "muted" | "accent" }
-                              : b
-                          )
-                        }
-                        className="rounded bg-zinc-950 border border-zinc-800 px-2 py-1 text-[11px] text-zinc-300"
-                      >
-                        <option value="default">Standard text</option>
-                        <option value="muted">Muted note</option>
-                        <option value="accent">Brand highlight</option>
-                      </select>
-                      <select
-                        value={block.align || "left"}
-                        onChange={(e) =>
-                          updateBlock(block.id, (b) =>
-                            b.type === "paragraph"
-                              ? { ...b, align: e.target.value as "left" | "center" | "right" }
-                              : b
-                          )
-                        }
-                        className="rounded bg-zinc-950 border border-zinc-800 px-2 py-1 text-[11px] text-zinc-300"
-                      >
-                        <option value="left">Align Left</option>
-                        <option value="center">Align Center</option>
-                        <option value="right">Align Right</option>
-                      </select>
-                    </div>
-                  </div>
-                )}
-
-                {block.type === "image" && (
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={uploadingBlockId === block.id}
-                        onClick={() => triggerDirectBlockImageUpload(block.id)}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs font-medium text-white whitespace-nowrap transition-colors"
-                      >
-                        {uploadingBlockId === block.id ? (
-                          <Loader2 size={13} className="animate-spin" />
-                        ) : (
-                          <Upload size={13} />
-                        )}
-                        {uploadingBlockId === block.id ? "Uploading..." : "Upload Image"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setImagePickerTarget({ kind: "block", blockId: block.id })}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200 whitespace-nowrap"
-                      >
-                        <ImageIcon size={13} /> Pick from Library
-                      </button>
-                      <input
-                        type="url"
-                        value={block.src}
-                        onChange={(e) =>
-                          updateBlock(block.id, (b) =>
-                            b.type === "image" ? { ...b, src: e.target.value } : b
-                          )
-                        }
-                        placeholder="https://... (auto-filled when you upload or pick an image)"
-                        className={`${inputClass} flex-1 min-w-[200px]`}
-                      />
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      <input
-                        type="text"
-                        value={block.alt}
-                        onChange={(e) =>
-                          updateBlock(block.id, (b) =>
-                            b.type === "image" ? { ...b, alt: e.target.value } : b
-                          )
-                        }
-                        placeholder="Required alt text"
-                        className={inputClass}
-                      />
-                      <input
-                        type="number"
-                        min={60}
-                        max={600}
-                        value={block.widthPx}
-                        onChange={(e) =>
-                          updateBlock(block.id, (b) =>
-                            b.type === "image"
-                              ? { ...b, widthPx: Math.max(60, Math.min(600, Number(e.target.value) || 300)) }
-                              : b
-                          )
-                        }
-                        placeholder="Width px"
-                        className={`${inputClass} tabular-nums`}
-                      />
-                      <input
-                        type="url"
-                        value={block.linkUrl || ""}
-                        onChange={(e) =>
-                          updateBlock(block.id, (b) =>
-                            b.type === "image" ? { ...b, linkUrl: e.target.value } : b
-                          )
-                        }
-                        placeholder="Optional link URL"
-                        className={inputClass}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {block.type === "button" && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      value={block.label}
-                      onChange={(e) =>
-                        updateBlock(block.id, (b) =>
-                          b.type === "button" ? { ...b, label: e.target.value } : b
-                        )
-                      }
-                      placeholder="Button label"
-                      className={inputClass}
-                    />
-                    <input
-                      type="text"
-                      value={block.url}
-                      onChange={(e) =>
-                        updateBlock(block.id, (b) =>
-                          b.type === "button" ? { ...b, url: e.target.value } : b
-                        )
-                      }
-                      placeholder="{{portal_link}} or https://..."
-                      className={inputClass}
-                    />
-                    <select
-                      value={block.displayStyle}
-                      onChange={(e) =>
-                        updateBlock(block.id, (b) =>
-                          b.type === "button"
-                            ? {
-                                ...b,
-                                displayStyle: e.target.value as "solid" | "outline" | "text_link",
-                              }
-                            : b
-                        )
-                      }
-                      className={inputClass}
-                    >
-                      <option value="solid">Solid Button</option>
-                      <option value="outline">Outline Button</option>
-                      <option value="text_link">Inline Text Link</option>
-                    </select>
-                    <input
-                      type="text"
-                      value={block.prefixText || ""}
-                      onChange={(e) =>
-                        updateBlock(block.id, (b) =>
-                          b.type === "button" ? { ...b, prefixText: e.target.value } : b
-                        )
-                      }
-                      placeholder="Optional prefix (for inline link, e.g. Hotel Portal)"
-                      className={inputClass}
-                    />
-                  </div>
-                )}
-
-                {block.type === "spacer" && (
-                  <div className="flex items-center gap-3">
-                    <label className="text-[11px] text-zinc-400">Height (px):</label>
-                    <input
-                      type="number"
-                      min={4}
-                      max={64}
-                      value={block.heightPx}
-                      onChange={(e) =>
-                        updateBlock(block.id, (b) =>
-                          b.type === "spacer"
-                            ? { ...b, heightPx: Math.max(4, Math.min(64, Number(e.target.value) || 16)) }
-                            : b
-                        )
-                      }
-                      className="w-24 rounded bg-zinc-950 border border-zinc-800 px-2 py-1 text-xs text-zinc-100 tabular-nums"
-                    />
-                  </div>
-                )}
-
-                {block.type === "two_column_text" && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <div className="space-y-1.5">
-                      <input
-                        type="text"
-                        value={block.leftTitle || ""}
-                        onChange={(e) =>
-                          updateBlock(block.id, (b) =>
-                            b.type === "two_column_text" ? { ...b, leftTitle: e.target.value } : b
-                          )
-                        }
-                        placeholder="Left title"
-                        className={inputClass}
-                      />
-                      <textarea
-                        rows={2}
-                        value={block.leftText}
-                        onChange={(e) =>
-                          updateBlock(block.id, (b) =>
-                            b.type === "two_column_text" ? { ...b, leftText: e.target.value } : b
-                          )
-                        }
-                        className={inputClass}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <input
-                        type="text"
-                        value={block.rightTitle || ""}
-                        onChange={(e) =>
-                          updateBlock(block.id, (b) =>
-                            b.type === "two_column_text" ? { ...b, rightTitle: e.target.value } : b
-                          )
-                        }
-                        placeholder="Right title"
-                        className={inputClass}
-                      />
-                      <textarea
-                        rows={2}
-                        value={block.rightText}
-                        onChange={(e) =>
-                          updateBlock(block.id, (b) =>
-                            b.type === "two_column_text" ? { ...b, rightText: e.target.value } : b
-                          )
-                        }
-                        className={inputClass}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {block.type === "booking_details_table" && (
-                  <div className="space-y-2">
-                    <input
-                      type="text"
-                      value={block.title || ""}
-                      onChange={(e) =>
-                        updateBlock(block.id, (b) =>
-                          b.type === "booking_details_table" ? { ...b, title: e.target.value } : b
-                        )
-                      }
-                      placeholder="Optional table title (leave blank for default)"
-                      className={inputClass}
-                    />
-                    <div className="space-y-1.5">
-                      {block.rows.map((row: BookingDetailsRowConfig, rIdx: number) => (
-                        <div key={row.id} className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              updateBlock(block.id, (b) =>
-                                b.type === "booking_details_table"
-                                  ? {
-                                      ...b,
-                                      rows: b.rows.map((r) =>
-                                        r.id === row.id ? { ...r, visible: !r.visible } : r
-                                      ),
-                                    }
-                                  : b
-                              )
-                            }
-                            className={`p-1.5 rounded border ${
-                              row.visible
-                                ? "border-zinc-700 text-emerald-400"
-                                : "border-zinc-800 text-zinc-600"
-                            }`}
-                            title={row.visible ? "Hide row" : "Show row"}
-                          >
-                            {row.visible ? <Eye size={12} /> : <EyeOff size={12} />}
-                          </button>
-                          <input
-                            type="text"
-                            value={row.label}
-                            onChange={(e) =>
-                              updateBlock(block.id, (b) =>
-                                b.type === "booking_details_table"
-                                  ? {
-                                      ...b,
-                                      rows: b.rows.map((r) =>
-                                        r.id === row.id ? { ...r, label: e.target.value } : r
-                                      ),
-                                    }
-                                  : b
-                              )
-                            }
-                            placeholder="Label"
-                            className={`${inputClass} w-1/3`}
-                          />
-                          <input
-                            type="text"
-                            value={row.valueTemplate}
-                            onChange={(e) =>
-                              updateBlock(block.id, (b) =>
-                                b.type === "booking_details_table"
-                                  ? {
-                                      ...b,
-                                      rows: b.rows.map((r) =>
-                                        r.id === row.id ? { ...r, valueTemplate: e.target.value } : r
-                                      ),
-                                    }
-                                  : b
-                              )
-                            }
-                            placeholder="{{variable}}"
-                            className={`${inputClass} flex-1 font-mono`}
-                          />
-                          <button
-                            type="button"
-                            disabled={rIdx === 0}
-                            onClick={() =>
-                              updateBlock(block.id, (b) => {
-                                if (b.type !== "booking_details_table") return b;
-                                const copy = [...b.rows];
-                                const [m] = copy.splice(rIdx, 1);
-                                copy.splice(rIdx - 1, 0, m);
-                                return { ...b, rows: copy };
-                              })
-                            }
-                            className="p-1 text-zinc-500 hover:text-zinc-200 disabled:opacity-30"
-                            aria-label="Move row up"
-                          >
-                            <ArrowUp size={12} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              updateBlock(block.id, (b) =>
-                                b.type === "booking_details_table"
-                                  ? { ...b, rows: b.rows.filter((r) => r.id !== row.id) }
-                                  : b
-                              )
-                            }
-                            className="p-1 text-zinc-500 hover:text-red-400"
-                            aria-label="Remove row"
-                          >
-                            <X size={12} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateBlock(block.id, (b) =>
-                          b.type === "booking_details_table"
-                            ? {
-                                ...b,
-                                rows: [
-                                  ...b.rows,
-                                  {
-                                    id: makeId("row"),
-                                    label: "New Row",
-                                    valueTemplate: "{{room_type}}",
-                                    visible: true,
-                                  },
-                                ],
-                              }
-                            : b
-                        )
-                      }
-                      className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 font-medium"
-                    >
-                      <Plus size={12} /> Add Table Row
-                    </button>
-                  </div>
-                )}
-
-                {block.type === "social_links" && (
-                  <div className="space-y-2">
-                    <input
-                      type="text"
-                      value={block.title || ""}
-                      onChange={(e) =>
-                        updateBlock(block.id, (b) =>
-                          b.type === "social_links" ? { ...b, title: e.target.value } : b
-                        )
-                      }
-                      placeholder="Section title"
-                      className={inputClass}
-                    />
-                    {block.links.map((link) => (
-                      <div key={link.id} className="flex items-center gap-1.5">
-                        <input
-                          type="text"
-                          value={link.label}
-                          onChange={(e) =>
-                            updateBlock(block.id, (b) =>
-                              b.type === "social_links"
-                                ? {
-                                    ...b,
-                                    links: b.links.map((l) =>
-                                      l.id === link.id ? { ...l, label: e.target.value } : l
-                                    ),
-                                  }
-                                : b
-                            )
-                          }
-                          placeholder="Label (e.g. Instagram)"
-                          className={`${inputClass} w-1/3`}
-                        />
-                        <input
-                          type="text"
-                          value={link.url}
-                          onChange={(e) =>
-                            updateBlock(block.id, (b) =>
-                              b.type === "social_links"
-                                ? {
-                                    ...b,
-                                    links: b.links.map((l) =>
-                                      l.id === link.id ? { ...l, url: e.target.value } : l
-                                    ),
-                                  }
-                                : b
-                            )
-                          }
-                          placeholder="https://..."
-                          className={`${inputClass} flex-1`}
-                        />
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateBlock(block.id, (b) =>
-                              b.type === "social_links"
-                                ? { ...b, links: b.links.filter((l) => l.id !== link.id) }
-                                : b
-                            )
-                          }
-                          className="p-1 text-zinc-500 hover:text-red-400"
-                          aria-label="Remove social link"
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateBlock(block.id, (b) =>
-                          b.type === "social_links"
-                            ? {
-                                ...b,
-                                links: [
-                                  ...b.links,
-                                  { id: makeId("soc"), label: "Website", url: "{{hotel_website}}" },
-                                ],
-                              }
-                            : b
-                        )
-                      }
-                      className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 font-medium"
-                    >
-                      <Plus size={12} /> Add Link
-                    </button>
-                  </div>
-                )}
-
-                {block.type === "footer" && (
-                  <div className="space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
-                        <input
-                          type="checkbox"
-                          checked={block.showContactBlock}
-                          onChange={(e) =>
-                            updateBlock(block.id, (b) =>
-                              b.type === "footer"
-                                ? { ...b, showContactBlock: e.target.checked }
-                                : b
-                            )
-                          }
-                        />
-                        Show Hotel Contact Block
-                      </label>
-                    </div>
-
-                    {block.showContactBlock && (
-                      <>
-                        <input
-                          type="text"
-                          value={block.contactTitle}
-                          onChange={(e) =>
-                            updateBlock(block.id, (b) =>
-                              b.type === "footer" ? { ...b, contactTitle: e.target.value } : b
-                            )
-                          }
-                          placeholder="Contact block heading"
-                          className={inputClass}
-                        />
-                        <div className="space-y-1.5">
-                          {block.fields.map((f: FooterContactField, fIdx: number) => (
-                            <div key={f.id} className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  updateBlock(block.id, (b) =>
-                                    b.type === "footer"
-                                      ? {
-                                          ...b,
-                                          fields: b.fields.map((x) =>
-                                            x.id === f.id ? { ...x, visible: !x.visible } : x
-                                          ),
-                                        }
-                                      : b
-                                  )
-                                }
-                                className={`p-1.5 rounded border ${
-                                  f.visible
-                                    ? "border-zinc-700 text-emerald-400"
-                                    : "border-zinc-800 text-zinc-600"
-                                }`}
-                              >
-                                {f.visible ? <Eye size={12} /> : <EyeOff size={12} />}
-                              </button>
-                              <input
-                                type="text"
-                                value={f.label}
-                                onChange={(e) =>
-                                  updateBlock(block.id, (b) =>
-                                    b.type === "footer"
-                                      ? {
-                                          ...b,
-                                          fields: b.fields.map((x) =>
-                                            x.id === f.id ? { ...x, label: e.target.value } : x
-                                          ),
-                                        }
-                                      : b
-                                  )
-                                }
-                                className={`${inputClass} w-1/3`}
-                              />
-                              <input
-                                type="text"
-                                value={f.valueTemplate}
-                                onChange={(e) =>
-                                  updateBlock(block.id, (b) =>
-                                    b.type === "footer"
-                                      ? {
-                                          ...b,
-                                          fields: b.fields.map((x) =>
-                                            x.id === f.id
-                                              ? { ...x, valueTemplate: e.target.value }
-                                              : x
-                                          ),
-                                        }
-                                      : b
-                                  )
-                                }
-                                className={`${inputClass} flex-1 font-mono`}
-                              />
-                              <button
-                                type="button"
-                                disabled={fIdx === 0}
-                                onClick={() =>
-                                  updateBlock(block.id, (b) => {
-                                    if (b.type !== "footer") return b;
-                                    const copy = [...b.fields];
-                                    const [m] = copy.splice(fIdx, 1);
-                                    copy.splice(fIdx - 1, 0, m);
-                                    return { ...b, fields: copy };
-                                  })
-                                }
-                                className="p-1 text-zinc-500 hover:text-zinc-200 disabled:opacity-30"
-                              >
-                                <ArrowUp size={12} />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    )}
-
-                    <textarea
-                      rows={2}
-                      value={block.legalImprintText || ""}
-                      onChange={(e) =>
-                        updateBlock(block.id, (b) =>
-                          b.type === "footer" ? { ...b, legalImprintText: e.target.value } : b
-                        )
-                      }
-                      placeholder="Optional legal/imprint text for this template (defaults to Hotel Email Settings imprint)"
-                      className={inputClass}
-                    />
-                  </div>
-                )}
-              </div>
-              );
-            })}
-
-            {/* Add Block Bar */}
-            <div className="rounded-xl bg-zinc-900/40 border border-dashed border-zinc-800 p-3">
-              <div className="text-[11px] font-medium text-zinc-400 mb-2">Add Content Block</div>
-              <div className="flex flex-wrap gap-1.5">
-                {(Object.keys(BLOCK_TYPE_LABELS) as EmailBlockType[]).map((type) => (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => addBlock(type)}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[11px] text-zinc-300 whitespace-nowrap transition-colors"
-                  >
-                    <Plus size={11} /> {BLOCK_TYPE_LABELS[type]}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
+          {/* Modular Visual Block Editor (Palette, Drag-and-Drop Grouping & Configuration Panels) */}
+          <BlockEditor
+            blocks={variant.blocks}
+            appUrl={appUrl}
+            resolvedPortalUrl={resolvedPortalUrl}
+            validationIssues={validationIssues}
+            expandedBlockId={expandedBlockId}
+            onExpandBlock={setExpandedBlockId}
+            onAddBlock={addBlock}
+            onAddOptionalSection={addOptionalSection}
+            onUpdateBlock={updateBlock}
+            onMoveBlock={moveBlock}
+            onReorderBlock={reorderBlock}
+            onDuplicateBlock={duplicateBlock}
+            onRemoveBlock={removeBlock}
+            imageActions={{
+              onPickLibrary: (blockId, field) =>
+                setImagePickerTarget({ kind: "block", blockId, field }),
+              onDirectUpload: (blockId, field) =>
+                triggerDirectBlockImageUpload(blockId, field),
+              uploadingKey,
+            }}
+          />
         </div>
 
         {/* RIGHT PANE: Sandboxed Live Preview */}
@@ -1758,16 +1073,50 @@ export function TemplateBlockEditor({
                 </div>
               </div>
 
-              <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={includeLoyaltySample}
-                  onChange={(e) => setIncludeLoyaltySample(e.target.checked)}
-                />
-                <Sparkles size={12} className="text-amber-400" />
-                Sample Loyalty Data
-              </label>
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* HTML Size Meter (Gmail 102 KB Clipping Guard) */}
+                <span
+                  title="Gmail clips HTML emails over 102 KB. Keep templates under 90 KB."
+                  className={`text-[11px] font-mono tabular-nums ${
+                    htmlSizeMetrics.status === "over"
+                      ? "text-red-400 font-semibold"
+                      : htmlSizeMetrics.status === "warning"
+                      ? "text-amber-400 font-semibold"
+                      : "text-zinc-400"
+                  }`}
+                >
+                  {htmlSizeMetrics.kb.toFixed(1)} KB / 90 KB
+                </span>
+
+                <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeLoyaltySample}
+                    onChange={(e) => setIncludeLoyaltySample(e.target.checked)}
+                  />
+                  <Sparkles size={12} className="text-amber-400" />
+                  Sample Loyalty
+                </label>
+              </div>
             </div>
+
+            {/* HTML Size Warning Banner when > 80 KB */}
+            {htmlSizeMetrics.status !== "ok" && (
+              <div
+                className={`px-4 py-2 border-b text-[11px] flex items-center gap-2 ${
+                  htmlSizeMetrics.status === "over"
+                    ? "bg-red-500/10 border-red-500/30 text-red-300"
+                    : "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                }`}
+              >
+                <AlertTriangle size={13} className="shrink-0" />
+                <span>
+                  {htmlSizeMetrics.status === "over"
+                    ? `Rendered HTML is ${htmlSizeMetrics.kb.toFixed(1)} KB (over 90 KB ceiling). Remove or shorten a few blocks so Gmail does not clip the footer.`
+                    : `Rendered HTML is ${htmlSizeMetrics.kb.toFixed(1)} KB. Approaching Gmail's 102 KB clipping threshold.`}
+                </span>
+              </div>
+            )}
 
             {/* Simulated Inbox Envelope */}
             <div className="px-4 py-2.5 bg-zinc-950/70 border-b border-zinc-800 text-xs space-y-1">
@@ -1797,13 +1146,22 @@ export function TemplateBlockEditor({
                 style={{
                   width: previewMode === "mobile" ? "375px" : "100%",
                   maxWidth: "660px",
-                  height: "640px",
+                  height: "660px",
                 }}
               />
             </div>
           </div>
         </div>
       </div>
+
+      {/* Starter Layout Preset Picker Modal (Draft-only) */}
+      {starterPickerOpen && (
+        <StarterLayoutPickerModal
+          language={language}
+          onApplyPreset={handleApplyStarterPreset}
+          onClose={() => setStarterPickerOpen(false)}
+        />
+      )}
 
       {/* Image Library Picker Modal */}
       {imagePickerTarget && (
@@ -1885,7 +1243,8 @@ export function TemplateBlockEditor({
               <h3 className="text-sm font-semibold text-zinc-100">Reset template to default?</h3>
               <p className="text-xs text-zinc-400 mt-1">
                 This restores the standard PMS email design and copy for{" "}
-                <span className="text-zinc-200 font-medium">{eventName}</span>. Your prior published versions remain available in History.
+                <span className="text-zinc-200 font-medium">{eventName}</span>. Your prior
+                published versions remain available in History.
               </p>
             </div>
             <div className="flex justify-end gap-2">
@@ -1916,7 +1275,8 @@ export function TemplateBlockEditor({
             <div>
               <h3 className="text-sm font-semibold text-zinc-100">Discard unsaved changes?</h3>
               <p className="text-xs text-zinc-400 mt-1">
-                You have unsaved edits in this template. Save a draft first or discard your changes.
+                You have unsaved edits in this template. Save a draft first or discard your
+                changes.
               </p>
             </div>
             <div className="flex justify-end gap-2">
@@ -1935,7 +1295,7 @@ export function TemplateBlockEditor({
                 }}
                 className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-xs font-semibold text-white"
               >
-                Discard & Leave
+                Discard &amp; Leave
               </button>
             </div>
           </div>

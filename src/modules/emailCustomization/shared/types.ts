@@ -125,7 +125,81 @@ export type WebSafeFontId = (typeof WEB_SAFE_FONTS)[number]["id"];
 
 export type BlockCondition = "always" | "has_loyalty" | "has_balance_due" | "has_deposit";
 
-export type EmailBlockType =
+export const EMAIL_ICON_NAMES = [
+  "location_pin",
+  "phone",
+  "calendar",
+  "key",
+  "map",
+  "dining",
+  "activities",
+  "spa",
+  "wifi",
+  "parking",
+  "chat",
+  "check",
+  "arrow",
+  "star",
+  "gift",
+] as const;
+
+export type EmailIconName = (typeof EMAIL_ICON_NAMES)[number];
+
+export const EMAIL_ICON_LABELS: Record<EmailIconName, string> = {
+  location_pin: "Location Pin",
+  phone: "Phone",
+  calendar: "Calendar",
+  key: "Room Key",
+  map: "Map",
+  dining: "Dining",
+  activities: "Activities",
+  spa: "Spa & Wellness",
+  wifi: "Wi-Fi",
+  parking: "Parking",
+  chat: "Concierge Chat",
+  check: "Checkmark",
+  arrow: "Arrow",
+  star: "Star",
+  gift: "Gift / Welcome",
+};
+
+export const EMAIL_ICON_TONES = [
+  "dark",
+  "light",
+  "muted",
+  "emerald",
+  "navy",
+  "burgundy",
+  "amber",
+] as const;
+
+export type EmailIconTone = (typeof EMAIL_ICON_TONES)[number];
+
+export const EMAIL_ICON_TONE_HEX: Record<EmailIconTone, { label: string; hex: string }> = {
+  dark: { label: "Charcoal", hex: "#18181b" },
+  light: { label: "White", hex: "#ffffff" },
+  muted: { label: "Slate", hex: "#71717a" },
+  emerald: { label: "Emerald", hex: "#059669" },
+  navy: { label: "Navy", hex: "#1e3a5f" },
+  burgundy: { label: "Burgundy", hex: "#881337" },
+  amber: { label: "Warm Gold", hex: "#b45309" },
+};
+
+export type ModernButtonStyle = "filled" | "outlined" | "dark";
+export type ButtonCornerStyle = "square" | "rounded" | "pill";
+
+export interface BlockStyleConfig {
+  backgroundColor?: string;
+  textColor?: string;
+  borderColor?: string;
+  accentColor?: string;
+  align?: "left" | "center" | "right";
+  paddingY?: number; // 0..40 px
+  paddingX?: number; // 0..40 px
+  borderRadius?: number; // 0..16 px
+}
+
+export type LegacyEmailBlockType =
   | "heading"
   | "paragraph"
   | "image"
@@ -136,6 +210,39 @@ export type EmailBlockType =
   | "two_column_text"
   | "social_links"
   | "footer";
+
+export type ModernEmailBlockType =
+  | "brand_header"
+  | "promo_banner"
+  | "membership_strip"
+  | "icon_divider"
+  | "hero_text"
+  | "confirmation_number"
+  | "stay_dates"
+  | "feature_card"
+  | "benefits_list"
+  | "icon_link_grid"
+  | "image_with_list"
+  | "footer_nav"
+  | "legal_section";
+
+export type EmailBlockType = LegacyEmailBlockType | ModernEmailBlockType;
+
+export const MODERN_EMAIL_BLOCK_TYPES: readonly ModernEmailBlockType[] = [
+  "brand_header",
+  "promo_banner",
+  "membership_strip",
+  "icon_divider",
+  "hero_text",
+  "confirmation_number",
+  "stay_dates",
+  "feature_card",
+  "benefits_list",
+  "icon_link_grid",
+  "image_with_list",
+  "footer_nav",
+  "legal_section",
+] as const;
 
 export interface EmailBlockBase {
   id: string;
@@ -244,6 +351,208 @@ export interface FooterBlock extends EmailBlockBase {
   footerNote?: string;
 }
 
+// --- 13 New Modern Additive Block Types ---
+
+export interface BrandHeaderBlock extends EmailBlockBase {
+  type: "brand_header";
+  logoUrl?: string;
+  logoImageId?: string;
+  logoAlt?: string;
+  logoWidthPx?: number;
+  showHotelName: boolean;
+  showAddress: boolean;
+  showPhone: boolean;
+  iconTone?: EmailIconTone;
+  style?: BlockStyleConfig;
+}
+
+export interface PromoBannerBlock extends EmailBlockBase {
+  type: "promo_banner";
+  imageUrl?: string;
+  imageId?: string;
+  imageAlt?: string;
+  text: string;
+  buttonLabel: string;
+  buttonUrl: string;
+  buttonStyle?: ModernButtonStyle;
+  buttonCorner?: ButtonCornerStyle;
+  buttonBgColor?: string;
+  buttonTextColor?: string;
+  style?: BlockStyleConfig;
+}
+
+export interface MembershipStripBlock extends EmailBlockBase {
+  type: "membership_strip";
+  tierTemplate: string;
+  pointsTemplate: string;
+  linkUrl?: string;
+  showArrow?: boolean;
+  iconTone?: EmailIconTone;
+  style?: BlockStyleConfig;
+}
+
+export interface IconDividerBlock extends EmailBlockBase {
+  type: "icon_divider";
+  icon: EmailIconName;
+  iconTone?: EmailIconTone;
+  lineColor?: string;
+  style?: BlockStyleConfig;
+}
+
+export interface HeroTextBlock extends EmailBlockBase {
+  type: "hero_text";
+  headline: string;
+  body: string;
+  buttonLabel?: string;
+  buttonUrl?: string;
+  buttonStyle?: ModernButtonStyle;
+  buttonCorner?: ButtonCornerStyle;
+  buttonBgColor?: string;
+  buttonTextColor?: string;
+  style?: BlockStyleConfig;
+}
+
+export interface ConfirmationNumberBlock extends EmailBlockBase {
+  type: "confirmation_number";
+  label: string;
+  valueTemplate: string;
+  style?: BlockStyleConfig;
+}
+
+export interface StayDatesBlock extends EmailBlockBase {
+  type: "stay_dates";
+  checkInLabel: string;
+  checkInDateTemplate: string;
+  checkInTimeTemplate: string;
+  checkOutLabel: string;
+  checkOutDateTemplate: string;
+  checkOutTimeTemplate: string;
+  buttonLabel?: string;
+  buttonUrl?: string;
+  buttonStyle?: ModernButtonStyle;
+  buttonCorner?: ButtonCornerStyle;
+  buttonBgColor?: string;
+  buttonTextColor?: string;
+  style?: BlockStyleConfig;
+}
+
+export interface FeatureCardBlock extends EmailBlockBase {
+  type: "feature_card";
+  imagePosition: "left" | "right";
+  imageUrl: string;
+  imageId?: string;
+  imageAlt: string;
+  title: string;
+  body: string;
+  buttonLabel?: string;
+  buttonUrl?: string;
+  buttonStyle?: ModernButtonStyle;
+  buttonCorner?: ButtonCornerStyle;
+  buttonBgColor?: string;
+  buttonTextColor?: string;
+  style?: BlockStyleConfig;
+}
+
+export interface BenefitsListItem {
+  id: string;
+  text: string;
+}
+
+export interface BenefitsListBlock extends EmailBlockBase {
+  type: "benefits_list";
+  badgeText?: string;
+  badgeImageUrl?: string;
+  badgeImageId?: string;
+  badgeImageAlt?: string;
+  heading: string;
+  listStyle: "bullet" | "icon";
+  itemIcon?: EmailIconName;
+  iconTone?: EmailIconTone;
+  items: BenefitsListItem[];
+  footnote?: string;
+  buttonLabel?: string;
+  buttonUrl?: string;
+  buttonStyle?: ModernButtonStyle;
+  buttonCorner?: ButtonCornerStyle;
+  buttonBgColor?: string;
+  buttonTextColor?: string;
+  style?: BlockStyleConfig;
+}
+
+export interface IconLinkGridItem {
+  id: string;
+  icon: EmailIconName;
+  label: string;
+  url: string;
+}
+
+export interface IconLinkGridBlock extends EmailBlockBase {
+  type: "icon_link_grid";
+  heading?: string;
+  subheading?: string;
+  iconTone?: EmailIconTone;
+  showArrows?: boolean;
+  items: IconLinkGridItem[];
+  style?: BlockStyleConfig;
+}
+
+export interface ImageWithListItem {
+  id: string;
+  icon: EmailIconName;
+  text: string;
+}
+
+export interface ImageWithListBlock extends EmailBlockBase {
+  type: "image_with_list";
+  imagePosition?: "left" | "right";
+  imageUrl: string;
+  imageId?: string;
+  imageAlt: string;
+  heading: string;
+  iconTone?: EmailIconTone;
+  items: ImageWithListItem[];
+  buttonLabel?: string;
+  buttonUrl?: string;
+  buttonStyle?: ModernButtonStyle;
+  buttonCorner?: ButtonCornerStyle;
+  buttonBgColor?: string;
+  buttonTextColor?: string;
+  style?: BlockStyleConfig;
+}
+
+export interface FooterNavLinkItem {
+  id: string;
+  label: string;
+  url: string;
+}
+
+export interface FooterNavBlock extends EmailBlockBase {
+  type: "footer_nav";
+  links: FooterNavLinkItem[];
+  secondaryText?: string;
+  secondaryLinkUrl?: string;
+  showViewNote?: boolean;
+  style?: BlockStyleConfig;
+}
+
+export interface LegalSectionItem {
+  id: string;
+  heading: string;
+  body: string;
+}
+
+export interface LegalSectionBlock extends EmailBlockBase {
+  type: "legal_section";
+  sections: LegalSectionItem[];
+  copyrightText?: string;
+  showFooterLogo?: boolean;
+  footerLogoUrl?: string;
+  footerLogoImageId?: string;
+  footerLogoAlt?: string;
+  footerLogoWidthPx?: number;
+  style?: BlockStyleConfig;
+}
+
 export type EmailBlock =
   | HeadingBlock
   | ParagraphBlock
@@ -254,7 +563,20 @@ export type EmailBlock =
   | BookingDetailsTableBlock
   | TwoColumnTextBlock
   | SocialLinksBlock
-  | FooterBlock;
+  | FooterBlock
+  | BrandHeaderBlock
+  | PromoBannerBlock
+  | MembershipStripBlock
+  | IconDividerBlock
+  | HeroTextBlock
+  | ConfirmationNumberBlock
+  | StayDatesBlock
+  | FeatureCardBlock
+  | BenefitsListBlock
+  | IconLinkGridBlock
+  | ImageWithListBlock
+  | FooterNavBlock
+  | LegalSectionBlock;
 
 export interface EmailTemplateBranding {
   accentBarEnabled: boolean;
@@ -275,6 +597,8 @@ export interface EmailTemplateBranding {
 }
 
 export interface EmailTemplateVariant {
+  /** Schema version: undefined or 1 = legacy classic layout (byte-for-byte preserved), 2 = modern responsive layout */
+  schemaVersion?: 1 | 2;
   subject: string;
   preheader: string;
   branding: EmailTemplateBranding;
@@ -346,10 +670,13 @@ export interface EmailImageAsset {
   url: string;
   storagePath: string;
   storageProvider?: "local" | "cloudinary";
-  mimeType: "image/png" | "image/jpeg" | "image/webp";
+  mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
   width: number;
   height: number;
   sizeBytes: number;
+  isAnimated?: boolean;
+  frameCount?: number;
+  durationMs?: number;
   createdBy: string;
   createdAt: string;
 }
@@ -430,8 +757,13 @@ export const DEFAULT_HOTEL_EMAIL_SETTINGS: HotelEmailSettings = {
 export const IMAGE_LIMITS = {
   maxFileSizeBytes: 2 * 1024 * 1024, // 2 MB
   maxWidthPx: 2000,
+  maxGifWidthPx: 640,
+  maxGifFrames: 100,
+  maxGifDurationMs: 15_000, // 15 seconds
   maxImagesPerHotel: 30,
   maxTotalBytesPerHotel: 20 * 1024 * 1024, // 20 MB total per hotel
+  htmlWarnBytes: 80 * 1024, // 80 KB soft warning
+  htmlMaxBytes: 90 * 1024, // 90 KB Gmail clipping threshold alert
 } as const;
 
 export const EMAIL_MODULE_BASE_CONFIG = {
@@ -444,3 +776,4 @@ export const EMAIL_MODULE_BASE_CONFIG = {
   defaultSettings: DEFAULT_HOTEL_EMAIL_SETTINGS,
   imageLimits: IMAGE_LIMITS,
 } as const;
+

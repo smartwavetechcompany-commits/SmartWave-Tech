@@ -13,17 +13,21 @@ import {
 } from "../../../services/emailService.ts";
 import {
   ALLOWED_TEMPLATE_VARIABLES,
+  EMAIL_ICON_NAMES,
+  EMAIL_ICON_TONES,
   SUPPORTED_EMAIL_LANGUAGES,
   VARIABLE_DESCRIPTIONS,
   WEB_SAFE_FONTS,
   type CustomizableEmailEventType,
   type EmailTemplateVariant,
 } from "../shared/types.ts";
+import { STARTER_LAYOUT_PRESETS } from "../shared/presets.ts";
 import {
   EMAIL_EVENT_CATALOG,
   OPTIONAL_SECTION_PRESETS,
   buildSamplePreviewContext,
 } from "./defaultTemplates.ts";
+import { createEmailAssetsMiddleware } from "./assetService.ts";
 import { fsReadDoc } from "./firestoreRest.ts";
 import {
   createLocalEmailImageMiddleware,
@@ -96,6 +100,8 @@ export function mountEmailCustomizationRoutes(
 
   // Read-only static serving strictly for local email images under IMAGE_UPLOAD_DIR/email-images
   app.use("/uploads/email-images", createLocalEmailImageMiddleware());
+  // Read-only serving for module built-in PNG icons, neutral placeholders, and sample GIF
+  app.use("/uploads/email-assets", createEmailAssetsMiddleware());
 
   async function requireEmailModuleAccess(
     req: Request,
@@ -168,6 +174,9 @@ export function mountEmailCustomizationRoutes(
           label: p.label,
           description: p.description,
         })),
+        icons: EMAIL_ICON_NAMES,
+        iconTones: EMAIL_ICON_TONES,
+        starterPresets: STARTER_LAYOUT_PRESETS,
       });
     } catch (err) {
       return res

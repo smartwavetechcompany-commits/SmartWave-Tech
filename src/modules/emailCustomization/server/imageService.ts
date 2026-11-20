@@ -16,17 +16,20 @@ import {
 import { findImageReferencesAcrossTemplates } from "./resolver.ts";
 import { EMAIL_EVENT_CATALOG } from "./defaultTemplates.ts";
 
-export type AllowedImageMime = "image/png" | "image/jpeg" | "image/webp";
+export type AllowedImageMime = "image/png" | "image/jpeg" | "image/webp" | "image/gif";
 export type ImageStorageProviderName = "local" | "cloudinary";
 
 export interface ProcessedImageResult {
   buffer: Buffer;
   mimeType: AllowedImageMime;
-  ext: ".png" | ".jpg" | ".webp";
+  ext: ".png" | ".jpg" | ".webp" | ".gif";
   width: number;
   height: number;
   sizeBytes: number;
   randomFilename: string;
+  isAnimated?: boolean;
+  frameCount?: number;
+  durationMs?: number;
 }
 
 export interface StoredImageUploadInput {
@@ -54,24 +57,25 @@ export interface ImageStorageProvider {
 }
 
 const SAFE_HOTEL_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
-const SAFE_RANDOM_FILENAME_RE = /^[0-9a-f]{32}\.(png|jpg|webp)$/;
+const SAFE_RANDOM_FILENAME_RE = /^[0-9a-f]{32}\.(png|jpg|webp|gif)$/;
 
 const EXT_TO_MIME: Record<string, AllowedImageMime> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".webp": "image/webp",
+  ".gif": "image/gif",
 };
 
 /**
- * Verifies real binary magic bytes — strictly allows PNG, JPEG, and WebP only.
- * Rejects SVG, GIF, PDF, MP4, AVIF, HTML, scripts, and renamed extensions.
+ * Verifies real binary magic bytes — strictly allows PNG, JPEG, WebP, and GIF (GIF87a / GIF89a) only.
+ * Rejects SVG, PDF, MP4, WebM, AVIF, HTML, scripts, and renamed extensions.
  */
 export function detectAllowedImageMagicBytes(
   buf: Buffer
-): { mimeType: AllowedImageMime; ext: ".png" | ".jpg" | ".webp" } | null {
+): { mimeType: AllowedImageMime; ext: ".png" | ".jpg" | ".webp" | ".gif" } | null {
   if (!Buffer.isBuffer(buf) || buf.length < 12) return null;
 
-  // Reject any text/XML/SVG/HTML header immediately
+  // Reject any text/XML/SVG/HTML/PDF header immediately
   const headAscii = buf.subarray(0, Math.min(64, buf.length)).toString("utf8").trimStart().toLowerCase();
   if (
     headAscii.startsWith("<svg") ||
@@ -79,8 +83,7 @@ export function detectAllowedImageMagicBytes(
     headAscii.startsWith("<!doctype") ||
     headAscii.startsWith("<html") ||
     headAscii.startsWith("<script") ||
-    headAscii.startsWith("%pdf") ||
-    headAscii.startsWith("gif8")
+    headAscii.startsWith("%pdf")
   ) {
     return null;
   }
@@ -118,6 +121,18 @@ export function detectAllowedImageMagicBytes(
     return { mimeType: "image/webp", ext: ".webp" };
   }
 
+  // GIF: GIF87a (47 49 46 38 37 61) or GIF89a (47 49 46 38 39 61)
+  if (
+    buf[0] === 0x47 &&
+    buf[1] === 0x49 &&
+    buf[2] === 0x46 &&
+    buf[3] === 0x38 &&
+    (buf[4] === 0x37 || buf[4] === 0x39) &&
+    buf[5] === 0x61
+  ) {
+    return { mimeType: "image/gif", ext: ".gif" };
+  }
+
   return null;
 }
 
@@ -132,8 +147,9 @@ export function sanitizeImageLabel(raw: unknown, fallback = "Hotel Image"): stri
 }
 
 /**
- * Validates magic bytes, decodes and re-encodes via Sharp (stripping EXIF/GPS metadata),
- * resizes down to max 2000px wide, enforces <= 2 MB output size, and generates a random filename.
+ * Validates magic bytes, decodes and re-encodes via Sharp (stripping EXIF/GPS/comments metadata),
+ * resizes PNG/JPEG/WebP down to max 2000px wide and GIFs down to max 640px wide while preserving
+ * GIF animation (<= 100 frames, <= 15s duration, <= 2 MB), and generates a random filename.
  */
 export async function validateAndProcessImageBuffer(
   rawBuffer: Buffer
@@ -151,8 +167,126 @@ export async function validateAndProcessImageBuffer(
   if (!detected) {
     return {
       ok: false,
-      error: "Unsupported file format. Only PNG, JPEG, and WebP images are allowed (SVG, GIF, PDF, and video files are not supported).",
+      error:
+        "Unsupported file format. Only PNG, JPEG, WebP, and GIF images are allowed (SVG, PDF, AVIF, and video files are not supported).",
     };
+  }
+
+  // Dedicated animated-safe GIF pipeline
+  if (detected.mimeType === "image/gif") {
+    if (rawBuffer.length > IMAGE_LIMITS.maxFileSizeBytes) {
+      return {
+        ok: false,
+        error:
+          "GIF exceeds the 2 MB upload limit. Tip: reduce width to 600px, use fewer colors (128 colors), or trim frames before uploading.",
+      };
+    }
+
+    try {
+      const gifInput = sharp(rawBuffer, {
+        animated: true,
+        failOn: "error",
+        limitInputPixels: 40_000_000,
+      });
+      const meta = await gifInput.metadata();
+
+      if (meta.format !== "gif") {
+        return { ok: false, error: "File contents do not match a valid GIF image." };
+      }
+
+      const frameCount = Math.max(1, Number(meta.pages || 1));
+      if (frameCount > IMAGE_LIMITS.maxGifFrames) {
+        return {
+          ok: false,
+          error: `GIF has ${frameCount} frames, exceeding the ${IMAGE_LIMITS.maxGifFrames}-frame limit. Tip: lower frame rate to 8–12 fps or trim the loop length.`,
+        };
+      }
+
+      const rawDelays = Array.isArray(meta.delay) ? meta.delay : [];
+      const normalizedDelays =
+        frameCount > 1
+          ? Array.from({ length: frameCount }, (_, i) => {
+              const d = Number(rawDelays[i]);
+              return Number.isFinite(d) && d > 0 ? d : 100;
+            })
+          : undefined;
+      const durationMs =
+        frameCount > 1 && normalizedDelays
+          ? normalizedDelays.reduce((sum, d) => sum + d, 0)
+          : 0;
+
+      if (durationMs > IMAGE_LIMITS.maxGifDurationMs) {
+        const secs = (durationMs / 1000).toFixed(1);
+        return {
+          ok: false,
+          error: `GIF duration is ${secs}s, exceeding the ${IMAGE_LIMITS.maxGifDurationMs / 1000}s maximum. Tip: shorten the animation loop to under 10 seconds for fast email loading.`,
+        };
+      }
+
+      // Re-encode WITHOUT .withMetadata() to strip comments/EXIF/hidden payloads while preserving animation
+      const needsResize = Boolean(meta.width && meta.width > IMAGE_LIMITS.maxGifWidthPx);
+      let pipeline = sharp(rawBuffer, {
+        animated: true,
+        failOn: "error",
+        limitInputPixels: 40_000_000,
+      });
+      if (needsResize) {
+        pipeline = pipeline.resize({
+          width: IMAGE_LIMITS.maxGifWidthPx,
+          withoutEnlargement: true,
+          fit: "inside",
+        });
+      }
+
+      const outBuf = await pipeline
+        .gif({
+          delay: normalizedDelays,
+          loop: typeof meta.loop === "number" ? meta.loop : 0,
+          effort: 7,
+        })
+        .toBuffer();
+
+      if (outBuf.length > IMAGE_LIMITS.maxFileSizeBytes) {
+        return {
+          ok: false,
+          error:
+            "Optimized GIF still exceeds the 2 MB size limit. Tip: reduce width to 600px, lower frame count, or compress with fewer colors.",
+        };
+      }
+
+      const finalMeta = await sharp(outBuf, { animated: true }).metadata();
+      const finalPages = Math.max(1, Number(finalMeta.pages || frameCount));
+      const finalFrameHeight =
+        finalMeta.pageHeight ||
+        (finalMeta.height && finalPages > 1
+          ? Math.round(finalMeta.height / finalPages)
+          : finalMeta.height) ||
+        meta.pageHeight ||
+        meta.height ||
+        0;
+      const randomFilename = `${crypto.randomBytes(16).toString("hex")}.gif`;
+
+      return {
+        ok: true,
+        result: {
+          buffer: outBuf,
+          mimeType: "image/gif",
+          ext: ".gif",
+          width: finalMeta.width || meta.width || 0,
+          height: finalFrameHeight,
+          sizeBytes: outBuf.length,
+          randomFilename,
+          isAnimated: finalPages > 1,
+          frameCount: finalPages,
+          durationMs,
+        },
+      };
+    } catch {
+      return {
+        ok: false,
+        error: "GIF could not be decoded. Please upload a valid, uncorrupted GIF image.",
+      };
+    }
   }
 
   try {
@@ -169,7 +303,7 @@ export async function validateAndProcessImageBuffer(
     if (meta.format !== expectedSharpFormat) {
       return {
         ok: false,
-        error: "File contents do not match a valid PNG, JPEG, or WebP image.",
+        error: "File contents do not match a valid PNG, JPEG, WebP, or GIF image.",
       };
     }
 
@@ -224,7 +358,7 @@ export async function validateAndProcessImageBuffer(
   } catch {
     return {
       ok: false,
-      error: "Image could not be decoded. Please upload a valid, uncorrupted PNG, JPEG, or WebP image.",
+      error: "Image could not be decoded. Please upload a valid, uncorrupted PNG, JPEG, WebP, or GIF image.",
     };
   }
 }
@@ -697,6 +831,9 @@ export async function listHotelImages(
       width: Number(d.width || 0),
       height: Number(d.height || 0),
       sizeBytes: Number(d.sizeBytes || 0),
+      isAnimated: typeof d.isAnimated === "boolean" ? d.isAnimated : undefined,
+      frameCount: typeof d.frameCount === "number" ? d.frameCount : undefined,
+      durationMs: typeof d.durationMs === "number" ? d.durationMs : undefined,
       createdBy: String(d.createdBy || ""),
       createdAt: String(d.createdAt || ""),
     }))
@@ -805,6 +942,9 @@ export async function uploadHotelImage(
     width: processed.result.width,
     height: processed.result.height,
     sizeBytes: processed.result.sizeBytes,
+    ...(processed.result.isAnimated !== undefined ? { isAnimated: processed.result.isAnimated } : {}),
+    ...(processed.result.frameCount !== undefined ? { frameCount: processed.result.frameCount } : {}),
+    ...(processed.result.durationMs !== undefined ? { durationMs: processed.result.durationMs } : {}),
     createdBy: actor,
     createdAt: new Date().toISOString(),
   };

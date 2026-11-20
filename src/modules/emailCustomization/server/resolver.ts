@@ -41,6 +41,7 @@ function sanitizeVariantTextDeep(variant: EmailTemplateVariant): EmailTemplateVa
   };
 
   return {
+    ...(variant.schemaVersion ? { schemaVersion: variant.schemaVersion } : {}),
     subject: stripDangerousMarkup(variant.subject || "").trim(),
     preheader: stripDangerousMarkup(variant.preheader || "").trim(),
     portalUrlOverride: cleanUrlOrEmpty(variant.portalUrlOverride),
@@ -111,6 +112,126 @@ function sanitizeVariantTextDeep(variant: EmailTemplateVariant): EmailTemplateVa
               label: stripDangerousMarkup(f.label || ""),
               valueTemplate: stripDangerousMarkup(f.valueTemplate || ""),
             })),
+          };
+        case "brand_header":
+          return {
+            ...block,
+            logoUrl: cleanUrlOrEmpty(block.logoUrl),
+            logoAlt: block.logoAlt ? stripDangerousMarkup(block.logoAlt).trim() : undefined,
+          };
+        case "promo_banner":
+          return {
+            ...block,
+            imageUrl: cleanUrlOrEmpty(block.imageUrl),
+            imageAlt: block.imageAlt ? stripDangerousMarkup(block.imageAlt).trim() : undefined,
+            text: stripDangerousMarkup(block.text || ""),
+            buttonLabel: stripDangerousMarkup(block.buttonLabel || "").trim(),
+            buttonUrl: cleanUrlOrEmpty(block.buttonUrl, true),
+          };
+        case "membership_strip":
+          return {
+            ...block,
+            tierTemplate: stripDangerousMarkup(block.tierTemplate || "").trim(),
+            pointsTemplate: stripDangerousMarkup(block.pointsTemplate || "").trim(),
+            linkUrl: cleanUrlOrEmpty(block.linkUrl, true),
+          };
+        case "hero_text":
+          return {
+            ...block,
+            headline: stripDangerousMarkup(block.headline || "").trim(),
+            body: stripDangerousMarkup(block.body || ""),
+            buttonLabel: block.buttonLabel ? stripDangerousMarkup(block.buttonLabel).trim() : undefined,
+            buttonUrl: cleanUrlOrEmpty(block.buttonUrl, true),
+          };
+        case "confirmation_number":
+          return {
+            ...block,
+            label: stripDangerousMarkup(block.label || "").trim(),
+            valueTemplate: stripDangerousMarkup(block.valueTemplate || "").trim(),
+          };
+        case "stay_dates":
+          return {
+            ...block,
+            checkInLabel: stripDangerousMarkup(block.checkInLabel || "").trim(),
+            checkInDateTemplate: stripDangerousMarkup(block.checkInDateTemplate || "").trim(),
+            checkInTimeTemplate: stripDangerousMarkup(block.checkInTimeTemplate || "").trim(),
+            checkOutLabel: stripDangerousMarkup(block.checkOutLabel || "").trim(),
+            checkOutDateTemplate: stripDangerousMarkup(block.checkOutDateTemplate || "").trim(),
+            checkOutTimeTemplate: stripDangerousMarkup(block.checkOutTimeTemplate || "").trim(),
+            buttonLabel: block.buttonLabel ? stripDangerousMarkup(block.buttonLabel).trim() : undefined,
+            buttonUrl: cleanUrlOrEmpty(block.buttonUrl, true),
+          };
+        case "feature_card":
+          return {
+            ...block,
+            imageUrl: cleanUrlOrEmpty(block.imageUrl),
+            imageAlt: stripDangerousMarkup(block.imageAlt || "").trim(),
+            title: stripDangerousMarkup(block.title || "").trim(),
+            body: stripDangerousMarkup(block.body || ""),
+            buttonLabel: block.buttonLabel ? stripDangerousMarkup(block.buttonLabel).trim() : undefined,
+            buttonUrl: cleanUrlOrEmpty(block.buttonUrl, true),
+          };
+        case "benefits_list":
+          return {
+            ...block,
+            badgeText: block.badgeText ? stripDangerousMarkup(block.badgeText).trim() : undefined,
+            badgeImageUrl: cleanUrlOrEmpty(block.badgeImageUrl),
+            badgeImageAlt: block.badgeImageAlt ? stripDangerousMarkup(block.badgeImageAlt).trim() : undefined,
+            heading: stripDangerousMarkup(block.heading || "").trim(),
+            items: (block.items || []).map((it) => ({
+              ...it,
+              text: stripDangerousMarkup(it.text || "").trim(),
+            })),
+            footnote: block.footnote ? stripDangerousMarkup(block.footnote) : undefined,
+            buttonLabel: block.buttonLabel ? stripDangerousMarkup(block.buttonLabel).trim() : undefined,
+            buttonUrl: cleanUrlOrEmpty(block.buttonUrl, true),
+          };
+        case "icon_link_grid":
+          return {
+            ...block,
+            heading: block.heading ? stripDangerousMarkup(block.heading).trim() : undefined,
+            subheading: block.subheading ? stripDangerousMarkup(block.subheading) : undefined,
+            items: (block.items || []).map((it) => ({
+              ...it,
+              label: stripDangerousMarkup(it.label || "").trim(),
+              url: cleanUrlOrEmpty(it.url, true),
+            })),
+          };
+        case "image_with_list":
+          return {
+            ...block,
+            imageUrl: cleanUrlOrEmpty(block.imageUrl),
+            imageAlt: stripDangerousMarkup(block.imageAlt || "").trim(),
+            heading: stripDangerousMarkup(block.heading || "").trim(),
+            items: (block.items || []).map((it) => ({
+              ...it,
+              text: stripDangerousMarkup(it.text || "").trim(),
+            })),
+            buttonLabel: block.buttonLabel ? stripDangerousMarkup(block.buttonLabel).trim() : undefined,
+            buttonUrl: cleanUrlOrEmpty(block.buttonUrl, true),
+          };
+        case "footer_nav":
+          return {
+            ...block,
+            links: (block.links || []).map((l) => ({
+              ...l,
+              label: stripDangerousMarkup(l.label || "").trim(),
+              url: cleanUrlOrEmpty(l.url, true),
+            })),
+            secondaryText: block.secondaryText ? stripDangerousMarkup(block.secondaryText).trim() : undefined,
+            secondaryLinkUrl: cleanUrlOrEmpty(block.secondaryLinkUrl, true),
+          };
+        case "legal_section":
+          return {
+            ...block,
+            sections: (block.sections || []).map((s) => ({
+              ...s,
+              heading: stripDangerousMarkup(s.heading || "").trim(),
+              body: stripDangerousMarkup(s.body || ""),
+            })),
+            copyrightText: block.copyrightText ? stripDangerousMarkup(block.copyrightText).trim() : undefined,
+            footerLogoUrl: cleanUrlOrEmpty(block.footerLogoUrl),
+            footerLogoAlt: block.footerLogoAlt ? stripDangerousMarkup(block.footerLogoAlt).trim() : undefined,
           };
         default:
           return block;

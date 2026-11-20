@@ -2,11 +2,17 @@ import {
   ALLOWED_TEMPLATE_VARIABLES,
   ALLOWED_URL_VARIABLES,
   DEFAULT_HOTEL_EMAIL_SETTINGS,
+  EMAIL_ICON_NAMES,
+  EMAIL_ICON_TONES,
+  IMAGE_LIMITS,
   WEB_SAFE_FONTS,
   type AllowedTemplateVariable,
+  type BlockStyleConfig,
   type CurrencyDisplaySettings,
   type DateFormatPreset,
   type EmailBlock,
+  type EmailIconName,
+  type EmailIconTone,
   type EmailRenderContext,
   type EmailTemplateVariant,
   type HotelEmailSettings,
@@ -15,10 +21,39 @@ import {
 
 const ALLOWED_VAR_SET = new Set<string>(ALLOWED_TEMPLATE_VARIABLES);
 const WEB_SAFE_FONT_SET = new Set<string>(WEB_SAFE_FONTS.map((f) => f.id));
+const EMAIL_ICON_SET = new Set<string>(EMAIL_ICON_NAMES);
+const EMAIL_ICON_TONE_SET = new Set<string>(EMAIL_ICON_TONES);
+const BUTTON_STYLE_SET = new Set<string>(["filled", "outlined", "dark"]);
+const BUTTON_CORNER_SET = new Set<string>(["square", "rounded", "pill"]);
+const ALIGN_SET = new Set<string>(["left", "center", "right"]);
 const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 const STRICT_EMAIL_RE =
   /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
 const MAX_URL_LENGTH = 2048;
+
+export function isValidEmailIconName(name: unknown): name is EmailIconName {
+  return typeof name === "string" && EMAIL_ICON_SET.has(name);
+}
+
+export function isValidEmailIconTone(tone: unknown): tone is EmailIconTone {
+  return typeof tone === "string" && EMAIL_ICON_TONE_SET.has(tone);
+}
+
+export function measureEmailHtmlBytes(html: string): {
+  bytes: number;
+  kb: number;
+  status: "ok" | "warning" | "over";
+} {
+  const bytes = new TextEncoder().encode(String(html || "")).length;
+  const kb = Math.round((bytes / 1024) * 10) / 10;
+  const status =
+    bytes > IMAGE_LIMITS.htmlMaxBytes
+      ? "over"
+      : bytes > IMAGE_LIMITS.htmlWarnBytes
+        ? "warning"
+        : "ok";
+  return { bytes, kb, status };
+}
 
 export function escapeHtml(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -244,11 +279,134 @@ export interface ValidationIssue {
   message: string;
 }
 
+function validateBlockStyleConfig(
+  style: BlockStyleConfig | undefined,
+  prefix: string,
+  blockNumber: number,
+  issues: ValidationIssue[]
+): void {
+  if (!style) return;
+  const colorFields: Array<keyof BlockStyleConfig> = [
+    "backgroundColor",
+    "textColor",
+    "borderColor",
+    "accentColor",
+  ];
+  for (const key of colorFields) {
+    const val = style[key];
+    if (val !== undefined && val !== "" && !isValidHexColor(val)) {
+      issues.push({
+        path: `${prefix}.style.${key}`,
+        message: `Block #${blockNumber} ${key} must be a valid hex color (e.g. #18181b).`,
+      });
+    }
+  }
+  if (style.align !== undefined && !ALIGN_SET.has(style.align)) {
+    issues.push({
+      path: `${prefix}.style.align`,
+      message: `Block #${blockNumber} alignment must be left, center, or right.`,
+    });
+  }
+  if (
+    style.paddingY !== undefined &&
+    (!Number.isFinite(style.paddingY) || style.paddingY < 0 || style.paddingY > 40)
+  ) {
+    issues.push({
+      path: `${prefix}.style.paddingY`,
+      message: `Block #${blockNumber} vertical padding must be between 0 and 40 px.`,
+    });
+  }
+  if (
+    style.paddingX !== undefined &&
+    (!Number.isFinite(style.paddingX) || style.paddingX < 0 || style.paddingX > 40)
+  ) {
+    issues.push({
+      path: `${prefix}.style.paddingX`,
+      message: `Block #${blockNumber} horizontal padding must be between 0 and 40 px.`,
+    });
+  }
+  if (
+    style.borderRadius !== undefined &&
+    (!Number.isFinite(style.borderRadius) || style.borderRadius < 0 || style.borderRadius > 16)
+  ) {
+    issues.push({
+      path: `${prefix}.style.borderRadius`,
+      message: `Block #${blockNumber} border radius must be between 0 and 16 px.`,
+    });
+  }
+}
+
+function validateModernButtonProps(
+  block: {
+    buttonLabel?: string;
+    buttonUrl?: string;
+    buttonStyle?: string;
+    buttonCorner?: string;
+    buttonBgColor?: string;
+    buttonTextColor?: string;
+  },
+  prefix: string,
+  blockNumber: number,
+  required: boolean,
+  issues: ValidationIssue[]
+): void {
+  const hasLabel = Boolean(block.buttonLabel && block.buttonLabel.trim());
+  const hasUrl = Boolean(block.buttonUrl && block.buttonUrl.trim());
+
+  if (required && !hasLabel) {
+    issues.push({
+      path: `${prefix}.buttonLabel`,
+      message: `Block #${blockNumber} requires button label text.`,
+    });
+  } else if (hasLabel) {
+    const lv = validateTemplateVariables(block.buttonLabel!, `Block #${blockNumber} button label`);
+    if (!lv.valid && lv.error) issues.push({ path: `${prefix}.buttonLabel`, message: lv.error });
+  }
+
+  if (required || hasLabel || hasUrl) {
+    const uc = validateEmailUrl(block.buttonUrl, {
+      allowEmpty: !required && !hasLabel,
+      allowVariableToken: true,
+      fieldName: `Block #${blockNumber} button URL`,
+    });
+    if (!uc.valid && uc.error) issues.push({ path: `${prefix}.buttonUrl`, message: uc.error });
+  }
+
+  if (block.buttonStyle && !BUTTON_STYLE_SET.has(block.buttonStyle)) {
+    issues.push({
+      path: `${prefix}.buttonStyle`,
+      message: `Block #${blockNumber} button style must be filled, outlined, or dark.`,
+    });
+  }
+  if (block.buttonCorner && !BUTTON_CORNER_SET.has(block.buttonCorner)) {
+    issues.push({
+      path: `${prefix}.buttonCorner`,
+      message: `Block #${blockNumber} button corner style must be square, rounded, or pill.`,
+    });
+  }
+  if (block.buttonBgColor && !isValidHexColor(block.buttonBgColor)) {
+    issues.push({
+      path: `${prefix}.buttonBgColor`,
+      message: `Block #${blockNumber} button color must be a valid hex color.`,
+    });
+  }
+  if (block.buttonTextColor && !isValidHexColor(block.buttonTextColor)) {
+    issues.push({
+      path: `${prefix}.buttonTextColor`,
+      message: `Block #${blockNumber} button text color must be a valid hex color.`,
+    });
+  }
+}
+
 export function validateTemplateVariant(variant: EmailTemplateVariant): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
   if (!variant || typeof variant !== "object") {
     return [{ path: "variant", message: "Template data is missing." }];
+  }
+
+  if (variant.schemaVersion !== undefined && variant.schemaVersion !== 1 && variant.schemaVersion !== 2) {
+    issues.push({ path: "schemaVersion", message: "Unsupported template schema version." });
   }
 
   if (!variant.subject || !variant.subject.trim()) {
@@ -327,50 +485,67 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
     "two_column_text",
     "social_links",
     "footer",
+    "brand_header",
+    "promo_banner",
+    "membership_strip",
+    "icon_divider",
+    "hero_text",
+    "confirmation_number",
+    "stay_dates",
+    "feature_card",
+    "benefits_list",
+    "icon_link_grid",
+    "image_with_list",
+    "footer_nav",
+    "legal_section",
   ]);
+
+  const checkVar = (text: string | undefined, path: string, label: string) => {
+    if (!text) return;
+    const res = validateTemplateVariables(text, label);
+    if (!res.valid && res.error) issues.push({ path, message: res.error });
+  };
 
   variant.blocks.forEach((block: EmailBlock, idx: number) => {
     const prefix = `blocks[${idx}]`;
+    const num = idx + 1;
     if (!block || !allowedBlockTypes.has(block.type)) {
       issues.push({
         path: prefix,
-        message: `Block #${idx + 1} uses an unsupported block type. Only text, image, button, table, divider, spacer, social, and footer blocks are permitted.`,
+        message: `Block #${num} uses an unsupported block type.`,
       });
       return;
     }
 
     switch (block.type) {
       case "heading": {
-        const v = validateTemplateVariables(block.text, `Heading block #${idx + 1}`);
-        if (!v.valid && v.error) issues.push({ path: `${prefix}.text`, message: v.error });
+        checkVar(block.text, `${prefix}.text`, `Heading block #${num}`);
         if (block.color && !isValidHexColor(block.color)) {
-          issues.push({ path: `${prefix}.color`, message: `Heading block #${idx + 1} color must be a valid hex color.` });
+          issues.push({ path: `${prefix}.color`, message: `Heading block #${num} color must be a valid hex color.` });
         }
         break;
       }
       case "paragraph": {
-        const v = validateTemplateVariables(block.text, `Paragraph block #${idx + 1}`);
-        if (!v.valid && v.error) issues.push({ path: `${prefix}.text`, message: v.error });
+        checkVar(block.text, `${prefix}.text`, `Paragraph block #${num}`);
         break;
       }
       case "image": {
-        const urlCheck = validateEmailUrl(block.src, { fieldName: `Image block #${idx + 1} URL` });
+        const urlCheck = validateEmailUrl(block.src, { fieldName: `Image block #${num} URL` });
         if (!urlCheck.valid && urlCheck.error) {
           issues.push({ path: `${prefix}.src`, message: urlCheck.error });
         }
         if (!block.alt || !block.alt.trim()) {
           issues.push({
             path: `${prefix}.alt`,
-            message: `Image block #${idx + 1} requires alt text for accessibility and email clients.`,
+            message: `Image block #${num} requires alt text for accessibility and email clients.`,
           });
         } else {
-          const av = validateTemplateVariables(block.alt, `Image block #${idx + 1} alt text`);
-          if (!av.valid && av.error) issues.push({ path: `${prefix}.alt`, message: av.error });
+          checkVar(block.alt, `${prefix}.alt`, `Image block #${num} alt text`);
         }
         if (block.linkUrl && block.linkUrl.trim()) {
           const lc = validateEmailUrl(block.linkUrl, {
             allowVariableToken: true,
-            fieldName: `Image block #${idx + 1} link URL`,
+            fieldName: `Image block #${num} link URL`,
           });
           if (!lc.valid && lc.error) issues.push({ path: `${prefix}.linkUrl`, message: lc.error });
         }
@@ -380,33 +555,24 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
         if (!block.label || !block.label.trim()) {
           issues.push({
             path: `${prefix}.label`,
-            message: `Link/Button block #${idx + 1} requires label text.`,
+            message: `Link/Button block #${num} requires label text.`,
           });
         } else {
-          const lv = validateTemplateVariables(block.label, `Link/Button block #${idx + 1} label`);
-          if (!lv.valid && lv.error) issues.push({ path: `${prefix}.label`, message: lv.error });
+          checkVar(block.label, `${prefix}.label`, `Link/Button block #${num} label`);
         }
-        if (block.prefixText) {
-          const pv = validateTemplateVariables(block.prefixText, `Link/Button block #${idx + 1} surrounding text`);
-          if (!pv.valid && pv.error) issues.push({ path: `${prefix}.prefixText`, message: pv.error });
-        }
+        checkVar(block.prefixText, `${prefix}.prefixText`, `Link/Button block #${num} surrounding text`);
         const uc = validateEmailUrl(block.url, {
           allowVariableToken: true,
-          fieldName: `Link/Button block #${idx + 1} URL`,
+          fieldName: `Link/Button block #${num} URL`,
         });
         if (!uc.valid && uc.error) issues.push({ path: `${prefix}.url`, message: uc.error });
         break;
       }
       case "booking_details_table": {
-        if (block.title) {
-          const tv = validateTemplateVariables(block.title, `Details table #${idx + 1} title`);
-          if (!tv.valid && tv.error) issues.push({ path: `${prefix}.title`, message: tv.error });
-        }
+        checkVar(block.title, `${prefix}.title`, `Details table #${num} title`);
         (block.rows || []).forEach((row, rIdx) => {
-          const rl = validateTemplateVariables(row.label, `Table row #${rIdx + 1} label`);
-          if (!rl.valid && rl.error) issues.push({ path: `${prefix}.rows[${rIdx}].label`, message: rl.error });
-          const rv = validateTemplateVariables(row.valueTemplate, `Table row #${rIdx + 1} value`);
-          if (!rv.valid && rv.error) issues.push({ path: `${prefix}.rows[${rIdx}].valueTemplate`, message: rv.error });
+          checkVar(row.label, `${prefix}.rows[${rIdx}].label`, `Table row #${rIdx + 1} label`);
+          checkVar(row.valueTemplate, `${prefix}.rows[${rIdx}].valueTemplate`, `Table row #${rIdx + 1} value`);
         });
         break;
       }
@@ -417,19 +583,12 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
           ["rightTitle", "Right column title"],
           ["rightText", "Right column text"],
         ] as const) {
-          const val = (block as any)[k];
-          if (val) {
-            const tv = validateTemplateVariables(val, `${label} (block #${idx + 1})`);
-            if (!tv.valid && tv.error) issues.push({ path: `${prefix}.${k}`, message: tv.error });
-          }
+          checkVar((block as any)[k], `${prefix}.${k}`, `${label} (block #${num})`);
         }
         break;
       }
       case "social_links": {
-        if (block.title) {
-          const tv = validateTemplateVariables(block.title, `Social links block #${idx + 1} title`);
-          if (!tv.valid && tv.error) issues.push({ path: `${prefix}.title`, message: tv.error });
-        }
+        checkVar(block.title, `${prefix}.title`, `Social links block #${num} title`);
         (block.links || []).forEach((item, lIdx) => {
           if (!item.label || !item.label.trim()) {
             issues.push({
@@ -446,26 +605,293 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
         break;
       }
       case "footer": {
-        if (block.contactTitle) {
-          const cv = validateTemplateVariables(block.contactTitle, "Contact block title");
-          if (!cv.valid && cv.error) issues.push({ path: `${prefix}.contactTitle`, message: cv.error });
-        }
+        checkVar(block.contactTitle, `${prefix}.contactTitle`, "Contact block title");
         (block.fields || []).forEach((f, fIdx) => {
-          const fl = validateTemplateVariables(f.label, `Contact field #${fIdx + 1} label`);
-          if (!fl.valid && fl.error) issues.push({ path: `${prefix}.fields[${fIdx}].label`, message: fl.error });
-          const fv = validateTemplateVariables(f.valueTemplate, `Contact field #${fIdx + 1} value`);
-          if (!fv.valid && fv.error) issues.push({ path: `${prefix}.fields[${fIdx}].valueTemplate`, message: fv.error });
+          checkVar(f.label, `${prefix}.fields[${fIdx}].label`, `Contact field #${fIdx + 1} label`);
+          checkVar(f.valueTemplate, `${prefix}.fields[${fIdx}].valueTemplate`, `Contact field #${fIdx + 1} value`);
         });
-        if (block.legalImprintText) {
-          const iv = validateTemplateVariables(block.legalImprintText, "Legal/Imprint text");
-          if (!iv.valid && iv.error) issues.push({ path: `${prefix}.legalImprintText`, message: iv.error });
+        checkVar(block.legalImprintText, `${prefix}.legalImprintText`, "Legal/Imprint text");
+        checkVar(block.footerNote, `${prefix}.footerNote`, "Footer note");
+        break;
+      }
+
+      // --- 13 New Modern Additive Block Validations ---
+      case "brand_header": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        if (block.iconTone && !isValidEmailIconTone(block.iconTone)) {
+          issues.push({ path: `${prefix}.iconTone`, message: `Header block #${num} icon color is not allowed.` });
         }
-        if (block.footerNote) {
-          const fnv = validateTemplateVariables(block.footerNote, "Footer note");
-          if (!fnv.valid && fnv.error) issues.push({ path: `${prefix}.footerNote`, message: fnv.error });
+        if (block.logoUrl && block.logoUrl.trim()) {
+          const lc = validateEmailUrl(block.logoUrl, { fieldName: `Header block #${num} logo URL` });
+          if (!lc.valid && lc.error) issues.push({ path: `${prefix}.logoUrl`, message: lc.error });
+          if (!block.logoAlt || !block.logoAlt.trim()) {
+            issues.push({
+              path: `${prefix}.logoAlt`,
+              message: `Header block #${num} requires alt text when a logo image is set.`,
+            });
+          } else {
+            checkVar(block.logoAlt, `${prefix}.logoAlt`, `Header block #${num} logo alt text`);
+          }
         }
         break;
       }
+
+      case "promo_banner": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        if (!block.text || !block.text.trim()) {
+          issues.push({ path: `${prefix}.text`, message: `Promo banner #${num} requires text.` });
+        } else {
+          checkVar(block.text, `${prefix}.text`, `Promo banner #${num} text`);
+        }
+        if (block.imageUrl && block.imageUrl.trim()) {
+          const ic = validateEmailUrl(block.imageUrl, { fieldName: `Promo banner #${num} image URL` });
+          if (!ic.valid && ic.error) issues.push({ path: `${prefix}.imageUrl`, message: ic.error });
+          if (!block.imageAlt || !block.imageAlt.trim()) {
+            issues.push({
+              path: `${prefix}.imageAlt`,
+              message: `Promo banner #${num} requires alt text for its image.`,
+            });
+          } else {
+            checkVar(block.imageAlt, `${prefix}.imageAlt`, `Promo banner #${num} image alt text`);
+          }
+        }
+        validateModernButtonProps(block, prefix, num, true, issues);
+        break;
+      }
+
+      case "membership_strip": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        checkVar(block.tierTemplate, `${prefix}.tierTemplate`, `Membership strip #${num} tier`);
+        checkVar(block.pointsTemplate, `${prefix}.pointsTemplate`, `Membership strip #${num} points`);
+        if (block.iconTone && !isValidEmailIconTone(block.iconTone)) {
+          issues.push({ path: `${prefix}.iconTone`, message: `Membership strip #${num} icon color is not allowed.` });
+        }
+        if (block.linkUrl && block.linkUrl.trim()) {
+          const lc = validateEmailUrl(block.linkUrl, {
+            allowVariableToken: true,
+            fieldName: `Membership strip #${num} link URL`,
+          });
+          if (!lc.valid && lc.error) issues.push({ path: `${prefix}.linkUrl`, message: lc.error });
+        }
+        break;
+      }
+
+      case "icon_divider": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        if (!isValidEmailIconName(block.icon)) {
+          issues.push({ path: `${prefix}.icon`, message: `Icon divider #${num} uses an unsupported icon.` });
+        }
+        if (block.iconTone && !isValidEmailIconTone(block.iconTone)) {
+          issues.push({ path: `${prefix}.iconTone`, message: `Icon divider #${num} icon color is not allowed.` });
+        }
+        if (block.lineColor && !isValidHexColor(block.lineColor)) {
+          issues.push({ path: `${prefix}.lineColor`, message: `Icon divider #${num} line color must be a valid hex color.` });
+        }
+        break;
+      }
+
+      case "hero_text": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        if (!block.headline || !block.headline.trim()) {
+          issues.push({ path: `${prefix}.headline`, message: `Hero text block #${num} requires a headline.` });
+        } else {
+          checkVar(block.headline, `${prefix}.headline`, `Hero text #${num} headline`);
+        }
+        checkVar(block.body, `${prefix}.body`, `Hero text #${num} body`);
+        validateModernButtonProps(block, prefix, num, false, issues);
+        break;
+      }
+
+      case "confirmation_number": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        checkVar(block.label, `${prefix}.label`, `Confirmation number #${num} label`);
+        if (!block.valueTemplate || !block.valueTemplate.trim()) {
+          issues.push({ path: `${prefix}.valueTemplate`, message: `Confirmation number #${num} requires a value or variable.` });
+        } else {
+          checkVar(block.valueTemplate, `${prefix}.valueTemplate`, `Confirmation number #${num} value`);
+        }
+        break;
+      }
+
+      case "stay_dates": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        checkVar(block.checkInLabel, `${prefix}.checkInLabel`, `Stay dates #${num} check-in label`);
+        checkVar(block.checkInDateTemplate, `${prefix}.checkInDateTemplate`, `Stay dates #${num} check-in date`);
+        checkVar(block.checkInTimeTemplate, `${prefix}.checkInTimeTemplate`, `Stay dates #${num} check-in time`);
+        checkVar(block.checkOutLabel, `${prefix}.checkOutLabel`, `Stay dates #${num} check-out label`);
+        checkVar(block.checkOutDateTemplate, `${prefix}.checkOutDateTemplate`, `Stay dates #${num} check-out date`);
+        checkVar(block.checkOutTimeTemplate, `${prefix}.checkOutTimeTemplate`, `Stay dates #${num} check-out time`);
+        validateModernButtonProps(block, prefix, num, false, issues);
+        break;
+      }
+
+      case "feature_card": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        if (block.imagePosition !== "left" && block.imagePosition !== "right") {
+          issues.push({ path: `${prefix}.imagePosition`, message: `Feature card #${num} image position must be left or right.` });
+        }
+        const ic = validateEmailUrl(block.imageUrl, { fieldName: `Feature card #${num} image URL` });
+        if (!ic.valid && ic.error) issues.push({ path: `${prefix}.imageUrl`, message: ic.error });
+        if (!block.imageAlt || !block.imageAlt.trim()) {
+          issues.push({ path: `${prefix}.imageAlt`, message: `Feature card #${num} requires image alt text.` });
+        } else {
+          checkVar(block.imageAlt, `${prefix}.imageAlt`, `Feature card #${num} image alt text`);
+        }
+        if (!block.title || !block.title.trim()) {
+          issues.push({ path: `${prefix}.title`, message: `Feature card #${num} requires a title.` });
+        } else {
+          checkVar(block.title, `${prefix}.title`, `Feature card #${num} title`);
+        }
+        checkVar(block.body, `${prefix}.body`, `Feature card #${num} body`);
+        validateModernButtonProps(block, prefix, num, false, issues);
+        break;
+      }
+
+      case "benefits_list": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        checkVar(block.badgeText, `${prefix}.badgeText`, `Benefits list #${num} badge text`);
+        if (block.badgeImageUrl && block.badgeImageUrl.trim()) {
+          const bc = validateEmailUrl(block.badgeImageUrl, { fieldName: `Benefits list #${num} badge image URL` });
+          if (!bc.valid && bc.error) issues.push({ path: `${prefix}.badgeImageUrl`, message: bc.error });
+          if (!block.badgeImageAlt || !block.badgeImageAlt.trim()) {
+            issues.push({ path: `${prefix}.badgeImageAlt`, message: `Benefits list #${num} requires alt text for its badge image.` });
+          } else {
+            checkVar(block.badgeImageAlt, `${prefix}.badgeImageAlt`, `Benefits list #${num} badge alt`);
+          }
+        }
+        if (!block.heading || !block.heading.trim()) {
+          issues.push({ path: `${prefix}.heading`, message: `Benefits list #${num} requires a heading.` });
+        } else {
+          checkVar(block.heading, `${prefix}.heading`, `Benefits list #${num} heading`);
+        }
+        if (block.listStyle !== "bullet" && block.listStyle !== "icon") {
+          issues.push({ path: `${prefix}.listStyle`, message: `Benefits list #${num} style must be bullet or icon.` });
+        }
+        if (block.itemIcon && !isValidEmailIconName(block.itemIcon)) {
+          issues.push({ path: `${prefix}.itemIcon`, message: `Benefits list #${num} uses an unsupported icon.` });
+        }
+        if (block.iconTone && !isValidEmailIconTone(block.iconTone)) {
+          issues.push({ path: `${prefix}.iconTone`, message: `Benefits list #${num} icon color is not allowed.` });
+        }
+        if (!Array.isArray(block.items) || block.items.length === 0) {
+          issues.push({ path: `${prefix}.items`, message: `Benefits list #${num} must contain at least one item.` });
+        } else {
+          block.items.forEach((it, iIdx) => {
+            checkVar(it.text, `${prefix}.items[${iIdx}].text`, `Benefits list #${num} item #${iIdx + 1}`);
+          });
+        }
+        checkVar(block.footnote, `${prefix}.footnote`, `Benefits list #${num} footnote`);
+        validateModernButtonProps(block, prefix, num, false, issues);
+        break;
+      }
+
+      case "icon_link_grid": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        checkVar(block.heading, `${prefix}.heading`, `Icon link grid #${num} heading`);
+        checkVar(block.subheading, `${prefix}.subheading`, `Icon link grid #${num} subheading`);
+        if (block.iconTone && !isValidEmailIconTone(block.iconTone)) {
+          issues.push({ path: `${prefix}.iconTone`, message: `Icon link grid #${num} icon color is not allowed.` });
+        }
+        if (!Array.isArray(block.items) || block.items.length < 2 || block.items.length > 4) {
+          issues.push({
+            path: `${prefix}.items`,
+            message: `Icon link grid #${num} must have between 2 and 4 items.`,
+          });
+        } else {
+          block.items.forEach((it, iIdx) => {
+            if (!isValidEmailIconName(it.icon)) {
+              issues.push({ path: `${prefix}.items[${iIdx}].icon`, message: `Icon link #${iIdx + 1} uses an unsupported icon.` });
+            }
+            if (!it.label || !it.label.trim()) {
+              issues.push({ path: `${prefix}.items[${iIdx}].label`, message: `Icon link #${iIdx + 1} requires a label.` });
+            } else {
+              checkVar(it.label, `${prefix}.items[${iIdx}].label`, `Icon link #${iIdx + 1} label`);
+            }
+            const uc = validateEmailUrl(it.url, {
+              allowVariableToken: true,
+              fieldName: `Icon link "${it.label || iIdx + 1}" URL`,
+            });
+            if (!uc.valid && uc.error) issues.push({ path: `${prefix}.items[${iIdx}].url`, message: uc.error });
+          });
+        }
+        break;
+      }
+
+      case "image_with_list": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        const ic = validateEmailUrl(block.imageUrl, { fieldName: `Image + List #${num} image URL` });
+        if (!ic.valid && ic.error) issues.push({ path: `${prefix}.imageUrl`, message: ic.error });
+        if (!block.imageAlt || !block.imageAlt.trim()) {
+          issues.push({ path: `${prefix}.imageAlt`, message: `Image + List #${num} requires image alt text.` });
+        } else {
+          checkVar(block.imageAlt, `${prefix}.imageAlt`, `Image + List #${num} image alt text`);
+        }
+        if (!block.heading || !block.heading.trim()) {
+          issues.push({ path: `${prefix}.heading`, message: `Image + List #${num} requires a heading.` });
+        } else {
+          checkVar(block.heading, `${prefix}.heading`, `Image + List #${num} heading`);
+        }
+        if (block.iconTone && !isValidEmailIconTone(block.iconTone)) {
+          issues.push({ path: `${prefix}.iconTone`, message: `Image + List #${num} icon color is not allowed.` });
+        }
+        (block.items || []).forEach((it, iIdx) => {
+          if (!isValidEmailIconName(it.icon)) {
+            issues.push({ path: `${prefix}.items[${iIdx}].icon`, message: `Feature item #${iIdx + 1} uses an unsupported icon.` });
+          }
+          checkVar(it.text, `${prefix}.items[${iIdx}].text`, `Feature item #${iIdx + 1} text`);
+        });
+        validateModernButtonProps(block, prefix, num, false, issues);
+        break;
+      }
+
+      case "footer_nav": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        if (!Array.isArray(block.links) || block.links.length === 0) {
+          issues.push({ path: `${prefix}.links`, message: `Footer navigation #${num} must include at least one link.` });
+        } else {
+          block.links.forEach((l, lIdx) => {
+            if (!l.label || !l.label.trim()) {
+              issues.push({ path: `${prefix}.links[${lIdx}].label`, message: `Footer link #${lIdx + 1} requires a label.` });
+            } else {
+              checkVar(l.label, `${prefix}.links[${lIdx}].label`, `Footer link #${lIdx + 1} label`);
+            }
+            const uc = validateEmailUrl(l.url, {
+              allowVariableToken: true,
+              fieldName: `Footer link "${l.label || lIdx + 1}" URL`,
+            });
+            if (!uc.valid && uc.error) issues.push({ path: `${prefix}.links[${lIdx}].url`, message: uc.error });
+          });
+        }
+        checkVar(block.secondaryText, `${prefix}.secondaryText`, `Footer navigation #${num} secondary text`);
+        if (block.secondaryLinkUrl && block.secondaryLinkUrl.trim()) {
+          const sc = validateEmailUrl(block.secondaryLinkUrl, {
+            allowVariableToken: true,
+            fieldName: `Footer navigation #${num} secondary URL`,
+          });
+          if (!sc.valid && sc.error) issues.push({ path: `${prefix}.secondaryLinkUrl`, message: sc.error });
+        }
+        break;
+      }
+
+      case "legal_section": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        (block.sections || []).forEach((sec, sIdx) => {
+          checkVar(sec.heading, `${prefix}.sections[${sIdx}].heading`, `Legal section #${sIdx + 1} heading`);
+          checkVar(sec.body, `${prefix}.sections[${sIdx}].body`, `Legal section #${sIdx + 1} body`);
+        });
+        checkVar(block.copyrightText, `${prefix}.copyrightText`, `Legal section #${num} copyright`);
+        if (block.showFooterLogo && block.footerLogoUrl && block.footerLogoUrl.trim()) {
+          const fl = validateEmailUrl(block.footerLogoUrl, { fieldName: `Legal section #${num} footer logo URL` });
+          if (!fl.valid && fl.error) issues.push({ path: `${prefix}.footerLogoUrl`, message: fl.error });
+          if (!block.footerLogoAlt || !block.footerLogoAlt.trim()) {
+            issues.push({ path: `${prefix}.footerLogoAlt`, message: `Legal section #${num} requires alt text for its footer logo.` });
+          } else {
+            checkVar(block.footerLogoAlt, `${prefix}.footerLogoAlt`, `Legal section #${num} footer logo alt`);
+          }
+        }
+        break;
+      }
+
       default:
         break;
     }
