@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowDown,
@@ -10,6 +10,7 @@ import {
   EyeOff,
   History,
   Image as ImageIcon,
+  Loader2,
   Monitor,
   Plus,
   RotateCcw,
@@ -191,8 +192,11 @@ export function TemplateBlockEditor({
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const [imagePickerTarget, setImagePickerTarget] = useState<
-    null | { kind: "logo" } | { kind: "block"; blockId: string }
+    null | { kind: "logo" } | { kind: "block"; blockId: string; removeIfEmptyOnClose?: boolean }
   >(null);
+  const [uploadingBlockId, setUploadingBlockId] = useState<string | null>(null);
+  const directUploadBlockIdRef = useRef<string | null>(null);
+  const directFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [saving, setSaving] = useState<"draft" | "publish" | null>(null);
   const [testing, setTesting] = useState(false);
@@ -249,7 +253,6 @@ export function TemplateBlockEditor({
   const handleSave = async (publish: boolean) => {
     setServerErrors([]);
     if (validationIssues.length > 0) {
-      setServerErrors(validationIssues.map((i) => i.message));
       toast.error("Please fix the validation errors before saving.");
       return;
     }
@@ -287,8 +290,8 @@ export function TemplateBlockEditor({
   };
 
   const handleSendTest = async () => {
+    setServerErrors([]);
     if (validationIssues.length > 0) {
-      setServerErrors(validationIssues.map((i) => i.message));
       toast.error("Fix validation errors before sending a test email.");
       return;
     }
@@ -386,6 +389,10 @@ export function TemplateBlockEditor({
       }
       return { ...prev, blocks: [...prev.blocks, newBlock] };
     });
+    if (type === "image") {
+      // Immediately open the picker/uploader so the admin never gets stuck with an empty image URL error
+      setImagePickerTarget({ kind: "block", blockId: newBlock.id, removeIfEmptyOnClose: true });
+    }
   };
 
   const addPreset = (presetId: string) => {
@@ -420,11 +427,79 @@ export function TemplateBlockEditor({
     } else {
       updateBlock(imagePickerTarget.blockId, (b) =>
         b.type === "image"
-          ? { ...b, imageId: img.id, src: img.url, alt: b.alt || img.label }
+          ? {
+              ...b,
+              imageId: img.id,
+              src: img.url,
+              alt: !b.alt || b.alt === "{{hotel_name}} image" ? img.label : b.alt,
+            }
           : b
       );
     }
     setImagePickerTarget(null);
+  };
+
+  const handleCloseImagePicker = () => {
+    if (imagePickerTarget && imagePickerTarget.kind === "block" && imagePickerTarget.removeIfEmptyOnClose) {
+      const targetBlock = variant.blocks.find((b) => b.id === imagePickerTarget.blockId);
+      if (targetBlock && targetBlock.type === "image" && !targetBlock.src.trim()) {
+        removeBlock(imagePickerTarget.blockId);
+      }
+    }
+    setImagePickerTarget(null);
+  };
+
+  const triggerDirectBlockImageUpload = (blockId: string) => {
+    directUploadBlockIdRef.current = blockId;
+    directFileInputRef.current?.click();
+  };
+
+  const handleDirectBlockFileSelected = (file: File) => {
+    const blockId = directUploadBlockIdRef.current;
+    if (!blockId) return;
+    const hasAllowedExt = /\.(png|jpe?g|webp)$/i.test(file.name || "");
+    const allowedMime = new Set(["image/png", "image/jpeg", "image/webp"]);
+    if (file.type ? !allowedMime.has(file.type) : !hasAllowedExt) {
+      toast.error("Only PNG, JPEG, and WebP images are supported.");
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      toast.error("File is too large. Please upload a PNG, JPEG, or WebP image under 2 MB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        setUploadingBlockId(blockId);
+        const base64Data = String(reader.result || "");
+        const defaultLabel = file.name.replace(/\.[^.]+$/, "").slice(0, 60) || "Hotel Image";
+        const res = await emailCustomizationApi.uploadImage(base64Data, defaultLabel, hotelId);
+        if (res.image) {
+          const uploaded = res.image;
+          updateBlock(blockId, (b) =>
+            b.type === "image"
+              ? {
+                  ...b,
+                  imageId: uploaded.id,
+                  src: uploaded.url,
+                  alt: !b.alt || b.alt === "{{hotel_name}} image" ? uploaded.label : b.alt,
+                }
+              : b
+          );
+          toast.success("Image uploaded and inserted into block.");
+        }
+      } catch (err: any) {
+        toast.error(err?.message || "Image upload failed.");
+      } finally {
+        setUploadingBlockId(null);
+        directUploadBlockIdRef.current = null;
+      }
+    };
+    reader.onerror = () => {
+      toast.error("Could not read the selected image file.");
+    };
+    reader.readAsDataURL(file);
   };
 
   const copyVariableTag = (varName: string) => {
@@ -527,18 +602,76 @@ export function TemplateBlockEditor({
         </div>
       </div>
 
+      {/* Hidden direct file input for instant one-click image block upload */}
+      <input
+        ref={directFileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handleDirectBlockFileSelected(f);
+          e.target.value = "";
+        }}
+      />
+
       {/* Inline Validation Issues */}
       {(validationIssues.length > 0 || serverErrors.length > 0) && (
-        <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 space-y-1">
+        <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 space-y-2">
           <div className="flex items-center gap-1.5 font-semibold">
             <AlertCircle size={14} /> Template validation errors:
           </div>
-          <ul className="list-disc pl-5 space-y-0.5">
-            {(serverErrors.length > 0 ? serverErrors : validationIssues.map((i) => i.message))
-              .slice(0, 6)
-              .map((msg, idx) => (
-                <li key={idx}>{msg}</li>
-              ))}
+          <ul className="list-disc pl-5 space-y-1.5">
+            {serverErrors.length > 0
+              ? serverErrors.slice(0, 6).map((msg, idx) => <li key={idx}>{msg}</li>)
+              : validationIssues.slice(0, 6).map((issue, idx) => {
+                  const imgMatch = issue.path.match(/^blocks\[(\d+)\]\.src$/);
+                  const imgBlockIdx = imgMatch ? Number(imgMatch[1]) : -1;
+                  const targetBlock =
+                    imgBlockIdx >= 0 && variant.blocks[imgBlockIdx]?.type === "image"
+                      ? variant.blocks[imgBlockIdx]
+                      : null;
+                  return (
+                    <li key={idx} className="leading-relaxed">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span>{issue.message}</span>
+                        {targetBlock && (
+                          <span className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              disabled={uploadingBlockId === targetBlock.id}
+                              onClick={() => triggerDirectBlockImageUpload(targetBlock.id)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-medium whitespace-nowrap"
+                            >
+                              {uploadingBlockId === targetBlock.id ? (
+                                <Loader2 size={11} className="animate-spin" />
+                              ) : (
+                                <Upload size={11} />
+                              )}
+                              Upload Image
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setImagePickerTarget({ kind: "block", blockId: targetBlock.id })
+                              }
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-[11px] font-medium whitespace-nowrap"
+                            >
+                              <ImageIcon size={11} /> Pick from Library
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeBlock(targetBlock.id)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-red-500/40 hover:bg-red-500/20 text-red-200 text-[11px] font-medium whitespace-nowrap"
+                            >
+                              <Trash2 size={11} /> Remove Block
+                            </button>
+                          </span>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
           </ul>
         </div>
       )}
@@ -865,14 +998,23 @@ export function TemplateBlockEditor({
               </div>
             </div>
 
-            {variant.blocks.map((block, idx) => (
+            {variant.blocks.map((block, idx) => {
+              const blockHasError = validationIssues.some((i) =>
+                i.path.startsWith(`blocks[${idx}]`)
+              );
+              return (
               <div
                 key={block.id}
-                className="rounded-xl bg-zinc-900/60 border border-zinc-800 p-3.5 space-y-2.5"
+                className={`rounded-xl bg-zinc-900/60 border p-3.5 space-y-2.5 transition-colors ${
+                  blockHasError ? "border-red-500/60" : "border-zinc-800"
+                }`}
               >
                 {/* Block Header Controls */}
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-[11px] font-mono text-zinc-500 tabular-nums">
+                      #{idx + 1}
+                    </span>
                     <span className="text-xs font-semibold text-zinc-200">
                       {BLOCK_TYPE_LABELS[block.type]}
                     </span>
@@ -1006,7 +1148,20 @@ export function TemplateBlockEditor({
 
                 {block.type === "image" && (
                   <div className="space-y-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={uploadingBlockId === block.id}
+                        onClick={() => triggerDirectBlockImageUpload(block.id)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs font-medium text-white whitespace-nowrap transition-colors"
+                      >
+                        {uploadingBlockId === block.id ? (
+                          <Loader2 size={13} className="animate-spin" />
+                        ) : (
+                          <Upload size={13} />
+                        )}
+                        {uploadingBlockId === block.id ? "Uploading..." : "Upload Image"}
+                      </button>
                       <button
                         type="button"
                         onClick={() => setImagePickerTarget({ kind: "block", blockId: block.id })}
@@ -1022,8 +1177,8 @@ export function TemplateBlockEditor({
                             b.type === "image" ? { ...b, src: e.target.value } : b
                           )
                         }
-                        placeholder="https://... (pick from library or enter HTTPS image URL)"
-                        className={inputClass}
+                        placeholder="https://... (auto-filled when you upload or pick an image)"
+                        className={`${inputClass} flex-1 min-w-[200px]`}
                       />
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1549,7 +1704,8 @@ export function TemplateBlockEditor({
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
 
             {/* Add Block Bar */}
             <div className="rounded-xl bg-zinc-900/40 border border-dashed border-zinc-800 p-3">
@@ -1658,7 +1814,7 @@ export function TemplateBlockEditor({
             imagePickerTarget.kind === "logo" ? variant.branding.logoUrl : undefined
           }
           onSelect={handleImagePicked}
-          onClose={() => setImagePickerTarget(null)}
+          onClose={handleCloseImagePicker}
         />
       )}
 

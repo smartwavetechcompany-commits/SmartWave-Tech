@@ -74,7 +74,8 @@ export function ImageLibraryPanel({
 
   const handleFile = async (file: File) => {
     setErrorMsg(null);
-    if (!ACCEPTED_MIME.has(file.type)) {
+    const hasAllowedExt = /\.(png|jpe?g|webp)$/i.test(file.name || "");
+    if (file.type ? !ACCEPTED_MIME.has(file.type) : !hasAllowedExt) {
       setErrorMsg(
         "Only PNG, JPEG, and WebP images are supported. SVG, GIF, PDF, and video files are not permitted."
       );
@@ -93,11 +94,12 @@ export function ImageLibraryPanel({
         const defaultLabel = file.name.replace(/\.[^.]+$/, "").slice(0, 60) || "Hotel Image";
         const res = await emailCustomizationApi.uploadImage(base64Data, defaultLabel, hotelId);
         if (res.image) {
-          toast.success("Image uploaded and optimized.");
-          await loadImages();
+          toast.success("Image uploaded and added to library.");
           if (mode === "picker" && onSelect) {
             onSelect(res.image);
+            return;
           }
+          await loadImages();
         }
       } catch (err: any) {
         setErrorMsg(err?.message || "Upload failed.");
