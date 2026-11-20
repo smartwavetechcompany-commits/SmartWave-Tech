@@ -52,6 +52,8 @@ import {
   getTenantEmailLogs,
   sanitizeEmailList,
 } from "./src/services/multiTenantEmailService.ts";
+import { mountEmailCustomizationRoutes } from "./src/modules/emailCustomization/server/routes.ts";
+import { sendHotelEmail } from "./src/modules/emailCustomization/server/dispatcher.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -104,6 +106,9 @@ async function startServer() {
     }
     next();
   });
+
+  // Allow up to 6mb JSON payloads strictly for the Email Customization Image Library upload route (2MB binary + base64 overhead)
+  app.use("/api/email-customization/images", express.json({ limit: "6mb" }));
 
   app.use(
     express.json({
@@ -2247,10 +2252,33 @@ async function startServer() {
         return res.status(403).json({ error: "Forbidden: Cannot modify Super Administrator permissions." });
       }
 
+      const callerRole = String(caller.profile?.role || '').trim();
+      const callerStaffRole = String(caller.profile?.staffRole || '').trim();
+      const callerCanAssignEmailModule =
+        isSuperAdminCaller(caller) ||
+        callerRole === 'hotelAdmin' ||
+        callerRole === 'admin' ||
+        callerRole === 'hotel_admin' ||
+        callerStaffRole === 'admin';
+
       const rawPerms = Array.isArray(permissions) ? permissions : [];
-      const sanitizedPermissions = isSuperAdminCaller(caller)
+      const emailModulePerms = new Set(['view_email_templates', 'manage_email_templates']);
+      const existingTargetPerms = Array.isArray(targetData.permissions) ? targetData.permissions : [];
+      const preservedEmailPerms = existingTargetPerms.filter((p: any) => emailModulePerms.has(String(p)));
+
+      let sanitizedPermissions = isSuperAdminCaller(caller)
         ? rawPerms
         : rawPerms.filter((p: any) => p !== 'access_super_admin');
+
+      if (!callerCanAssignEmailModule) {
+        // Non-admin staff cannot grant or revoke Email Templates permissions; preserve target's existing state
+        sanitizedPermissions = Array.from(
+          new Set([
+            ...sanitizedPermissions.filter((p: any) => !emailModulePerms.has(String(p))),
+            ...preservedEmailPerms,
+          ])
+        );
+      }
 
       const moduleMap: Record<string, string[]> = {
         dashboard: ['view_dashboard', 'export_dashboard'],
@@ -2267,11 +2295,19 @@ async function startServer() {
         audits: ['nightly_audit', 'run_night_audit', 'approve_night_audit'],
         reports: ['view_reports', 'export_reports', 'print_reports'],
         staff: ['manage_staff', 'view_users', 'view_activity_logs'],
-        settings: ['edit_hotel_settings', 'view_settings', 'edit_settings', 'manage_roles']
+        settings: ['edit_hotel_settings', 'view_settings', 'edit_settings', 'manage_roles'],
+        email_templates: ['view_email_templates', 'manage_email_templates']
       };
 
-      const resolvedAssignedModules = (Array.isArray(assignedModules) && assignedModules.length > 0)
-        ? assignedModules
+      const sanitizedAssignedModules = Array.isArray(assignedModules)
+        ? assignedModules.filter((m: any) => {
+            if (m !== 'email_templates') return true;
+            return sanitizedPermissions.some((p: any) => emailModulePerms.has(String(p)));
+          })
+        : [];
+
+      const resolvedAssignedModules = (sanitizedAssignedModules.length > 0)
+        ? sanitizedAssignedModules
         : (sanitizedPermissions.length > 0
             ? Object.keys(moduleMap).filter(modId => moduleMap[modId].some(p => sanitizedPermissions.includes(p)))
             : []);
@@ -3908,60 +3944,51 @@ async function startServer() {
     const normalizedEventMap: Record<
       string,
       {
-        canonical: "confirmation" | "checked_in" | "checked_out" | "cancelled" | "no_show";
-        fullType: MultiTenantEmailEventType;
-        markerKey: "confirmation" | "checkedIn" | "checkedOut" | "cancelled" | "noShow";
-        audience: EmailRecipientAudience;
+        canonical:
+          | "confirmation"
+          | "checked_in"
+          | "checked_out"
+          | "cancelled"
+          | "no_show"
+          | "booking_modified"
+          | "payment_receipt"
+          | "pre_arrival_reminder"
+          | "post_stay_feedback_request";
+        moduleEvent:
+          | "booking_confirmation"
+          | "checked_in"
+          | "checked_out"
+          | "booking_cancellation"
+          | "no_show"
+          | "booking_modified"
+          | "payment_receipt"
+          | "pre_arrival_reminder"
+          | "post_stay_feedback_request";
       }
     > = {
-      confirmation: {
-        canonical: "confirmation",
-        fullType: "reservation.confirmed",
-        markerKey: "confirmation",
-        audience: "guest",
-      },
-      booking_confirmation: {
-        canonical: "confirmation",
-        fullType: "reservation.confirmed",
-        markerKey: "confirmation",
-        audience: "guest",
-      },
-      checked_in: {
-        canonical: "checked_in",
-        fullType: "reservation.checked_in",
-        markerKey: "checkedIn",
-        audience: "guest",
-      },
-      checked_out: {
-        canonical: "checked_out",
-        fullType: "reservation.checked_out",
-        markerKey: "checkedOut",
-        audience: "guest",
-      },
-      cancelled: {
-        canonical: "cancelled",
-        fullType: "reservation.cancelled",
-        markerKey: "cancelled",
-        audience: "guest",
-      },
-      booking_cancellation: {
-        canonical: "cancelled",
-        fullType: "reservation.cancelled",
-        markerKey: "cancelled",
-        audience: "guest",
-      },
-      no_show: {
-        canonical: "no_show",
-        fullType: "reservation.no_show",
-        markerKey: "noShow",
-        audience: "hotel_staff",
+      confirmation: { canonical: "confirmation", moduleEvent: "booking_confirmation" },
+      booking_confirmation: { canonical: "confirmation", moduleEvent: "booking_confirmation" },
+      checked_in: { canonical: "checked_in", moduleEvent: "checked_in" },
+      checked_out: { canonical: "checked_out", moduleEvent: "checked_out" },
+      cancelled: { canonical: "cancelled", moduleEvent: "booking_cancellation" },
+      booking_cancellation: { canonical: "cancelled", moduleEvent: "booking_cancellation" },
+      no_show: { canonical: "no_show", moduleEvent: "no_show" },
+      booking_modified: { canonical: "booking_modified", moduleEvent: "booking_modified" },
+      modified: { canonical: "booking_modified", moduleEvent: "booking_modified" },
+      payment_receipt: { canonical: "payment_receipt", moduleEvent: "payment_receipt" },
+      deposit_received: { canonical: "payment_receipt", moduleEvent: "payment_receipt" },
+      pre_arrival_reminder: { canonical: "pre_arrival_reminder", moduleEvent: "pre_arrival_reminder" },
+      post_stay_feedback_request: {
+        canonical: "post_stay_feedback_request",
+        moduleEvent: "post_stay_feedback_request",
       },
     };
 
     const eventSpec = normalizedEventMap[String(rawEvent || "").trim()];
     if (!eventSpec) {
       return res.status(400).json({
-        error: "Unsupported reservation notification event. Expected confirmation, checked_in, checked_out, cancelled, or no_show.",
+        error:
+          "Unsupported reservation notification event. Expected confirmation, checked_in, checked_out, cancelled, no_show, booking_modified, payment_receipt, pre_arrival_reminder, or post_stay_feedback_request.",
       });
     }
 
@@ -3980,7 +4007,16 @@ async function startServer() {
       });
     }
 
-    const dedupeKey = `res-notify:${hotelId}:${reservationId}:${eventSpec.canonical}`;
+    const rawSuffix =
+      typeof req.body?.idempotencySuffix === "string"
+        ? req.body.idempotencySuffix.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 48)
+        : "";
+    const paymentAmount =
+      typeof req.body?.paymentAmount === "number" && Number.isFinite(req.body.paymentAmount)
+        ? req.body.paymentAmount
+        : undefined;
+
+    const dedupeKey = `res-notify:${hotelId}:${reservationId}:${eventSpec.canonical}${rawSuffix ? `:${rawSuffix}` : ""}`;
     if (inFlightTransactionalKeys.has(dedupeKey) || hasRecentTransactionalEvent(dedupeKey)) {
       return res.status(200).json({
         success: true,
@@ -4007,7 +4043,7 @@ async function startServer() {
         });
       }
 
-      // Confirm CURRENT reservation status matches the requested event
+      // Preserve exact CURRENT reservation status transition guards
       const currentStatus = String(reservation.status || "").toLowerCase();
       if (
         eventSpec.canonical === "confirmation" &&
@@ -4048,252 +4084,51 @@ async function startServer() {
         });
       }
 
-      // Persistent idempotency marker check on reservation.emailsSent.<markerKey>
-      const existingEmailsSent =
-        reservation.emailsSent && typeof reservation.emailsSent === "object"
-          ? reservation.emailsSent
-          : {};
-      if (existingEmailsSent[eventSpec.markerKey]) {
-        markTransactionalEventSent(dedupeKey);
-        return res.status(200).json({
-          success: true,
-          skipped: true,
-          reason: `Email for '${eventSpec.canonical}' was already sent at ${existingEmailsSent[eventSpec.markerKey]}.`,
-        });
-      }
+      const staffUsers =
+        eventSpec.moduleEvent === "no_show"
+          ? await queryHotelStaffUsersServerSide(hotelId, caller.idToken)
+          : undefined;
 
-      // Load this tenant hotel's own configuration & branding
-      const hotelDoc = await readFirestoreDocServerSide(`hotels/${hotelId}`, caller.idToken);
-      const prefCheck = isHotelEmailEventEnabled(hotelDoc, eventSpec.fullType, eventSpec.audience);
-      if (!prefCheck.enabled) {
-        return res.status(200).json({
-          success: true,
-          skipped: true,
-          reason: prefCheck.reason,
-        });
-      }
-
-      // Resolve recipients server-side (never from browser)
-      let recipients: string[] = [];
-      if (eventSpec.audience === "guest") {
-        let guestEmail =
-          typeof reservation.guestEmail === "string" ? reservation.guestEmail.trim() : "";
-        if (
-          !guestEmail &&
-          typeof reservation.guestId === "string" &&
-          isSafeIdentifier(reservation.guestId)
-        ) {
-          const guestDoc = await readFirestoreDocServerSide(
-            `hotels/${hotelId}/guests/${reservation.guestId}`,
-            caller.idToken
-          );
-          if (guestDoc && typeof guestDoc.email === "string") {
-            guestEmail = guestDoc.email.trim();
-          }
-        }
-        if (guestEmail && isValidEmailAddress(guestEmail)) {
-          recipients = [guestEmail];
-        }
-      } else {
-        const staffUsers = await queryHotelStaffUsersServerSide(hotelId, caller.idToken);
-        recipients = resolveHotelOperationalRecipients(hotelDoc, eventSpec.fullType, staffUsers);
-      }
-
-      if (recipients.length === 0) {
-        return res.status(200).json({
-          success: true,
-          skipped: true,
-          reason:
-            eventSpec.audience === "guest"
-              ? "Guest does not have a valid email address on file."
-              : "No authorized hotel staff recipient configured for this operational alert.",
-        });
-      }
-
-      const appUrl = getAppUrl();
-      const brand = resolveHotelBrandContext(hotelId, hotelDoc, appUrl);
-      const guestName =
-        (typeof reservation.guestName === "string" && reservation.guestName.trim()) || "Guest";
-      const roomLabel = reservation.roomNumber
-        ? `Room ${String(reservation.roomNumber).trim()}`
-        : reservation.roomTypeName
-          ? String(reservation.roomTypeName).trim()
-          : "Assigned Room";
-      const checkIn =
-        [
-          typeof reservation.checkIn === "string" ? reservation.checkIn.trim() : "",
-          typeof reservation.checkInTime === "string" && reservation.checkInTime.trim()
-            ? `(${reservation.checkInTime.trim()})`
-            : "",
-        ]
-          .filter(Boolean)
-          .join(" ") || "N/A";
-      const checkOut =
-        [
-          typeof reservation.checkOut === "string" ? reservation.checkOut.trim() : "",
-          typeof reservation.checkOutTime === "string" && reservation.checkOutTime.trim()
-            ? `(${reservation.checkOutTime.trim()})`
-            : "",
-        ]
-          .filter(Boolean)
-          .join(" ") || "N/A";
-      const bookingRef = reservationId.slice(0, 8).toUpperCase();
-
-      const rows: EmailSummaryRow[] = [
-        { label: "Booking Reference", value: bookingRef },
-        { label: "Guest Name", value: guestName },
-        { label: "Room", value: roomLabel },
-        { label: "Check-In", value: checkIn },
-        { label: "Check-Out", value: checkOut },
-      ];
-      if (reservation.nights) {
-        rows.push({ label: "Nights", value: String(reservation.nights) });
-      }
-      if (
-        (eventSpec.canonical === "checked_out" || eventSpec.canonical === "confirmation") &&
-        Number.isFinite(Number(reservation.totalAmount)) &&
-        Number(reservation.totalAmount) > 0
-      ) {
-        rows.push({
-          label: "Total Amount",
-          value: formatMoneyForEmail(reservation.totalAmount, brand.currency),
-        });
-      }
-      if (
-        eventSpec.canonical === "checked_out" &&
-        Number.isFinite(Number(reservation.paidAmount))
-      ) {
-        rows.push({
-          label: "Total Paid",
-          value: formatMoneyForEmail(reservation.paidAmount, brand.currency),
-        });
-      }
-
-      const rendered = renderMultiTenantEmail(eventSpec.fullType, brand, {
-        recipientName: eventSpec.audience === "guest" ? guestName : undefined,
-        subjectOverride: `${
-          eventSpec.canonical === "confirmation"
-            ? "Booking Confirmation"
-            : eventSpec.canonical === "checked_in"
-              ? "Check-In Confirmation"
-              : eventSpec.canonical === "checked_out"
-                ? "Thank You & Check-Out Summary"
-                : eventSpec.canonical === "cancelled"
-                  ? "Booking Cancellation"
-                  : "[Operations] Reservation No-Show"
-        } - ${brand.hotelName} (${bookingRef})`,
-        rows,
-        note:
-          eventSpec.canonical === "cancelled"
-            ? "If this cancellation was unexpected, please contact the hotel directly."
-            : eventSpec.canonical === "checked_out"
-              ? "Thank you for choosing us. We look forward to welcoming you again."
-              : undefined,
-        ctaLabel: "Hotel Portal",
-        ctaUrl: appUrl,
-      });
-
-      const logId = `em_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const nowIso = new Date().toISOString();
-
-      const result = await sendEmail({
-        to: recipients,
-        subject: rendered.subject,
-        html: rendered.html,
-        text: rendered.text,
-        fromName: rendered.fromName,
-        replyTo: rendered.replyTo,
-        idempotencyKey: dedupeKey,
-        tags: [
-          { name: "hotelId", value: hotelId },
-          { name: "eventType", value: eventSpec.fullType },
-          { name: "audience", value: eventSpec.audience },
-          { name: "reservationId", value: reservationId },
-          { name: "logId", value: logId },
-        ],
-      });
-
-      if (!result.success) {
-        // Do NOT set emailsSent marker on failure so a safe retry is possible
-        const failLog = {
-          logId,
-          hotelId,
-          eventType: eventSpec.fullType,
-          audience: eventSpec.audience,
-          recipients,
-          subject: rendered.subject,
-          reservationId,
-          guestId: typeof reservation.guestId === "string" ? reservation.guestId : undefined,
-          idempotencyKey: dedupeKey,
-          provider: "resend" as const,
-          status: (result.deliveryState === "unconfigured" ? "unconfigured" : "failed") as
-            | "unconfigured"
-            | "failed",
-          attempts: result.attempts,
-          error: result.error,
-          createdAt: nowIso,
-          updatedAt: nowIso,
-        };
-        recordEmailDeliveryLog(failLog);
-        void persistTenantEmailLogToFirestore(hotelId, logId, failLog, caller.idToken);
-        return res.status(result.statusCode || 502).json({
-          success: false,
-          deliveryState: result.deliveryState,
-          provider: result.provider,
-          error: result.error || "Failed to dispatch reservation email.",
-        });
-      }
-
-      // Mark sent in memory and persist conditional emailsSent.<markerKey> on reservation
-      markTransactionalEventSent(dedupeKey);
-      const sentAt = new Date().toISOString();
-      const updatedEmailsSent = {
-        ...existingEmailsSent,
-        [eventSpec.markerKey]: sentAt,
-      };
-      const patchRes = await patchFirestoreFieldsServerSide(
-        `hotels/${hotelId}/reservations/${reservationId}`,
-        { emailsSent: updatedEmailsSent },
-        [`emailsSent.${eventSpec.markerKey}`],
-        caller.idToken,
-        resMeta.updateTime
-      );
-      if (!patchRes.ok && patchRes.status === 412) {
-        // Retry once without updateTime precondition so marker is recorded if another field updated concurrently
-        await patchFirestoreFieldsServerSide(
-          `hotels/${hotelId}/reservations/${reservationId}`,
-          { emailsSent: updatedEmailsSent },
-          [`emailsSent.${eventSpec.markerKey}`],
-          caller.idToken
-        );
-      }
-
-      const successLog = {
-        logId,
-        hotelId,
-        eventType: eventSpec.fullType,
-        audience: eventSpec.audience,
-        recipients,
-        subject: rendered.subject,
+      // Delegate rendering, template resolution, default fallback, and dispatch to the Email Customization Module
+      const dispatchRes = await sendHotelEmail(hotelId, eventSpec.moduleEvent, {
         reservationId,
-        guestId: typeof reservation.guestId === "string" ? reservation.guestId : undefined,
-        idempotencyKey: dedupeKey,
-        provider: "resend" as const,
-        messageId: result.messageId,
-        status: "accepted_by_provider" as const,
-        attempts: result.attempts,
-        createdAt: nowIso,
-        updatedAt: sentAt,
-      };
-      recordEmailDeliveryLog(successLog);
-      void persistTenantEmailLogToFirestore(hotelId, logId, successLog, caller.idToken);
+        bearerToken: caller.idToken,
+        idempotencySuffix: rawSuffix || undefined,
+        paymentAmount,
+        staffUsers,
+        preloaded: {
+          reservation,
+          reservationUpdateTime: resMeta.updateTime,
+        },
+      });
 
+      if (dispatchRes.skipped) {
+        if (dispatchRes.deduplicated) {
+          markTransactionalEventSent(dedupeKey);
+        }
+        return res.status(200).json({
+          success: true,
+          skipped: true,
+          reason: dispatchRes.reason || "Email skipped.",
+        });
+      }
+
+      if (!dispatchRes.ok) {
+        return res.status(dispatchRes.statusCode || 502).json({
+          success: false,
+          deliveryState: dispatchRes.deliveryState || "failed",
+          provider: dispatchRes.provider || "resend",
+          error: dispatchRes.error || "Failed to dispatch reservation email.",
+        });
+      }
+
+      markTransactionalEventSent(dedupeKey);
       return res.status(200).json({
         success: true,
-        messageId: result.messageId,
-        logId,
-        deliveryState: result.deliveryState,
-        provider: result.provider,
+        messageId: dispatchRes.messageId,
+        logId: dispatchRes.logId,
+        deliveryState: dispatchRes.deliveryState || "accepted_by_provider",
+        provider: dispatchRes.provider || "resend",
       });
     } catch (err: any) {
       console.error(
@@ -5090,150 +4925,34 @@ async function startServer() {
 
     inFlightTransactionalKeys.add(dedupeKey);
     try {
-      const requestDoc = await readFirestoreDocServerSide(`trackingCodeRequests/${requestId}`);
-      if (!requestDoc) {
-        return res.status(404).json({ error: "Tracking code request not found." });
-      }
+      const dispatchRes = await sendHotelEmail("SYSTEM", "tracking_code_request_alert", {
+        requestId,
+      });
 
-      const requestStatus = String(requestDoc.status || "pending").toLowerCase();
-      if (requestStatus !== "pending") {
+      if (dispatchRes.skipped) {
         return res.status(200).json({
           success: true,
           skipped: true,
-          reason: "Tracking code request is no longer pending.",
+          reason: dispatchRes.reason || "Tracking code request alert skipped.",
         });
       }
 
-      const requestHotelId =
-        typeof requestDoc.hotelId === "string" &&
-        requestDoc.hotelId !== "unknown" &&
-        isSafeIdentifier(requestDoc.hotelId)
-          ? requestDoc.hotelId
-          : "";
-
-      const [systemSettings, requestHotelDoc] = await Promise.all([
-        readFirestoreDocServerSide("system/settings"),
-        requestHotelId
-          ? readFirestoreDocServerSide(`hotels/${requestHotelId}`)
-          : Promise.resolve(null),
-      ]);
-
-      const recipients = resolveTrackingCodeAlertRecipients(systemSettings, requestHotelDoc);
-      if (recipients.length === 0) {
-        return res.status(200).json({
-          success: true,
-          skipped: true,
-          reason: "No valid platform or hotel tracking code alert recipient configured.",
-        });
-      }
-
-      const appUrl = getAppUrl();
-      const platformBrand = resolvePlatformBrandContext(systemSettings, appUrl);
-      const isRenewal = String(requestDoc.type || "").toLowerCase() === "renewal";
-      const reqHotelName =
-        (typeof requestDoc.hotelName === "string" && requestDoc.hotelName.trim()) ||
-        (requestHotelDoc && typeof requestHotelDoc.name === "string" && requestHotelDoc.name.trim()) ||
-        "Prospective Hotel";
-
-      const rendered = renderMultiTenantEmail("tracking_code.request_submitted", platformBrand, {
-        title: isRenewal ? "Subscription Renewal Code Request" : "New Tracking Code Request",
-        subjectOverride: `[Platform Admin] ${
-          isRenewal ? "Renewal Code Request" : "New Tracking Code Request"
-        } - ${reqHotelName}`,
-        intro: isRenewal
-          ? `An existing hotel organization (${reqHotelName}) submitted a subscription renewal code request.`
-          : `A new hotel registration tracking code request has been submitted for ${reqHotelName}.`,
-        rows: [
-          { label: "Request ID", value: requestId },
-          { label: "Request Type", value: isRenewal ? "Subscription Renewal" : "New Hotel Registration" },
-          { label: "Hotel Name", value: reqHotelName },
-          ...(requestHotelId ? [{ label: "Hotel ID", value: requestHotelId }] : []),
-          {
-            label: "Requester Email",
-            value:
-              (typeof requestDoc.email === "string" && requestDoc.email.trim()) || "Not provided",
-          },
-          ...(typeof requestDoc.phone === "string" && requestDoc.phone.trim()
-            ? [{ label: "Phone", value: requestDoc.phone.trim() }]
-            : []),
-          ...(typeof requestDoc.plan === "string" && requestDoc.plan.trim()
-            ? [{ label: "Requested Plan", value: requestDoc.plan.trim() }]
-            : []),
-          ...(typeof requestDoc.message === "string" && requestDoc.message.trim()
-            ? [{ label: "Notes", value: requestDoc.message.trim() }]
-            : []),
-          ...(typeof requestDoc.timestamp === "string" && requestDoc.timestamp.trim()
-            ? [{ label: "Submitted At", value: requestDoc.timestamp.trim() }]
-            : []),
-        ],
-        ctaLabel: "Review in Admin Portal",
-        ctaUrl: appUrl,
-      });
-
-      const requesterReplyTo =
-        typeof requestDoc.email === "string" && isValidEmailAddress(requestDoc.email.trim())
-          ? requestDoc.email.trim()
-          : platformBrand.replyTo;
-
-      const logId = `em_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const nowIso = new Date().toISOString();
-
-      const result = await sendEmail({
-        to: recipients,
-        subject: rendered.subject,
-        html: rendered.html,
-        text: rendered.text,
-        fromName: rendered.fromName,
-        replyTo: requesterReplyTo,
-        idempotencyKey: dedupeKey,
-        tags: [
-          { name: "hotelId", value: requestHotelId || "SYSTEM" },
-          { name: "eventType", value: "tracking_code.request_submitted" },
-          { name: "audience", value: "platform_superadmin" },
-          { name: "logId", value: logId },
-        ],
-      });
-
-      const logEntry = {
-        logId,
-        hotelId: requestHotelId || "SYSTEM",
-        eventType: "tracking_code.request_submitted",
-        audience: "platform_superadmin" as const,
-        recipients,
-        subject: rendered.subject,
-        entityId: requestId,
-        idempotencyKey: dedupeKey,
-        provider: "resend" as const,
-        messageId: result.messageId,
-        status: (result.success
-          ? "accepted_by_provider"
-          : result.deliveryState === "unconfigured"
-            ? "unconfigured"
-            : "failed") as "accepted_by_provider" | "unconfigured" | "failed",
-        attempts: result.attempts,
-        error: result.error,
-        createdAt: nowIso,
-        updatedAt: new Date().toISOString(),
-      };
-      recordEmailDeliveryLog(logEntry);
-      void persistTenantEmailLogToFirestore(requestHotelId || "SYSTEM", logId, logEntry);
-
-      if (!result.success) {
-        return res.status(result.statusCode || 502).json({
+      if (!dispatchRes.ok) {
+        return res.status(dispatchRes.statusCode || 502).json({
           success: false,
-          deliveryState: result.deliveryState,
-          provider: result.provider,
-          error: result.error || "Failed to dispatch admin alert email.",
+          deliveryState: dispatchRes.deliveryState,
+          provider: dispatchRes.provider,
+          error: dispatchRes.error || "Failed to dispatch admin alert email.",
         });
       }
 
       markTransactionalEventSent(dedupeKey);
       return res.status(200).json({
         success: true,
-        messageId: result.messageId,
-        logId,
-        deliveryState: result.deliveryState,
-        provider: result.provider,
+        messageId: dispatchRes.messageId,
+        logId: dispatchRes.logId,
+        deliveryState: dispatchRes.deliveryState,
+        provider: dispatchRes.provider,
       });
     } catch (err: any) {
       console.error(
@@ -5374,6 +5093,15 @@ async function startServer() {
       emailServiceReady: true,
       timestamp: new Date().toISOString()
     });
+  });
+
+  // Mount Multi-Tenant Email Customization Module routes (Hotel Admin & SuperAdmin only)
+  mountEmailCustomizationRoutes(app, {
+    requireAuth,
+    extractBearerToken: (req) => {
+      const h = String(req.headers.authorization || "");
+      return h.startsWith("Bearer ") ? h.slice(7).trim() : null;
+    },
   });
 
   // API routes FIRST

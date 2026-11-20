@@ -61,6 +61,10 @@ export type Permission =
   | 'view_settings'
   | 'edit_settings'
 
+  // --- EMAIL TEMPLATES & BRANDING ---
+  | 'view_email_templates'
+  | 'manage_email_templates'
+
   // --- USER MANAGEMENT ---
   | 'view_users'
   | 'create_users'
@@ -345,6 +349,15 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { id: 'manage_roles_admin', label: 'Build & Manage Custom Roles', description: 'Create, clone, and edit roles' },
       { id: 'manage_permissions_admin', label: 'Manage Permissions', description: 'Granular permissions configuration' },
     ]
+  },
+  {
+    id: 'email_templates',
+    label: 'Email Templates & Branding',
+    description: 'Guest transactional email templates, sender branding, event toggles, and image library',
+    permissions: [
+      { id: 'view_email_templates', label: 'View Email Templates', description: 'Inspect hotel email templates, preview layouts, and view email settings' },
+      { id: 'manage_email_templates', label: 'Manage Email Templates & Settings', description: 'Edit, publish, toggle templates, update sender settings, and manage email images' },
+    ]
   }
 ];
 
@@ -432,21 +445,21 @@ export const SYSTEM_ROLE_TEMPLATES: Record<string, { name: string; description: 
     name: 'Hotel Manager',
     description: 'Comprehensive property supervision across operations, staff, and finance',
     permissions: [
-      ...ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected'].includes(p))
+      ...ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected', 'view_email_templates', 'manage_email_templates'].includes(p))
     ]
   },
   generalManager: {
     name: 'General Manager',
     description: 'Full operational, administrative, and strategic authority over the hotel property',
     permissions: [
-      ...ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected'].includes(p))
+      ...ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected', 'view_email_templates', 'manage_email_templates'].includes(p))
     ]
   },
   hotelOwner: {
     name: 'Hotel Owner',
     description: 'Executive ownership role with complete configuration and financial authority',
     permissions: [
-      ...ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected'].includes(p))
+      ...ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected', 'view_email_templates', 'manage_email_templates'].includes(p))
     ]
   }
 };
@@ -605,6 +618,10 @@ const PERMISSION_FIELD_PATH_MAP: Record<string, { modules: string[]; actions: st
   edit_settings: { modules: ['settings'], actions: ['edit', 'editSettings'] },
   edit_hotel_settings: { modules: ['settings'], actions: ['editHotelSettings', 'edit'] },
   manage_roles: { modules: ['settings'], actions: ['manageRoles', 'roles'] },
+
+  // Email Templates & Branding
+  view_email_templates: { modules: ['email_templates', 'emailTemplates'], actions: ['view', 'read', 'viewEmailTemplates'] },
+  manage_email_templates: { modules: ['email_templates', 'emailTemplates'], actions: ['manage', 'edit', 'publish', 'manageEmailTemplates'] },
 
   // Dashboard
   view_dashboard: { modules: ['dashboard'], actions: ['view', 'viewDashboard', 'read'] },
@@ -852,6 +869,10 @@ const MODULE_ACTION_PERMISSIONS: Record<string, Permission[]> = {
     'edit_settings', 
     'edit_hotel_settings', 
     'manage_roles'
+  ],
+  email_templates: [
+    'view_email_templates',
+    'manage_email_templates'
   ]
 };
 

@@ -14,7 +14,7 @@ import {
   isRoomRestaurantPostingBlocked,
   RESTAURANT_POSTING_BLOCKED_MESSAGE,
 } from '../utils/restaurantPostingGuard';
-import { notifyPlatformEvent } from './transactionalEmailClient';
+import { notifyPlatformEvent, notifyReservationEmailEvent } from './transactionalEmailClient';
 
 /**
  * Distinguishes corporate account credits (corporate payments, bulk settlements, deposits, or adjustments)
@@ -597,6 +597,27 @@ export const postToLedger = async (
           reason: (entry as any).refundReason || entry.description,
           reference: entry.referenceCode || postedIds[0],
         },
+      });
+    } catch {
+      // Non-blocking
+    }
+  }
+
+  // Additive: Trigger customizable payment_receipt email for direct reservation payment credits
+  if (
+    entry.type === 'credit' &&
+    entry.category === 'payment' &&
+    entry.amount > 0 &&
+    reservationId &&
+    reservationId !== 'CORPORATE_SETTLEMENT' &&
+    reservationId !== 'BULK_SETTLEMENT' &&
+    !(entry as any).fromGuestDeposit &&
+    postedIds[0]
+  ) {
+    try {
+      void notifyReservationEmailEvent(hotelId, reservationId, 'payment_receipt', {
+        idempotencySuffix: postedIds[0],
+        paymentAmount: entry.amount,
       });
     } catch {
       // Non-blocking

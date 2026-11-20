@@ -46,6 +46,7 @@ import { AccountSuspendedModal } from './components/AccountSuspendedModal';
 import { ResetPasswordPage } from './components/ResetPasswordPage';
 import { SetPasswordPage } from './components/SetPasswordPage';
 import { LandingLoadingScreen } from './components/LandingLoadingScreen';
+import { EmailTemplatesPage } from './modules/emailCustomization/ui/EmailTemplatesPage';
 
 function DashboardRoute() {
   const { profile } = useAuth();
@@ -74,10 +75,11 @@ function DashboardRoute() {
     finance: '/finance',
     reports: '/reports',
     staff: '/staff',
-    settings: '/settings'
+    settings: '/settings',
+    email_templates: '/email-templates'
   };
 
-  const moduleCheckOrder = ['reservations', 'frontDesk', 'rooms', 'housekeeping', 'kitchen', 'inventory', 'maintenance', 'guests', 'corporate', 'finance', 'reports', 'staff', 'settings'];
+  const moduleCheckOrder = ['reservations', 'frontDesk', 'rooms', 'housekeeping', 'kitchen', 'inventory', 'maintenance', 'guests', 'corporate', 'finance', 'reports', 'staff', 'settings', 'email_templates'];
   for (const mod of moduleCheckOrder) {
     if (canAccessPMSModule(mod) && moduleRoutes[mod]) {
       return <Navigate to={moduleRoutes[mod]} replace />;
@@ -378,6 +380,11 @@ function AppContent() {
             <Route path="/admin-settings" element={
               <PermissionGuard moduleId="settings" showError>
                 <AdminSettings />
+              </PermissionGuard>
+            } />
+            <Route path="/email-templates" element={
+              <PermissionGuard moduleId="email_templates" showError>
+                <EmailTemplatesPage />
               </PermissionGuard>
             } />
             <Route path="/promotions" element={

@@ -1854,6 +1854,22 @@ export function FrontDesk() {
       );
 
       toast.success('Reservation updated successfully');
+
+      // Additive: Trigger booking_modified email ONLY when stay dates actually changed
+      if (
+        editForm.checkIn !== editingReservation.checkIn ||
+        editForm.checkOut !== editingReservation.checkOut
+      ) {
+        try {
+          const modSuffix = `${editForm.checkIn}_${editForm.checkOut}`.replace(/[^a-zA-Z0-9_-]/g, '');
+          void notifyReservationEmailEvent(hotel.id, editingReservation.id, 'booking_modified', {
+            idempotencySuffix: modSuffix,
+          });
+        } catch {
+          // Non-blocking
+        }
+      }
+
       setEditingReservation(null);
     } catch (err: any) {
       console.error("Edit reservation error:", err.message || safeStringify(err));

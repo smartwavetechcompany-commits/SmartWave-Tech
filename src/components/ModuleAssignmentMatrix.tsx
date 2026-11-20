@@ -22,10 +22,13 @@ import {
   Sparkles,
   Shield,
   Layers,
-  Check
+  Check,
+  Mail,
+  Lock
 } from 'lucide-react';
 import { CustomRole } from '../types';
 import { Permission, SYSTEM_ROLE_TEMPLATES, BASE_ROLE_PERMISSIONS } from '../utils/permissions';
+import { useAuth } from '../contexts/AuthContext';
 import { cn } from '../utils';
 
 export interface ModuleDefinition {
@@ -288,6 +291,18 @@ export const PMS_MODULES: ModuleDefinition[] = [
       { id: 'edit_settings', name: 'Edit Operational Policies', description: 'Configure room block policies, refunds, and taxes' },
       { id: 'manage_roles', name: 'Manage Custom Roles', description: 'Create, modify, and delete custom RBAC roles' },
     ]
+  },
+  {
+    id: 'email_templates',
+    name: 'Email Templates & Branding',
+    description: 'Guest transactional email templates, sender settings, per-event toggles, and email image library (Admin-managed)',
+    icon: Mail,
+    color: 'emerald',
+    primaryPermissions: ['view_email_templates', 'manage_email_templates'],
+    granularPermissions: [
+      { id: 'view_email_templates', name: 'View Email Templates', description: 'View hotel email templates, live previews, and email settings (read-only)' },
+      { id: 'manage_email_templates', name: 'Manage Email Templates & Settings', description: 'Edit, publish, toggle, reset templates, update sender settings, and manage email images' },
+    ]
   }
 ];
 
@@ -333,12 +348,26 @@ export function ModuleAssignmentMatrix({
   onRoleDescriptionChange,
   disabled = false
 }: ModuleAssignmentMatrixProps) {
+  const { profile } = useAuth();
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Only Hotel Admin, Super Admin, or Admin accounts may assign or revoke Email Templates permissions
+  const canAssignEmailModule = Boolean(
+    profile &&
+      (profile.role === 'superAdmin' ||
+        profile.role === 'hotelAdmin' ||
+        (profile.role as string) === 'admin' ||
+        profile.staffRole === 'admin')
+  );
+
+  const isEmailModulePermission = (permId: string) =>
+    permId === 'view_email_templates' || permId === 'manage_email_templates';
 
   // Toggle all permissions for a specific module
   const toggleModule = (module: ModuleDefinition) => {
     if (disabled) return;
+    if (module.id === 'email_templates' && !canAssignEmailModule) return;
     const allModulePerms = [
       ...module.primaryPermissions,
       ...module.granularPermissions.map(p => p.id)
@@ -358,6 +387,7 @@ export function ModuleAssignmentMatrix({
   // Toggle a single granular permission
   const togglePermission = (permId: Permission) => {
     if (disabled) return;
+    if (isEmailModulePermission(permId) && !canAssignEmailModule) return;
     if (selectedPermissions.includes(permId)) {
       onChange(selectedPermissions.filter(p => p !== permId));
     } else {
@@ -422,20 +452,24 @@ export function ModuleAssignmentMatrix({
 
       case 'manager':
         targetPerms = PMS_MODULES
-          .filter(m => m.id !== 'settings')
+          .filter(m => m.id !== 'settings' && m.id !== 'email_templates')
           .flatMap(m => [...m.primaryPermissions, ...m.granularPermissions.map(p => p.id)])
           .filter(p => p !== 'view_total_revenue_collected');
         break;
 
       case 'all':
-        targetPerms = PMS_MODULES.flatMap(m => [
-          ...m.primaryPermissions,
-          ...m.granularPermissions.map(p => p.id)
-        ]);
+        targetPerms = PMS_MODULES
+          .filter(m => canAssignEmailModule || m.id !== 'email_templates')
+          .flatMap(m => [
+            ...m.primaryPermissions,
+            ...m.granularPermissions.map(p => p.id)
+          ]);
         break;
 
       case 'clear':
-        targetPerms = [];
+        targetPerms = canAssignEmailModule
+          ? []
+          : selectedPermissions.filter(isEmailModulePermission);
         break;
     }
 
@@ -604,6 +638,7 @@ export function ModuleAssignmentMatrix({
       <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
         {filteredModules.map((module) => {
           const Icon = module.icon;
+          const isLockedModule = module.id === 'email_templates' && !canAssignEmailModule;
           const allModulePerms = [
             ...module.primaryPermissions,
             ...module.granularPermissions.map(p => p.id)
@@ -618,6 +653,7 @@ export function ModuleAssignmentMatrix({
               key={module.id}
               className={cn(
                 "rounded-xl border transition-all overflow-hidden",
+                isLockedModule ? "opacity-60" : "",
                 isFullyAssigned
                   ? "bg-zinc-900/90 border-emerald-500/40 shadow-sm shadow-emerald-950/20"
                   : isPartiallyAssigned
@@ -631,9 +667,19 @@ export function ModuleAssignmentMatrix({
                   {/* Master Checkbox */}
                   <button
                     type="button"
+                    disabled={disabled || isLockedModule}
                     onClick={() => toggleModule(module)}
-                    className="p-0.5 rounded text-zinc-400 hover:text-emerald-400 focus:outline-none shrink-0"
-                    title={isFullyAssigned ? "Revoke module access" : "Grant module access"}
+                    className={cn(
+                      "p-0.5 rounded text-zinc-400 focus:outline-none shrink-0",
+                      isLockedModule ? "cursor-not-allowed" : "hover:text-emerald-400"
+                    )}
+                    title={
+                      isLockedModule
+                        ? "Only Hotel Administrators can assign or modify Email Templates access"
+                        : isFullyAssigned
+                          ? "Revoke module access"
+                          : "Grant module access"
+                    }
                   >
                     {isFullyAssigned ? (
                       <div className="w-5 h-5 rounded bg-emerald-500 text-zinc-950 flex items-center justify-center font-bold">
@@ -674,6 +720,12 @@ export function ModuleAssignmentMatrix({
                           {module.name}
                         </span>
 
+                        {isLockedModule && (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-400 uppercase tracking-wider shrink-0">
+                            <Lock size={9} /> Admin Only
+                          </span>
+                        )}
+
                         {isFullyAssigned ? (
                           <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 uppercase tracking-wider shrink-0">
                             Full Access
@@ -711,13 +763,15 @@ export function ModuleAssignmentMatrix({
                 <div className="px-4 pb-3.5 pt-2 bg-zinc-950/80 border-t border-zinc-800/80 space-y-2">
                   <div className="text-[10px] uppercase font-bold tracking-wider text-zinc-500 flex items-center justify-between">
                     <span>Granular Capabilities ({assignedPermsInModule.length}/{allModulePerms.length})</span>
-                    <button
-                      type="button"
-                      onClick={() => toggleModule(module)}
-                      className="text-emerald-400 hover:text-emerald-300 text-[10px] lowercase"
-                    >
-                      {isFullyAssigned ? 'uncheck module' : 'grant all in module'}
-                    </button>
+                    {!isLockedModule && (
+                      <button
+                        type="button"
+                        onClick={() => toggleModule(module)}
+                        className="text-emerald-400 hover:text-emerald-300 text-[10px] lowercase"
+                      >
+                        {isFullyAssigned ? 'uncheck module' : 'grant all in module'}
+                      </button>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -727,7 +781,8 @@ export function ModuleAssignmentMatrix({
                         <label
                           key={perm.id}
                           className={cn(
-                            "flex items-start gap-2.5 p-2 rounded-lg cursor-pointer border text-xs transition-colors",
+                            "flex items-start gap-2.5 p-2 rounded-lg border text-xs transition-colors",
+                            isLockedModule ? "cursor-not-allowed" : "cursor-pointer",
                             isGranted 
                               ? "bg-emerald-500/10 border-emerald-500/35 text-emerald-800 dark:text-emerald-200" 
                               : "bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:border-zinc-700"
@@ -735,6 +790,7 @@ export function ModuleAssignmentMatrix({
                         >
                           <input
                             type="checkbox"
+                            disabled={disabled || isLockedModule}
                             checked={isGranted}
                             onChange={() => togglePermission(perm.id)}
                             className="mt-0.5 rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-emerald-500"

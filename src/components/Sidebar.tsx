@@ -63,6 +63,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
     { icon: FileText, label: 'DSS Report', path: '/dss-report', capability: 'view_reports', module: 'reports', pmsModuleId: 'reports' },
     { icon: UserCog, label: t('sidebar.staff'), path: '/staff', capability: 'manage_staff', module: 'staff', pmsModuleId: 'staff' },
     { icon: ShieldCheck, label: 'Admin Controls', path: '/admin-settings', capability: 'edit_hotel_settings', module: 'settings', pmsModuleId: 'settings' },
+    { icon: Mail, label: 'Email Templates', path: '/email-templates', capability: 'view_email_templates', module: 'email_templates', pmsModuleId: 'email_templates' },
     { icon: Tag, label: 'Discounts & Promos', path: '/promotions', capability: 'edit_hotel_settings', module: 'settings', pmsModuleId: 'settings' },
     { icon: ClipboardList, label: 'Activity Logs', path: '/activity-logs', capability: 'view_activity_logs', module: 'staff', pmsModuleId: 'staff' },
     { icon: ShieldCheck, label: 'Super Admin', path: '/super-admin', capability: 'access_super_admin' },
@@ -78,11 +79,11 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
     }
 
     // 2. Hotel Admins automatically see every module within their hotel
-    if (profile.role === 'hotelAdmin' || profile.staffRole === 'admin') {
+    if (profile.role === 'hotelAdmin' || (profile.role as string) === 'admin' || profile.staffRole === 'admin') {
       return item.capability !== 'access_super_admin';
     }
 
-    // SuperAdmin portal is never shown to regular staff
+    // SuperAdmin portal is never shown to non-superAdmin users
     if (item.capability === 'access_super_admin') return false;
 
     // 3. Regular staff: Module Visibility (Rule 1)

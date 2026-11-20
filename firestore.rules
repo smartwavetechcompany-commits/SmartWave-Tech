@@ -147,6 +147,40 @@ service cloud.firestore {
       );
     }
 
+    function canManageEmailTemplates(hotelId) {
+      let data = getUserData();
+      let roleId = data != null ? data.get('customRoleId', '') : '';
+      let hasCustomRoleDoc = roleId is string && roleId != '' && exists(/databases/$(database)/documents/hotels/$(hotelId)/customRoles/$(roleId));
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        (sameHotel(hotelId) && data != null && data.get('status', 'active') != "suspended" && data.get('status', 'active') != "inactive" && (
+          data.role == "hotelAdmin" ||
+          data.role == "admin" ||
+          data.role == "hotel_admin" ||
+          data.get('staffRole', '') == "admin" ||
+          (hasCustomRoleDoc
+            ? customRoleHasPermission(hotelId, roleId, 'manage_email_templates')
+            : (data.get('permissions', []) is list && data.get('permissions', []).hasAny(['manage_email_templates', 'all'])))
+        ))
+      );
+    }
+
+    function canViewEmailTemplates(hotelId) {
+      let data = getUserData();
+      let roleId = data != null ? data.get('customRoleId', '') : '';
+      let hasCustomRoleDoc = roleId is string && roleId != '' && exists(/databases/$(database)/documents/hotels/$(hotelId)/customRoles/$(roleId));
+      return canManageEmailTemplates(hotelId) || (
+        isAuthenticated() &&
+        sameHotel(hotelId) &&
+        data != null &&
+        data.get('status', 'active') != "suspended" &&
+        data.get('status', 'active') != "inactive" &&
+        (hasCustomRoleDoc
+          ? customRoleHasPermission(hotelId, roleId, 'view_email_templates')
+          : (data.get('permissions', []) is list && data.get('permissions', []).hasAny(['view_email_templates', 'manage_email_templates', 'all'])))
+      );
+    }
+
     function roomHasPostingBlocked(hotelId, roomId) {
       return roomId is string &&
         roomId != '' &&
@@ -302,6 +336,24 @@ service cloud.firestore {
         allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
         allow create: if true;
         allow update, delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || hasStaffManagementPermission()));
+      }
+
+      // Email Customization: Templates (Hotel Admin / Admin / RBAC-assigned own hotel)
+      match /emailTemplates/{eventType} {
+        allow read: if canViewEmailTemplates(hotelId);
+        allow write: if canManageEmailTemplates(hotelId);
+      }
+
+      // Email Customization: Per-Hotel Email Settings (Hotel Admin / Admin / RBAC-assigned own hotel)
+      match /emailSettings/{docId} {
+        allow read: if canViewEmailTemplates(hotelId);
+        allow write: if canManageEmailTemplates(hotelId);
+      }
+
+      // Email Customization: Per-Hotel Email Image Library Metadata (Hotel Admin / Admin / RBAC-assigned own hotel)
+      match /emailImages/{imageId} {
+        allow read: if canViewEmailTemplates(hotelId);
+        allow write: if canManageEmailTemplates(hotelId);
       }
 
       // User Settings & Preferences

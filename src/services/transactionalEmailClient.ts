@@ -5,7 +5,9 @@ export type ReservationNotifyEvent =
   | 'checked_in'
   | 'checked_out'
   | 'cancelled'
-  | 'no_show';
+  | 'no_show'
+  | 'booking_modified'
+  | 'payment_receipt';
 
 // Backward-compatible alias for earlier callers
 export type ReservationEmailEventType =
@@ -54,7 +56,8 @@ function normalizeReservationEvent(eventType: ReservationEmailEventType): Reserv
 export async function notifyReservationEmailEvent(
   hotelId: string,
   reservationId: string,
-  eventType: ReservationEmailEventType
+  eventType: ReservationEmailEventType,
+  options?: { idempotencySuffix?: string; paymentAmount?: number }
 ): Promise<void> {
   if (!hotelId || !reservationId) return;
 
@@ -75,6 +78,8 @@ export async function notifyReservationEmailEvent(
       body: JSON.stringify({
         hotelId,
         event: normalizedEvent,
+        ...(options?.idempotencySuffix ? { idempotencySuffix: options.idempotencySuffix } : {}),
+        ...(typeof options?.paymentAmount === 'number' ? { paymentAmount: options.paymentAmount } : {}),
       }),
     });
 

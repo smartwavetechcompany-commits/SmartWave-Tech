@@ -1,0 +1,44 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Email Customization Images:
+    // - Public HTTPS read so guest email clients (Gmail, Outlook, Apple Mail) can load images.
+    // - Write & delete strictly limited to authenticated Hotel Admins of that hotel (or SuperAdmin).
+    // - Images only (PNG, JPEG, WebP), max 2 MB.
+    match /hotels/{hotelId}/email-images/{fileName} {
+      allow read: if true;
+      allow write: if request.auth != null
+        && request.resource != null
+        && request.resource.size <= 2 * 1024 * 1024
+        && request.resource.contentType in ['image/png', 'image/jpeg', 'image/webp']
+        && (
+          firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'superAdmin' ||
+          (
+            (firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.hotelId == hotelId ||
+             firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.hotel_id == hotelId) &&
+            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('status', 'active') != 'suspended' &&
+            (
+              firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role in ['hotelAdmin', 'admin', 'hotel_admin'] ||
+              firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('staffRole', '') == 'admin' ||
+              (firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('permissions', []) is list &&
+               firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('permissions', []).hasAny(['manage_email_templates', 'all']))
+            )
+          )
+        );
+      allow delete: if request.auth != null && (
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'superAdmin' ||
+        (
+          (firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.hotelId == hotelId ||
+           firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.hotel_id == hotelId) &&
+          firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('status', 'active') != 'suspended' &&
+          (
+            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role in ['hotelAdmin', 'admin', 'hotel_admin'] ||
+            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('staffRole', '') == 'admin' ||
+            (firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('permissions', []) is list &&
+             firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('permissions', []).hasAny(['manage_email_templates', 'all']))
+          )
+        )
+      );
+    }
+  }
+}

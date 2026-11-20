@@ -15,7 +15,7 @@ import {
 } from './ledgerService';
 import { getReservationLiveBalance } from '../utils/billingEngine';
 import { hasPermission } from '../utils/permissions';
-import { notifyPlatformEvent } from './transactionalEmailClient';
+import { notifyPlatformEvent, notifyReservationEmailEvent } from './transactionalEmailClient';
 
 export const GUEST_DEPOSIT_PERMISSION_DENIED_MESSAGE =
   'Unauthorized: You do not have the "Deposit Money to Guest Account" permission.';
@@ -497,6 +497,16 @@ export async function applyGuestDepositToReservation(
   ).catch(() => {});
 
   await recalculateReservationAccountFromLedger(hotelId, reservationId).catch(() => {});
+
+  // Additive: Send payment/deposit receipt email without affecting deposit settlement
+  try {
+    void notifyReservationEmailEvent(hotelId, reservationId, 'payment_receipt', {
+      idempotencySuffix: txRef.id,
+      paymentAmount: finalAmount,
+    });
+  } catch {
+    // Non-blocking
+  }
 
   return { transaction: txRecord, balanceBefore, balanceAfter };
 }
