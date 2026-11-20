@@ -1,11 +1,34 @@
 import React, { useMemo, useState } from "react";
-import { AlertCircle, CheckCircle2, Lock, Save } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowDown,
+  ArrowUp,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  CopyCheck,
+  Eye,
+  EyeOff,
+  Link2,
+  Loader2,
+  Lock,
+  Plus,
+  RotateCcw,
+  Save,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   SUPPORTED_EMAIL_LANGUAGES,
   type DateFormatPreset,
+  type EmailBlock,
+  type FooterNavLinkItem,
+  type HotelDefaultLinks,
   type HotelEmailSettings,
+  type LocalizedLinkValue,
+  type SupportedEmailLanguage,
 } from "../shared/types";
+import { buildDefaultFooterBlocks } from "../shared/presets";
 import {
   formatEmailCurrency,
   formatEmailDate,
@@ -14,6 +37,8 @@ import {
   validateHotelEmailSettings,
 } from "../shared/validation";
 import { emailCustomizationApi } from "./apiClient";
+import { createEmailBlock } from "./components/BlockEditor";
+import { LinkDestinationField } from "./LinkControls";
 
 interface EmailSettingsPanelProps {
   hotelId?: string;
@@ -22,6 +47,7 @@ interface EmailSettingsPanelProps {
   verifiedFromAddress: string;
   currencyCode?: string;
   onSaved: (next: HotelEmailSettings) => void;
+  onAppliedDefaultFooter?: () => void;
 }
 
 const COMMON_TIMEZONES = [
@@ -46,6 +72,91 @@ const DATE_FORMATS: { id: DateFormatPreset; label: string }[] = [
   { id: "mm_slash_dd_slash_yyyy", label: "MM/DD/YYYY (11/24/2026)" },
 ];
 
+const DEFAULT_LINK_FIELDS: Array<{
+  key: keyof HotelDefaultLinks;
+  label: string;
+  variable: string;
+  placeholder: string;
+}> = [
+  {
+    key: "website",
+    label: "Hotel Website",
+    variable: "{{hotel_website}}",
+    placeholder: "https://yourhotel.com",
+  },
+  {
+    key: "booking",
+    label: "Booking Page",
+    variable: "{{booking_link}}",
+    placeholder: "https://yourhotel.com/book",
+  },
+  {
+    key: "portal",
+    label: "Hotel Guest Portal",
+    variable: "{{portal_link}}",
+    placeholder: "https://yourhotel.com/portal",
+  },
+  {
+    key: "review",
+    label: "Guest Review Page",
+    variable: "{{review_link}}",
+    placeholder: "https://yourhotel.com/review",
+  },
+  {
+    key: "directions",
+    label: "Directions / Map",
+    variable: "{{directions_link}}",
+    placeholder: "https://maps.google.com/?q=Your+Hotel",
+  },
+  {
+    key: "wifiGuide",
+    label: "Wi-Fi & Guest Guide",
+    variable: "{{wifi_guide_link}}",
+    placeholder: "https://yourhotel.com/guest-guide",
+  },
+  {
+    key: "socialInstagram",
+    label: "Instagram",
+    variable: "{{social_instagram}}",
+    placeholder: "https://instagram.com/yourhotel",
+  },
+  {
+    key: "socialFacebook",
+    label: "Facebook",
+    variable: "{{social_facebook}}",
+    placeholder: "https://facebook.com/yourhotel",
+  },
+  {
+    key: "socialX",
+    label: "X / Twitter",
+    variable: "{{social_x}}",
+    placeholder: "https://x.com/yourhotel",
+  },
+  {
+    key: "socialLinkedin",
+    label: "LinkedIn",
+    variable: "{{social_linkedin}}",
+    placeholder: "https://linkedin.com/company/yourhotel",
+  },
+];
+
+function buildStandardFooterNavLinks(lang: SupportedEmailLanguage): FooterNavLinkItem[] {
+  if (lang === "de") {
+    return [
+      { id: "fnav_de_website", label: "Webseite", url: "{{hotel_website}}", openInNewTab: true },
+      { id: "fnav_de_directions", label: "Anfahrt", url: "{{directions_link}}", openInNewTab: true },
+      { id: "fnav_de_contact", label: "Kontakt", url: "mailto:{{hotel_email}}" },
+      { id: "fnav_de_portal", label: "Gästeportal", url: "{{portal_link}}", openInNewTab: true },
+    ];
+  }
+  return [
+    { id: "fnav_en_website", label: "Hotel Website", url: "{{hotel_website}}", openInNewTab: true },
+    { id: "fnav_en_directions", label: "Directions", url: "{{directions_link}}", openInNewTab: true },
+    { id: "fnav_en_contact", label: "Contact Us", url: "mailto:{{hotel_email}}" },
+    { id: "fnav_en_portal", label: "Guest Portal", url: "{{portal_link}}", openInNewTab: true },
+  ];
+}
+
 export function EmailSettingsPanel({
   hotelId,
   initialSettings,
@@ -53,12 +164,204 @@ export function EmailSettingsPanel({
   verifiedFromAddress,
   currencyCode = "NGN",
   onSaved,
+  onAppliedDefaultFooter,
 }: EmailSettingsPanelProps) {
   const [form, setForm] = useState<HotelEmailSettings>(initialSettings);
   const [saving, setSaving] = useState(false);
+  const [applyingFooter, setApplyingFooter] = useState(false);
+  const [applyingLinks, setApplyingLinks] = useState(false);
+  const [footerLang, setFooterLang] = useState<SupportedEmailLanguage>(
+    initialSettings.defaultLanguage || "en"
+  );
+  const [navLang, setNavLang] = useState<SupportedEmailLanguage>(
+    initialSettings.defaultLanguage || "en"
+  );
+  const [expandedOverrides, setExpandedOverrides] = useState<Record<string, boolean>>({});
   const [serverErrors, setServerErrors] = useState<string[]>([]);
 
   const validationIssues = useMemo(() => validateHotelEmailSettings(form), [form]);
+
+  const currentFooterBlocks: EmailBlock[] = form.defaultFooterBlocks?.[footerLang] || [];
+  const hasAnyDefaultFooter = Boolean(
+    (form.defaultFooterBlocks?.en && form.defaultFooterBlocks.en.length > 0) ||
+      (form.defaultFooterBlocks?.de && form.defaultFooterBlocks.de.length > 0)
+  );
+
+  const currentFooterNavLinks: FooterNavLinkItem[] = form.defaultFooterNavLinks?.[navLang] || [];
+  const hasAnyDefaultFooterNav = Boolean(
+    (form.defaultFooterNavLinks?.en && form.defaultFooterNavLinks.en.length > 0) ||
+      (form.defaultFooterNavLinks?.de && form.defaultFooterNavLinks.de.length > 0)
+  );
+
+  const updateDefaultLink = (
+    key: keyof HotelDefaultLinks,
+    field: "defaultUrl" | "en" | "de",
+    value: string
+  ) => {
+    setForm((prev) => {
+      const prevMap: HotelDefaultLinks = prev.defaultLinks || {};
+      const existing: LocalizedLinkValue = prevMap[key] || {};
+      const nextEntry: LocalizedLinkValue =
+        field === "defaultUrl"
+          ? { ...existing, defaultUrl: value }
+          : {
+              ...existing,
+              byLanguage: {
+                ...(existing.byLanguage || {}),
+                [field]: value,
+              },
+            };
+      return {
+        ...prev,
+        defaultLinks: {
+          ...prevMap,
+          [key]: nextEntry,
+        },
+      };
+    });
+  };
+
+  const updateDefaultFooterNavForLang = (
+    lang: SupportedEmailLanguage,
+    updater: (prev: FooterNavLinkItem[]) => FooterNavLinkItem[]
+  ) => {
+    setForm((prev) => {
+      const existing = prev.defaultFooterNavLinks?.[lang] || [];
+      const nextList = updater(existing);
+      return {
+        ...prev,
+        defaultFooterNavLinks: {
+          ...(prev.defaultFooterNavLinks || {}),
+          [lang]: nextList,
+        },
+      };
+    });
+  };
+
+  const handleLoadStandardFooterNav = () => {
+    const standard = buildStandardFooterNavLinks(navLang);
+    updateDefaultFooterNavForLang(navLang, () => standard);
+    toast.success(`Loaded standard ${navLang.toUpperCase()} footer navigation links.`);
+  };
+
+  const handleAddFooterNavLink = () => {
+    const newItem: FooterNavLinkItem = {
+      id: `fnav_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      label: navLang === "de" ? "Neuer Link" : "New Link",
+      url: "{{hotel_website}}",
+      openInNewTab: true,
+    };
+    updateDefaultFooterNavForLang(navLang, (prev) => [...prev, newItem]);
+  };
+
+  const handleApplyLinksToAllDrafts = async () => {
+    setServerErrors([]);
+    if (!hasAnyDefaultFooterNav) {
+      toast.error("Add at least one default footer navigation link before applying to drafts.");
+      return;
+    }
+    if (validationIssues.length > 0) {
+      setServerErrors(validationIssues.map((i) => i.message));
+      return;
+    }
+    try {
+      setApplyingLinks(true);
+      const saved = await emailCustomizationApi.saveSettings(form, hotelId);
+      const effectiveSettings = saved.settings || form;
+      if (saved.settings) {
+        setForm(saved.settings);
+        onSaved(saved.settings);
+      }
+      const res = await emailCustomizationApi.applyDefaultLinksToAllDrafts(
+        effectiveSettings.defaultFooterNavLinks,
+        hotelId
+      );
+      onAppliedDefaultFooter?.();
+      toast.success(
+        `Applied your default footer links to drafts for all ${res.updatedEvents.length} events. Live published templates were not modified — review and publish each event when ready.`
+      );
+    } catch (err: any) {
+      const msgs =
+        Array.isArray(err?.issues) && err.issues.length > 0
+          ? err.issues.map((i: any) => i.message)
+          : [err?.message || "Failed to apply default footer links to drafts."];
+      setServerErrors(msgs);
+    } finally {
+      setApplyingLinks(false);
+    }
+  };
+
+  const updateFooterBlocksForLang = (
+    lang: SupportedEmailLanguage,
+    updater: (prev: EmailBlock[]) => EmailBlock[]
+  ) => {
+    setForm((prev) => {
+      const existing = prev.defaultFooterBlocks?.[lang] || [];
+      const nextList = updater(existing);
+      return {
+        ...prev,
+        defaultFooterBlocks: {
+          ...(prev.defaultFooterBlocks || {}),
+          [lang]: nextList,
+        },
+      };
+    });
+  };
+
+  const handleLoadStandardDefaultFooter = () => {
+    const standard = buildDefaultFooterBlocks(footerLang);
+    updateFooterBlocksForLang(footerLang, () => standard);
+    toast.success(`Loaded standard 3-block ${footerLang.toUpperCase()} footer.`);
+  };
+
+  const handleAddDefaultFooterBlock = (
+    type:
+      | "footer_contact"
+      | "footer_authenticity"
+      | "footer_copyright"
+      | "footer_legal"
+      | "footer_powered_by"
+  ) => {
+    const blk = createEmailBlock(type, appUrl, footerLang);
+    updateFooterBlocksForLang(footerLang, (prev) => [...prev, blk]);
+  };
+
+  const handleApplyFooterToAllDrafts = async () => {
+    setServerErrors([]);
+    if (!hasAnyDefaultFooter) {
+      toast.error("Configure at least one default footer block before applying to drafts.");
+      return;
+    }
+    if (validationIssues.length > 0) {
+      setServerErrors(validationIssues.map((i) => i.message));
+      return;
+    }
+    try {
+      setApplyingFooter(true);
+      const saved = await emailCustomizationApi.saveSettings(form, hotelId);
+      const effectiveSettings = saved.settings || form;
+      if (saved.settings) {
+        setForm(saved.settings);
+        onSaved(saved.settings);
+      }
+      const res = await emailCustomizationApi.applyDefaultFooterToAllDrafts(
+        effectiveSettings.defaultFooterBlocks,
+        hotelId
+      );
+      onAppliedDefaultFooter?.();
+      toast.success(
+        `Applied your default footer to drafts for all ${res.updatedEvents.length} events. Live published templates were not modified — review and publish each event when ready.`
+      );
+    } catch (err: any) {
+      const msgs =
+        Array.isArray(err?.issues) && err.issues.length > 0
+          ? err.issues.map((i: any) => i.message)
+          : [err?.message || "Failed to apply default footer to drafts."];
+      setServerErrors(msgs);
+    } finally {
+      setApplyingFooter(false);
+    }
+  };
 
   const resolvedPortalPreview = useMemo(() => {
     const cleanFallback = (appUrl || "https://tidehotels.de").replace(/\/+$/, "");
@@ -349,10 +652,17 @@ export function EmailSettingsPanel({
       <section className="rounded-xl bg-zinc-900/60 border border-zinc-800 p-5 space-y-4">
         <div>
           <h3 className="text-sm font-semibold text-zinc-100">
-            Contact Details, Legal Imprint & Reminder Schedule
+            Contact Details, Legal Imprint &amp; Reminder Schedule
           </h3>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Optional email-specific contact overrides (blank fields automatically use your main Hotel Profile).
+            Feeds allow-listed merge variables (
+            <span className="font-mono text-zinc-300">{"{{hotel_address}}"}</span>,{" "}
+            <span className="font-mono text-zinc-300">{"{{hotel_phone}}"}</span>,{" "}
+            <span className="font-mono text-zinc-300">{"{{hotel_email}}"}</span>,{" "}
+            <span className="font-mono text-zinc-300">{"{{hotel_website}}"}</span>,{" "}
+            <span className="font-mono text-zinc-300">{"{{legal_imprint}}"}</span>). Blank fields
+            fall back to your Hotel Profile. Never silently injected into customized templates
+            unless referenced by a block.
           </p>
         </div>
 
@@ -420,14 +730,22 @@ export function EmailSettingsPanel({
         </div>
 
         <div>
-          <label className={labelClass}>Legal / Imprint Footer Text (Optional — e.g. German Impressum)</label>
+          <label className={labelClass}>
+            Legal / Imprint Text (Optional — feeds{" "}
+            <span className="font-mono text-emerald-400">{"{{legal_imprint}}"}</span>)
+          </label>
           <textarea
             rows={2}
             value={form.legalImprint || ""}
             onChange={(e) => setForm({ ...form, legalImprint: e.target.value })}
-            placeholder="Company registration, VAT ID, managing director, or legal notice shown below contact details"
+            placeholder="Company registration, VAT ID, managing director, or German Impressum"
             className={inputClass}
           />
+          <p className="text-[11px] text-zinc-500 mt-1">
+            Populates the <span className="font-mono text-zinc-400">{"{{legal_imprint}}"}</span>{" "}
+            variable and prefills new Legal / Impressum blocks. Never shown in customized templates
+            unless you include a block that uses it.
+          </p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-zinc-800/80">
@@ -457,6 +775,581 @@ export function EmailSettingsPanel({
               className={`${inputClass} tabular-nums`}
             />
           </div>
+        </div>
+      </section>
+
+      {/* Hotel Default Links (Primary + EN / DE Overrides) */}
+      <section className="rounded-xl bg-zinc-900/60 border border-zinc-800 p-5 space-y-4">
+        <div className="flex items-start gap-2.5">
+          <Link2 size={16} className="text-emerald-400 mt-0.5 shrink-0" />
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-100">
+              Hotel Default Links (Primary &amp; Language Overrides)
+            </h3>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Set reusable HTTPS links once per hotel. Each link powers its merge variable across all
+              email blocks. Expand EN / DE overrides if your hotel uses separate language URLs
+              (blank overrides automatically fall back to the primary URL).
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {DEFAULT_LINK_FIELDS.map((field) => {
+            const entry = form.defaultLinks?.[field.key];
+            const enOverride = entry?.byLanguage?.en || "";
+            const deOverride = entry?.byLanguage?.de || "";
+            const hasOverrides = Boolean(enOverride.trim() || deOverride.trim());
+            const isExpanded = Boolean(expandedOverrides[field.key]);
+
+            return (
+              <div
+                key={field.key}
+                className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 space-y-2"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-medium text-zinc-200">{field.label}</label>
+                  <span className="font-mono text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">
+                    {field.variable}
+                  </span>
+                </div>
+                <input
+                  type="url"
+                  value={entry?.defaultUrl || ""}
+                  onChange={(e) => updateDefaultLink(field.key, "defaultUrl", e.target.value)}
+                  placeholder={field.placeholder}
+                  className={inputClass}
+                />
+                <div className="flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedOverrides((prev) => ({
+                        ...prev,
+                        [field.key]: !prev[field.key],
+                      }))
+                    }
+                    className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors"
+                  >
+                    {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                    <span>EN / DE URL overrides</span>
+                    {hasOverrides && (
+                      <span className="ml-1 px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-300 text-[10px]">
+                        Active
+                      </span>
+                    )}
+                  </button>
+                </div>
+                {isExpanded && (
+                  <div className="grid grid-cols-1 gap-2 pt-1.5 border-t border-zinc-800/80">
+                    <div>
+                      <label className="block text-[10px] font-medium text-zinc-400 mb-1">
+                        English (EN) Override (Optional HTTPS)
+                      </label>
+                      <input
+                        type="url"
+                        value={enOverride}
+                        onChange={(e) => updateDefaultLink(field.key, "en", e.target.value)}
+                        placeholder="Leave blank to use primary URL"
+                        className={inputClass}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-medium text-zinc-400 mb-1">
+                        German (DE) Override (Optional HTTPS)
+                      </label>
+                      <input
+                        type="url"
+                        value={deOverride}
+                        onChange={(e) => updateDefaultLink(field.key, "de", e.target.value)}
+                        placeholder="Leave blank to use primary URL"
+                        className={inputClass}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Default Footer Navigation Links (EN / DE, Draft-only bulk apply) */}
+      <section className="rounded-xl bg-zinc-900/60 border border-zinc-800 p-5 space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-100">
+              Default Footer Navigation Links (Optional)
+            </h3>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Define your hotel&apos;s standard footer link row (e.g. Terms, Privacy, Imprint,
+              Directions, Contact) per language and apply it to event drafts. Live published emails
+              stay untouched until you publish.
+            </p>
+          </div>
+          <div className="inline-flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5">
+            {SUPPORTED_EMAIL_LANGUAGES.map((l) => (
+              <button
+                key={l.code}
+                type="button"
+                onClick={() => setNavLang(l.code)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${
+                  navLang === l.code
+                    ? "bg-zinc-800 text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                {l.label} ({(form.defaultFooterNavLinks?.[l.code] || []).length})
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={handleLoadStandardFooterNav}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-[11px] font-medium text-zinc-200 whitespace-nowrap"
+          >
+            <RotateCcw size={12} /> Load Standard Links
+          </button>
+          <button
+            type="button"
+            onClick={handleAddFooterNavLink}
+            disabled={currentFooterNavLinks.length >= 10}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-zinc-800 bg-zinc-950 hover:bg-zinc-900 disabled:opacity-40 text-[11px] text-zinc-300 whitespace-nowrap"
+          >
+            <Plus size={11} /> Add Footer Link
+          </button>
+        </div>
+
+        {currentFooterNavLinks.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-950/60 p-4 text-center text-xs text-zinc-500">
+            No default footer navigation links configured for {navLang.toUpperCase()} yet. Click{" "}
+            <span className="text-zinc-300 font-medium">Load Standard Links</span> or{" "}
+            <span className="text-zinc-300 font-medium">Add Footer Link</span>.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {currentFooterNavLinks.map((item, idx) => {
+              const updateNavLink = (patch: Partial<FooterNavLinkItem>) =>
+                updateDefaultFooterNavForLang(navLang, (list) =>
+                  list.map((entry, i) => (i === idx ? { ...entry, ...patch } : entry))
+                );
+
+              return (
+                <div
+                  key={item.id || idx}
+                  className={`rounded-lg border border-zinc-800 bg-zinc-950/80 p-3 space-y-2.5 ${
+                    item.hidden ? "opacity-60" : ""
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <input
+                        type="text"
+                        value={item.label}
+                        onChange={(e) => updateNavLink({ label: e.target.value })}
+                        placeholder="Link text (e.g. Privacy Policy)"
+                        className={inputClass}
+                      />
+                      {item.hidden && (
+                        <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-[10px] text-zinc-400 shrink-0">
+                          Hidden
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        title={item.hidden ? "Show link" : "Hide link"}
+                        onClick={() => updateNavLink({ hidden: !item.hidden })}
+                        className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
+                      >
+                        {item.hidden ? <EyeOff size={13} /> : <Eye size={13} />}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() =>
+                          updateDefaultFooterNavForLang(navLang, (list) => {
+                            if (idx === 0) return list;
+                            const copy = [...list];
+                            const [moved] = copy.splice(idx, 1);
+                            copy.splice(idx - 1, 0, moved);
+                            return copy;
+                          })
+                        }
+                        className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 disabled:opacity-30"
+                      >
+                        <ArrowUp size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === currentFooterNavLinks.length - 1}
+                        onClick={() =>
+                          updateDefaultFooterNavForLang(navLang, (list) => {
+                            if (idx >= list.length - 1) return list;
+                            const copy = [...list];
+                            const [moved] = copy.splice(idx, 1);
+                            copy.splice(idx + 1, 0, moved);
+                            return copy;
+                          })
+                        }
+                        className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 disabled:opacity-30"
+                      >
+                        <ArrowDown size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateDefaultFooterNavForLang(navLang, (list) =>
+                            list.filter((_, i) => i !== idx)
+                          )
+                        }
+                        className="p-1 rounded text-zinc-400 hover:text-red-400 hover:bg-zinc-800"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <LinkDestinationField
+                    url={item.url}
+                    visibleLabel={item.label}
+                    allowContactSchemes
+                    allowEmpty={false}
+                    onChangeUrl={(nextUrl) => updateNavLink({ url: nextUrl })}
+                    openInNewTab={item.openInNewTab !== false}
+                    onChangeOpenInNewTab={(next) => updateNavLink({ openInNewTab: next })}
+                    underline={item.underline}
+                    onChangeUnderline={(next) => updateNavLink({ underline: next })}
+                    color={item.color}
+                    onChangeColor={(next) => updateNavLink({ color: next })}
+                    compact
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-zinc-800/80">
+          <span className="text-[11px] text-zinc-500">
+            Updates draft footer navigation rows across all events. Published emails are never
+            modified automatically.
+          </span>
+          <button
+            type="button"
+            disabled={applyingLinks || !hasAnyDefaultFooterNav || validationIssues.length > 0}
+            onClick={() => void handleApplyLinksToAllDrafts()}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 disabled:opacity-40 text-xs font-semibold text-emerald-300 whitespace-nowrap transition-colors"
+          >
+            {applyingLinks ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <CopyCheck size={13} />
+            )}
+            {applyingLinks
+              ? "Applying to drafts..."
+              : "Apply default footer links to all events (Drafts only)"}
+          </button>
+        </div>
+      </section>
+
+      {/* Reusable Default Footer (Optional, per-language, Draft-only bulk apply) */}
+      <section className="rounded-xl bg-zinc-900/60 border border-zinc-800 p-5 space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-100">
+              Reusable Default Footer (Optional)
+            </h3>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Define your hotel&apos;s standard footer blocks once per language and copy them into
+              all event drafts. Applying never modifies live published templates until you review
+              and publish each event.
+            </p>
+          </div>
+          <div className="inline-flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5">
+            {SUPPORTED_EMAIL_LANGUAGES.map((l) => (
+              <button
+                key={l.code}
+                type="button"
+                onClick={() => setFooterLang(l.code)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${
+                  footerLang === l.code
+                    ? "bg-zinc-800 text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                {l.label} ({(form.defaultFooterBlocks?.[l.code] || []).length})
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Add / Load controls */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={handleLoadStandardDefaultFooter}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-[11px] font-medium text-zinc-200 whitespace-nowrap"
+          >
+            <RotateCcw size={12} /> Load Standard 3-Block Footer
+          </button>
+          <button
+            type="button"
+            onClick={() => handleAddDefaultFooterBlock("footer_contact")}
+            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-zinc-800 bg-zinc-950 hover:bg-zinc-900 text-[11px] text-zinc-300 whitespace-nowrap"
+          >
+            <Plus size={11} /> Contact Us
+          </button>
+          <button
+            type="button"
+            onClick={() => handleAddDefaultFooterBlock("footer_authenticity")}
+            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-zinc-800 bg-zinc-950 hover:bg-zinc-900 text-[11px] text-zinc-300 whitespace-nowrap"
+          >
+            <Plus size={11} /> Authenticity
+          </button>
+          <button
+            type="button"
+            onClick={() => handleAddDefaultFooterBlock("footer_copyright")}
+            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-zinc-800 bg-zinc-950 hover:bg-zinc-900 text-[11px] text-zinc-300 whitespace-nowrap"
+          >
+            <Plus size={11} /> Copyright
+          </button>
+          <button
+            type="button"
+            onClick={() => handleAddDefaultFooterBlock("footer_legal")}
+            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-zinc-800 bg-zinc-950 hover:bg-zinc-900 text-[11px] text-zinc-300 whitespace-nowrap"
+          >
+            <Plus size={11} /> Legal / Impressum
+          </button>
+          <button
+            type="button"
+            onClick={() => handleAddDefaultFooterBlock("footer_powered_by")}
+            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-zinc-800 bg-zinc-950 hover:bg-zinc-900 text-[11px] text-zinc-300 whitespace-nowrap"
+          >
+            <Plus size={11} /> Powered By (Optional)
+          </button>
+        </div>
+
+        {currentFooterBlocks.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-950/60 p-4 text-center text-xs text-zinc-500">
+            No reusable default footer blocks saved for {footerLang.toUpperCase()} yet. Click{" "}
+            <span className="text-zinc-300 font-medium">Load Standard 3-Block Footer</span> or save
+            a footer directly from any template editor.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {currentFooterBlocks.map((blk, idx) => {
+              const titleMap: Record<string, string> = {
+                footer_contact: "Contact Us",
+                footer_authenticity: "Confirmation Authenticity",
+                footer_copyright: "Copyright / Legal Line",
+                footer_legal: "Legal / Impressum",
+                footer_powered_by: "Powered By Credit",
+                footer_nav: "Footer Navigation",
+                social_links: "Social Links",
+              };
+              const updateBlk = (fn: (b: EmailBlock) => EmailBlock) =>
+                updateFooterBlocksForLang(footerLang, (list) =>
+                  list.map((item, i) => (i === idx ? fn(item) : item))
+                );
+
+              return (
+                <div
+                  key={blk.id || idx}
+                  className={`rounded-lg border border-zinc-800 bg-zinc-950/80 p-3 space-y-2.5 ${
+                    blk.hidden ? "opacity-60" : ""
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-xs font-semibold text-zinc-200">
+                        {titleMap[blk.type] || blk.type}
+                      </span>
+                      {blk.hidden && (
+                        <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-[10px] text-zinc-400">
+                          Hidden
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        title={blk.hidden ? "Show block" : "Hide block"}
+                        onClick={() => updateBlk((b) => ({ ...b, hidden: !b.hidden }))}
+                        className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
+                      >
+                        {blk.hidden ? <EyeOff size={13} /> : <Eye size={13} />}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() =>
+                          updateFooterBlocksForLang(footerLang, (list) => {
+                            if (idx === 0) return list;
+                            const copy = [...list];
+                            const [moved] = copy.splice(idx, 1);
+                            copy.splice(idx - 1, 0, moved);
+                            return copy;
+                          })
+                        }
+                        className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 disabled:opacity-30"
+                      >
+                        <ArrowUp size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === currentFooterBlocks.length - 1}
+                        onClick={() =>
+                          updateFooterBlocksForLang(footerLang, (list) => {
+                            if (idx >= list.length - 1) return list;
+                            const copy = [...list];
+                            const [moved] = copy.splice(idx, 1);
+                            copy.splice(idx + 1, 0, moved);
+                            return copy;
+                          })
+                        }
+                        className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 disabled:opacity-30"
+                      >
+                        <ArrowDown size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateFooterBlocksForLang(footerLang, (list) =>
+                            list.filter((_, i) => i !== idx)
+                          )
+                        }
+                        className="p-1 rounded text-zinc-400 hover:text-red-400 hover:bg-zinc-800"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {(blk.type === "footer_contact" ||
+                    blk.type === "footer_authenticity" ||
+                    blk.type === "footer_legal") && (
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        value={blk.heading}
+                        onChange={(e) =>
+                          updateBlk((b) =>
+                            b.type === "footer_contact" ||
+                            b.type === "footer_authenticity" ||
+                            b.type === "footer_legal"
+                              ? { ...b, heading: e.target.value }
+                              : b
+                          )
+                        }
+                        placeholder="Heading"
+                        className={inputClass}
+                      />
+                      <textarea
+                        rows={2}
+                        value={blk.text}
+                        onChange={(e) =>
+                          updateBlk((b) =>
+                            b.type === "footer_contact" ||
+                            b.type === "footer_authenticity" ||
+                            b.type === "footer_legal"
+                              ? { ...b, text: e.target.value }
+                              : b
+                          )
+                        }
+                        placeholder="Body text (supports {{hotel_name}}, {{hotel_phone}}, {{hotel_email}}, {{booking_reference}}, {{legal_imprint}})"
+                        className={inputClass}
+                      />
+                    </div>
+                  )}
+
+                  {blk.type === "footer_copyright" && (
+                    <input
+                      type="text"
+                      value={blk.text}
+                      onChange={(e) =>
+                        updateBlk((b) =>
+                          b.type === "footer_copyright" ? { ...b, text: e.target.value } : b
+                        )
+                      }
+                      placeholder="© {{hotel_name}} · {{hotel_address}}"
+                      className={inputClass}
+                    />
+                  )}
+
+                  {blk.type === "footer_powered_by" && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <input
+                        type="text"
+                        value={blk.text}
+                        onChange={(e) =>
+                          updateBlk((b) =>
+                            b.type === "footer_powered_by" ? { ...b, text: e.target.value } : b
+                          )
+                        }
+                        placeholder="Powered by {{hotel_name}}"
+                        className={inputClass}
+                      />
+                      <input
+                        type="text"
+                        value={blk.linkLabel || ""}
+                        onChange={(e) =>
+                          updateBlk((b) =>
+                            b.type === "footer_powered_by" ? { ...b, linkLabel: e.target.value } : b
+                          )
+                        }
+                        placeholder="Optional link label"
+                        className={inputClass}
+                      />
+                      <input
+                        type="url"
+                        value={blk.linkUrl || ""}
+                        onChange={(e) =>
+                          updateBlk((b) =>
+                            b.type === "footer_powered_by" ? { ...b, linkUrl: e.target.value } : b
+                          )
+                        }
+                        placeholder="Optional HTTPS URL"
+                        className={inputClass}
+                      />
+                    </div>
+                  )}
+
+                  {(blk.type === "footer_nav" || blk.type === "social_links") && (
+                    <div className="text-[11px] text-zinc-500">
+                      Saved from template editor ({blk.type === "footer_nav" ? `${blk.links.length} nav links` : `${blk.links.length} social links`}).
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-zinc-800/80">
+          <span className="text-[11px] text-zinc-500">
+            Applies only to drafts across all events. Live published emails stay unchanged until
+            you publish.
+          </span>
+          <button
+            type="button"
+            disabled={applyingFooter || !hasAnyDefaultFooter || validationIssues.length > 0}
+            onClick={() => void handleApplyFooterToAllDrafts()}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 disabled:opacity-40 text-xs font-semibold text-emerald-300 whitespace-nowrap transition-colors"
+          >
+            {applyingFooter ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <CopyCheck size={13} />
+            )}
+            {applyingFooter
+              ? "Applying to drafts..."
+              : "Apply my default footer to all events (Drafts only)"}
+          </button>
         </div>
       </section>
 

@@ -1,11 +1,13 @@
 import { auth } from "../../../firebase";
 import type {
   CustomizableEmailEventType,
+  EmailBlock,
   EmailImageAsset,
   EmailRenderContext,
   EmailTemplateDocument,
   EmailTemplateVariant,
   EventCatalogEntry,
+  FooterNavLinkItem,
   HotelEmailSettings,
   RenderedEmailOutput,
   SupportedEmailLanguage,
@@ -223,6 +225,34 @@ export const emailCustomizationApi = {
     return apiFetch<{ ok: boolean; settings: HotelEmailSettings }>(
       "/api/email-customization/settings",
       { method: "PUT", body: { settings }, hotelId }
+    );
+  },
+
+  applyDefaultFooterToAllDrafts(
+    defaultFooterBlocks?: Partial<Record<SupportedEmailLanguage, EmailBlock[]>>,
+    hotelId?: string
+  ) {
+    return apiFetch<{ ok: boolean; updatedEvents: CustomizableEmailEventType[] }>(
+      "/api/email-customization/settings/apply-default-footer",
+      {
+        method: "POST",
+        body: defaultFooterBlocks ? { defaultFooterBlocks } : {},
+        hotelId,
+      }
+    );
+  },
+
+  applyDefaultLinksToAllDrafts(
+    defaultFooterNavLinks?: Partial<Record<SupportedEmailLanguage, FooterNavLinkItem[]>>,
+    hotelId?: string
+  ) {
+    return apiFetch<{ ok: boolean; updatedEvents: CustomizableEmailEventType[] }>(
+      "/api/email-customization/settings/apply-default-links",
+      {
+        method: "POST",
+        body: defaultFooterNavLinks ? { defaultFooterNavLinks } : {},
+        hotelId,
+      }
     );
   },
 

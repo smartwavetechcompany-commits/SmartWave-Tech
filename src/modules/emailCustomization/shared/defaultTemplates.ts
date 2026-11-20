@@ -715,7 +715,7 @@ export const OPTIONAL_SECTION_PRESETS: OptionalSectionPreset[] = [
         type: "button",
         displayStyle: "outline",
         label: "Share Your Stay Review",
-        url: "{{portal_link}}",
+        url: "{{review_link}}",
         align: "left",
       },
     ],

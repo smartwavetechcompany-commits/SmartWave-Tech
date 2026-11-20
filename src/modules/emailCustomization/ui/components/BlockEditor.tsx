@@ -2,12 +2,16 @@ import React, { useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  BookmarkCheck,
   ChevronDown,
   ChevronRight,
   Copy,
+  Eye,
+  EyeOff,
   GripVertical,
   Layers,
   Plus,
+  RotateCcw,
   Trash2,
 } from "lucide-react";
 import {
@@ -15,6 +19,7 @@ import {
   type EmailBlock,
   type EmailBlockType,
   type EmailImageAsset,
+  type SupportedEmailLanguage,
 } from "../../shared/types";
 import { type ValidationIssue } from "../../shared/validation";
 import { OPTIONAL_SECTION_PRESETS } from "../../shared/defaultTemplates";
@@ -58,6 +63,11 @@ export function getBlockSectionGroup(type: EmailBlockType): Exclude<BlockSection
     case "footer_nav":
     case "legal_section":
     case "social_links":
+    case "footer_contact":
+    case "footer_authenticity":
+    case "footer_copyright":
+    case "footer_legal":
+    case "footer_powered_by":
       return "footer";
     default:
       return "content";
@@ -75,8 +85,13 @@ function makeId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
-export function createEmailBlock(type: EmailBlockType, appUrl: string): EmailBlock {
+export function createEmailBlock(
+  type: EmailBlockType,
+  appUrl: string,
+  language: SupportedEmailLanguage = "en"
+): EmailBlock {
   const id = makeId("blk");
+  const isDe = language === "de";
   switch (type) {
     case "heading":
       return { id, type: "heading", level: 2, text: "Section Heading", align: "left" };
@@ -390,6 +405,89 @@ export function createEmailBlock(type: EmailBlockType, appUrl: string): EmailBlo
         copyrightText: "© {{hotel_name}}",
         style: { backgroundColor: "#ffffff", textColor: "#52525b", paddingY: 16, paddingX: 24 },
       };
+    case "footer_contact":
+      return {
+        id,
+        type: "footer_contact",
+        heading: isDe ? "Kontakt" : "Contact Us",
+        text: isDe
+          ? "Bei Fragen zu Ihrer Reservierung erreichen Sie {{hotel_name}} telefonisch unter {{hotel_phone}} oder per E-Mail an {{hotel_email}}."
+          : "For questions regarding your reservation, reach {{hotel_name}} at {{hotel_phone}} or {{hotel_email}}.",
+        style: {
+          backgroundColor: "#fafafa",
+          textColor: "#52525b",
+          borderColor: "#e4e4e7",
+          align: "left",
+          paddingY: 16,
+          paddingX: 28,
+          fontSizePx: 12,
+        },
+      };
+    case "footer_authenticity":
+      return {
+        id,
+        type: "footer_authenticity",
+        heading: isDe ? "Echtheit dieser Bestätigung" : "Confirmation Authenticity",
+        text: isDe
+          ? "Diese transaktionale Nachricht wurde automatisch für Ihre Buchung {{booking_reference}} erstellt. Maßgeblich sind die im Reservierungssystem hinterlegten Daten."
+          : "This transactional confirmation reflects our official reservation record for {{booking_reference}} at {{hotel_name}}.",
+        style: {
+          backgroundColor: "#fafafa",
+          textColor: "#52525b",
+          align: "left",
+          paddingY: 10,
+          paddingX: 28,
+          fontSizePx: 12,
+        },
+      };
+    case "footer_copyright":
+      return {
+        id,
+        type: "footer_copyright",
+        text: "© {{hotel_name}} · {{hotel_address}}",
+        showFooterLogo: false,
+        footerLogoAlt: "{{hotel_name}}",
+        footerLogoWidthPx: 110,
+        style: {
+          backgroundColor: "#fafafa",
+          textColor: "#52525b",
+          align: "left",
+          paddingY: 14,
+          paddingX: 28,
+          fontSizePx: 11,
+        },
+      };
+    case "footer_legal":
+      return {
+        id,
+        type: "footer_legal",
+        heading: isDe ? "Impressum & Rechtliches" : "Legal / Imprint",
+        text: "{{legal_imprint}}",
+        style: {
+          backgroundColor: "#fafafa",
+          textColor: "#52525b",
+          align: "left",
+          paddingY: 12,
+          paddingX: 28,
+          fontSizePx: 11,
+        },
+      };
+    case "footer_powered_by":
+      return {
+        id,
+        type: "footer_powered_by",
+        text: isDe ? "Gesendet über" : "Sent via",
+        linkLabel: "{{hotel_name}}",
+        linkUrl: "{{hotel_website}}",
+        style: {
+          backgroundColor: "#fafafa",
+          textColor: "#71717a",
+          align: "center",
+          paddingY: 10,
+          paddingX: 24,
+          fontSizePx: 11,
+        },
+      };
   }
 }
 
@@ -449,6 +547,16 @@ export function summarizeEmailBlock(block: EmailBlock): string {
       return block.links.map((l) => l.label).join(" · ");
     case "legal_section":
       return `${block.sections.length} notice section(s)`;
+    case "footer_contact":
+      return block.heading || block.text || "Contact Us";
+    case "footer_authenticity":
+      return block.heading || block.text || "Confirmation Authenticity";
+    case "footer_copyright":
+      return block.text || "Copyright line";
+    case "footer_legal":
+      return block.heading || block.text || "Legal / Imprint";
+    case "footer_powered_by":
+      return [block.text, block.linkLabel].filter(Boolean).join(" ") || "Powered by credit";
   }
 }
 
@@ -497,7 +605,10 @@ export function applyImageAssetToEmailBlock(
       imageAlt: block.imageAlt || img.label,
     };
   }
-  if (block.type === "legal_section" && field === "footerLogoUrl") {
+  if (
+    (block.type === "legal_section" || block.type === "footer_copyright") &&
+    field === "footerLogoUrl"
+  ) {
     return {
       ...block,
       footerLogoImageId: img.id,
@@ -527,13 +638,19 @@ const QUICK_PALETTE_BLOCKS: readonly EmailBlockType[] = [
   "icon_link_grid",
   "image_with_list",
   "footer_nav",
-  "legal_section",
+  "footer_contact",
+  "footer_authenticity",
+  "footer_copyright",
+  "footer_legal",
+  "social_links",
+  "footer_powered_by",
 ];
 
 export interface BlockEditorProps {
   blocks: EmailBlock[];
   appUrl: string;
   resolvedPortalUrl: string;
+  resolvedVariables?: Record<string, string>;
   validationIssues: ValidationIssue[];
   expandedBlockId: string | null;
   onExpandBlock: (blockId: string | null) => void;
@@ -544,6 +661,9 @@ export interface BlockEditorProps {
   onReorderBlock: (fromIndex: number, toIndex: number) => void;
   onDuplicateBlock: (index: number) => void;
   onRemoveBlock: (blockId: string) => void;
+  onResetFooter?: () => void;
+  onSaveFooterAsDefault?: () => void;
+  savingDefaultFooter?: boolean;
   imageActions: ImageActionCallbacks;
 }
 
@@ -551,6 +671,7 @@ export function BlockEditor({
   blocks,
   appUrl,
   resolvedPortalUrl,
+  resolvedVariables,
   validationIssues,
   expandedBlockId,
   onExpandBlock,
@@ -561,6 +682,9 @@ export function BlockEditor({
   onReorderBlock,
   onDuplicateBlock,
   onRemoveBlock,
+  onResetFooter,
+  onSaveFooterAsDefault,
+  savingDefaultFooter = false,
   imageActions,
 }: BlockEditorProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -716,15 +840,42 @@ export function BlockEditor({
           return (
             <React.Fragment key={block.id}>
               {showGroupDivider && (
-                <div className="pt-1 flex items-center gap-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                    {SECTION_GROUP_LABELS[group]}
-                  </span>
-                  <div className="h-px flex-1 bg-zinc-800/80" />
+                <div className="pt-1 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 whitespace-nowrap">
+                      {SECTION_GROUP_LABELS[group]}
+                    </span>
+                    <div className="h-px flex-1 bg-zinc-800/80" />
+                  </div>
+                  {group === "footer" && (onResetFooter || onSaveFooterAsDefault) && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {onSaveFooterAsDefault && (
+                        <button
+                          type="button"
+                          disabled={savingDefaultFooter}
+                          onClick={onSaveFooterAsDefault}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-zinc-800 bg-zinc-950 hover:bg-zinc-800 disabled:opacity-50 text-[10px] font-medium text-emerald-400 whitespace-nowrap"
+                        >
+                          <BookmarkCheck size={11} />
+                          {savingDefaultFooter ? "Saving..." : "Save as Hotel Default Footer"}
+                        </button>
+                      )}
+                      {onResetFooter && (
+                        <button
+                          type="button"
+                          onClick={onResetFooter}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-zinc-800 bg-zinc-950 hover:bg-zinc-800 text-[10px] font-medium text-zinc-300 whitespace-nowrap"
+                        >
+                          <RotateCcw size={10} /> Reset footer to default
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
               <div
+                data-block-id={block.id}
                 draggable
                 onDragStart={(e) => {
                   setDragIndex(idx);
@@ -749,6 +900,8 @@ export function BlockEditor({
                   setDragOverIndex(null);
                 }}
                 className={`rounded-xl bg-zinc-900/60 border transition-colors ${
+                  block.hidden ? "opacity-60 border-dashed" : ""
+                } ${
                   isDragTarget
                     ? "border-emerald-500 bg-emerald-500/5 ring-1 ring-emerald-500/40"
                     : blockHasError
@@ -784,6 +937,11 @@ export function BlockEditor({
                       <span className="text-xs font-semibold text-zinc-200 whitespace-nowrap">
                         {BLOCK_TYPE_LABELS[block.type] || block.type}
                       </span>
+                      {block.hidden && (
+                        <span className="text-[10px] font-medium text-amber-300 border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 rounded shrink-0">
+                          Hidden
+                        </span>
+                      )}
                       <span className="hidden md:inline text-[10px] text-zinc-500 border border-zinc-800 bg-zinc-950 px-1.5 py-0.5 rounded shrink-0">
                         {SECTION_GROUP_BADGE[group]}
                       </span>
@@ -796,6 +954,25 @@ export function BlockEditor({
                   </div>
 
                   <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onUpdateBlock(block.id, (b) => ({
+                          ...b,
+                          hidden: !b.hidden,
+                        }))
+                      }
+                      title={block.hidden ? "Show block in email" : "Hide block from email"}
+                      aria-label={block.hidden ? "Show block" : "Hide block"}
+                      className={`p-1 rounded transition-colors ${
+                        block.hidden
+                          ? "text-amber-400 bg-amber-500/10 hover:bg-amber-500/20"
+                          : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
+                      }`}
+                    >
+                      {block.hidden ? <EyeOff size={13} /> : <Eye size={13} />}
+                    </button>
+
                     <select
                       value={block.condition || "always"}
                       onChange={(e) =>
@@ -879,6 +1056,7 @@ export function BlockEditor({
                       block={block}
                       appUrl={appUrl}
                       resolvedPortalUrl={resolvedPortalUrl}
+                      resolvedVariables={resolvedVariables}
                       onChange={(updater) => onUpdateBlock(block.id, updater)}
                       imageActions={imageActions}
                     />

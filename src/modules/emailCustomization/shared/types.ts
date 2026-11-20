@@ -54,6 +54,7 @@ export const ALLOWED_TEMPLATE_VARIABLES = [
   "hotel_address",
   "hotel_email",
   "hotel_website",
+  "legal_imprint",
   "room_name",
   "room_type",
   "check_in_date",
@@ -71,6 +72,13 @@ export const ALLOWED_TEMPLATE_VARIABLES = [
   "booking_link",
   "portal_link",
   "app_url",
+  "review_link",
+  "directions_link",
+  "wifi_guide_link",
+  "social_instagram",
+  "social_facebook",
+  "social_x",
+  "social_linkedin",
 ] as const;
 
 export type AllowedTemplateVariable = (typeof ALLOWED_TEMPLATE_VARIABLES)[number];
@@ -80,6 +88,18 @@ export const ALLOWED_URL_VARIABLES = new Set<string>([
   "{{hotel_website}}",
   "{{booking_link}}",
   "{{app_url}}",
+  "{{review_link}}",
+  "{{directions_link}}",
+  "{{wifi_guide_link}}",
+  "{{social_instagram}}",
+  "{{social_facebook}}",
+  "{{social_x}}",
+  "{{social_linkedin}}",
+]);
+
+export const ALLOWED_CONTACT_URL_VARIABLES = new Set<string>([
+  "mailto:{{hotel_email}}",
+  "tel:{{hotel_phone}}",
 ]);
 
 export const VARIABLE_DESCRIPTIONS: Record<
@@ -93,6 +113,7 @@ export const VARIABLE_DESCRIPTIONS: Record<
   hotel_address: { label: "Hotel Address", group: "Hotel", sample: "Friedrichstrasse 101, 10117 Berlin" },
   hotel_email: { label: "Hotel Email", group: "Hotel", sample: "reservations@harborview.example" },
   hotel_website: { label: "Hotel Website", group: "Links", sample: "https://harborview.example" },
+  legal_imprint: { label: "Legal / Imprint Text", group: "Hotel", sample: "Harborview Suites GmbH · VAT DE123456789" },
   room_name: { label: "Room Name / Number", group: "Stay", sample: "Room 204" },
   room_type: { label: "Room Type", group: "Stay", sample: "Deluxe King Suite" },
   check_in_date: { label: "Check-In Date", group: "Stay", sample: "2026-11-24" },
@@ -110,7 +131,56 @@ export const VARIABLE_DESCRIPTIONS: Record<
   booking_link: { label: "Booking Page URL", group: "Links", sample: "https://harborview.example/book" },
   portal_link: { label: "Hotel Portal URL", group: "Links", sample: "https://tidehotels.de" },
   app_url: { label: "Platform App URL", group: "Links", sample: "https://tidehotels.de" },
+  review_link: { label: "Guest Review Page URL", group: "Links", sample: "https://harborview.example/review" },
+  directions_link: { label: "Directions / Map URL", group: "Links", sample: "https://harborview.example/directions" },
+  wifi_guide_link: { label: "Wi-Fi & Guest Guide URL", group: "Links", sample: "https://harborview.example/wifi" },
+  social_instagram: { label: "Instagram URL", group: "Links", sample: "https://instagram.com/harborviewsuites" },
+  social_facebook: { label: "Facebook URL", group: "Links", sample: "https://facebook.com/harborviewsuites" },
+  social_x: { label: "X (Twitter) URL", group: "Links", sample: "https://x.com/harborviewsuites" },
+  social_linkedin: { label: "LinkedIn URL", group: "Links", sample: "https://linkedin.com/company/harborviewsuites" },
 };
+
+export interface InlineTextLink {
+  id: string;
+  label: string;
+  url: string;
+  color?: string;
+  underline?: boolean;
+  openInNewTab?: boolean;
+  hidden?: boolean;
+}
+
+export interface LocalizedLinkValue {
+  defaultUrl?: string;
+  byLanguage?: Partial<Record<SupportedEmailLanguage, string>>;
+}
+
+export interface HotelDefaultLinks {
+  website?: LocalizedLinkValue;
+  booking?: LocalizedLinkValue;
+  portal?: LocalizedLinkValue;
+  review?: LocalizedLinkValue;
+  directions?: LocalizedLinkValue;
+  wifiGuide?: LocalizedLinkValue;
+  socialInstagram?: LocalizedLinkValue;
+  socialFacebook?: LocalizedLinkValue;
+  socialX?: LocalizedLinkValue;
+  socialLinkedin?: LocalizedLinkValue;
+}
+
+export interface TemplateLinkOverviewItem {
+  id: string;
+  blockId: string;
+  blockIndex: number;
+  blockLabel: string;
+  location: string;
+  text: string;
+  rawUrl: string;
+  resolvedUrl: string;
+  hidden: boolean;
+  status: "valid" | "empty_variable" | "invalid";
+  error?: string;
+}
 
 export const WEB_SAFE_FONTS = [
   { id: "arial", label: "Arial / Helvetica", css: "Arial, Helvetica, sans-serif" },
@@ -197,6 +267,8 @@ export interface BlockStyleConfig {
   paddingY?: number; // 0..40 px
   paddingX?: number; // 0..40 px
   borderRadius?: number; // 0..16 px
+  fontFamily?: WebSafeFontId;
+  fontSizePx?: number; // 10..24 px
 }
 
 export type LegacyEmailBlockType =
@@ -224,7 +296,12 @@ export type ModernEmailBlockType =
   | "icon_link_grid"
   | "image_with_list"
   | "footer_nav"
-  | "legal_section";
+  | "legal_section"
+  | "footer_contact"
+  | "footer_authenticity"
+  | "footer_copyright"
+  | "footer_legal"
+  | "footer_powered_by";
 
 export type EmailBlockType = LegacyEmailBlockType | ModernEmailBlockType;
 
@@ -242,12 +319,49 @@ export const MODERN_EMAIL_BLOCK_TYPES: readonly ModernEmailBlockType[] = [
   "image_with_list",
   "footer_nav",
   "legal_section",
+  "footer_contact",
+  "footer_authenticity",
+  "footer_copyright",
+  "footer_legal",
+  "footer_powered_by",
+] as const;
+
+export const STANDALONE_FOOTER_BLOCK_TYPES: readonly EmailBlockType[] = [
+  "footer_contact",
+  "footer_authenticity",
+  "footer_copyright",
+  "footer_legal",
+  "footer_powered_by",
+] as const;
+
+export const FOOTER_SECTION_BLOCK_TYPES: readonly EmailBlockType[] = [
+  "footer",
+  "legal_section",
+  "footer_contact",
+  "footer_authenticity",
+  "footer_copyright",
+  "footer_legal",
+  "footer_powered_by",
+] as const;
+
+export const ALLOWED_DEFAULT_FOOTER_BLOCK_TYPES: readonly EmailBlockType[] = [
+  "footer_nav",
+  "social_links",
+  "footer_contact",
+  "footer_authenticity",
+  "footer_copyright",
+  "footer_legal",
+  "footer_powered_by",
+  "divider",
+  "spacer",
 ] as const;
 
 export interface EmailBlockBase {
   id: string;
   type: EmailBlockType;
   condition?: BlockCondition;
+  /** When true, this block is omitted completely from rendered HTML and plain text */
+  hidden?: boolean;
 }
 
 export interface HeadingBlock extends EmailBlockBase {
@@ -263,6 +377,7 @@ export interface ParagraphBlock extends EmailBlockBase {
   text: string;
   align?: "left" | "center" | "right";
   tone?: "default" | "muted" | "accent";
+  inlineLinks?: InlineTextLink[];
 }
 
 export interface ImageBlock extends EmailBlockBase {
@@ -274,6 +389,8 @@ export interface ImageBlock extends EmailBlockBase {
   align?: "left" | "center" | "right";
   fallbackBg?: string;
   linkUrl?: string;
+  linkOpenInNewTab?: boolean;
+  linkHidden?: boolean;
 }
 
 export interface ButtonBlock extends EmailBlockBase {
@@ -285,6 +402,10 @@ export interface ButtonBlock extends EmailBlockBase {
   align?: "left" | "center" | "right";
   bgColor?: string;
   textColor?: string;
+  borderColor?: string;
+  borderRadiusPx?: number;
+  underline?: boolean;
+  openInNewTab?: boolean;
 }
 
 export interface DividerBlock extends EmailBlockBase {
@@ -317,12 +438,17 @@ export interface TwoColumnTextBlock extends EmailBlockBase {
   leftText: string;
   rightTitle?: string;
   rightText: string;
+  inlineLinks?: InlineTextLink[];
 }
 
 export interface SocialLinkItem {
   id: string;
   label: string;
   url: string;
+  hidden?: boolean;
+  color?: string;
+  underline?: boolean;
+  openInNewTab?: boolean;
 }
 
 export interface SocialLinksBlock extends EmailBlockBase {
@@ -340,6 +466,9 @@ export interface FooterContactField {
   label: string;
   valueTemplate: string;
   visible: boolean;
+  linkEnabled?: boolean;
+  linkColor?: string;
+  underline?: boolean;
 }
 
 export interface FooterBlock extends EmailBlockBase {
@@ -359,9 +488,16 @@ export interface BrandHeaderBlock extends EmailBlockBase {
   logoImageId?: string;
   logoAlt?: string;
   logoWidthPx?: number;
+  logoLinkUrl?: string;
+  logoLinkOpenInNewTab?: boolean;
   showHotelName: boolean;
   showAddress: boolean;
   showPhone: boolean;
+  phoneOverride?: string;
+  phoneLinkEnabled?: boolean;
+  showEmail?: boolean;
+  emailOverride?: string;
+  emailLinkEnabled?: boolean;
   iconTone?: EmailIconTone;
   style?: BlockStyleConfig;
 }
@@ -371,6 +507,7 @@ export interface PromoBannerBlock extends EmailBlockBase {
   imageUrl?: string;
   imageId?: string;
   imageAlt?: string;
+  imageLinkUrl?: string;
   text: string;
   buttonLabel: string;
   buttonUrl: string;
@@ -378,6 +515,9 @@ export interface PromoBannerBlock extends EmailBlockBase {
   buttonCorner?: ButtonCornerStyle;
   buttonBgColor?: string;
   buttonTextColor?: string;
+  buttonBorderColor?: string;
+  buttonOpenInNewTab?: boolean;
+  buttonHidden?: boolean;
   style?: BlockStyleConfig;
 }
 
@@ -386,6 +526,8 @@ export interface MembershipStripBlock extends EmailBlockBase {
   tierTemplate: string;
   pointsTemplate: string;
   linkUrl?: string;
+  linkOpenInNewTab?: boolean;
+  linkHidden?: boolean;
   showArrow?: boolean;
   iconTone?: EmailIconTone;
   style?: BlockStyleConfig;
@@ -403,12 +545,16 @@ export interface HeroTextBlock extends EmailBlockBase {
   type: "hero_text";
   headline: string;
   body: string;
+  inlineLinks?: InlineTextLink[];
   buttonLabel?: string;
   buttonUrl?: string;
   buttonStyle?: ModernButtonStyle;
   buttonCorner?: ButtonCornerStyle;
   buttonBgColor?: string;
   buttonTextColor?: string;
+  buttonBorderColor?: string;
+  buttonOpenInNewTab?: boolean;
+  buttonHidden?: boolean;
   style?: BlockStyleConfig;
 }
 
@@ -433,6 +579,9 @@ export interface StayDatesBlock extends EmailBlockBase {
   buttonCorner?: ButtonCornerStyle;
   buttonBgColor?: string;
   buttonTextColor?: string;
+  buttonBorderColor?: string;
+  buttonOpenInNewTab?: boolean;
+  buttonHidden?: boolean;
   style?: BlockStyleConfig;
 }
 
@@ -442,14 +591,19 @@ export interface FeatureCardBlock extends EmailBlockBase {
   imageUrl: string;
   imageId?: string;
   imageAlt: string;
+  imageLinkUrl?: string;
   title: string;
   body: string;
+  inlineLinks?: InlineTextLink[];
   buttonLabel?: string;
   buttonUrl?: string;
   buttonStyle?: ModernButtonStyle;
   buttonCorner?: ButtonCornerStyle;
   buttonBgColor?: string;
   buttonTextColor?: string;
+  buttonBorderColor?: string;
+  buttonOpenInNewTab?: boolean;
+  buttonHidden?: boolean;
   style?: BlockStyleConfig;
 }
 
@@ -464,18 +618,23 @@ export interface BenefitsListBlock extends EmailBlockBase {
   badgeImageUrl?: string;
   badgeImageId?: string;
   badgeImageAlt?: string;
+  badgeImageLinkUrl?: string;
   heading: string;
   listStyle: "bullet" | "icon";
   itemIcon?: EmailIconName;
   iconTone?: EmailIconTone;
   items: BenefitsListItem[];
   footnote?: string;
+  inlineLinks?: InlineTextLink[];
   buttonLabel?: string;
   buttonUrl?: string;
   buttonStyle?: ModernButtonStyle;
   buttonCorner?: ButtonCornerStyle;
   buttonBgColor?: string;
   buttonTextColor?: string;
+  buttonBorderColor?: string;
+  buttonOpenInNewTab?: boolean;
+  buttonHidden?: boolean;
   style?: BlockStyleConfig;
 }
 
@@ -484,6 +643,8 @@ export interface IconLinkGridItem {
   icon: EmailIconName;
   label: string;
   url: string;
+  hidden?: boolean;
+  openInNewTab?: boolean;
 }
 
 export interface IconLinkGridBlock extends EmailBlockBase {
@@ -508,15 +669,20 @@ export interface ImageWithListBlock extends EmailBlockBase {
   imageUrl: string;
   imageId?: string;
   imageAlt: string;
+  imageLinkUrl?: string;
   heading: string;
   iconTone?: EmailIconTone;
   items: ImageWithListItem[];
+  inlineLinks?: InlineTextLink[];
   buttonLabel?: string;
   buttonUrl?: string;
   buttonStyle?: ModernButtonStyle;
   buttonCorner?: ButtonCornerStyle;
   buttonBgColor?: string;
   buttonTextColor?: string;
+  buttonBorderColor?: string;
+  buttonOpenInNewTab?: boolean;
+  buttonHidden?: boolean;
   style?: BlockStyleConfig;
 }
 
@@ -524,6 +690,10 @@ export interface FooterNavLinkItem {
   id: string;
   label: string;
   url: string;
+  hidden?: boolean;
+  color?: string;
+  underline?: boolean;
+  openInNewTab?: boolean;
 }
 
 export interface FooterNavBlock extends EmailBlockBase {
@@ -531,6 +701,8 @@ export interface FooterNavBlock extends EmailBlockBase {
   links: FooterNavLinkItem[];
   secondaryText?: string;
   secondaryLinkUrl?: string;
+  secondaryLinkHidden?: boolean;
+  secondaryLinkOpenInNewTab?: boolean;
   showViewNote?: boolean;
   style?: BlockStyleConfig;
 }
@@ -544,12 +716,72 @@ export interface LegalSectionItem {
 export interface LegalSectionBlock extends EmailBlockBase {
   type: "legal_section";
   sections: LegalSectionItem[];
+  inlineLinks?: InlineTextLink[];
   copyrightText?: string;
   showFooterLogo?: boolean;
   footerLogoUrl?: string;
   footerLogoImageId?: string;
   footerLogoAlt?: string;
   footerLogoWidthPx?: number;
+  footerLogoLinkUrl?: string;
+  style?: BlockStyleConfig;
+}
+
+// --- 5 Standalone Editable Footer Blocks (Schema v3 Additive) ---
+
+export interface FooterContactBlock extends EmailBlockBase {
+  type: "footer_contact";
+  heading: string;
+  text: string;
+  inlineLinks?: InlineTextLink[];
+  emailOverride?: string;
+  phoneOverride?: string;
+  emailLinkEnabled?: boolean;
+  phoneLinkEnabled?: boolean;
+  linkColor?: string;
+  underline?: boolean;
+  style?: BlockStyleConfig;
+}
+
+export interface FooterAuthenticityBlock extends EmailBlockBase {
+  type: "footer_authenticity";
+  heading: string;
+  text: string;
+  inlineLinks?: InlineTextLink[];
+  style?: BlockStyleConfig;
+}
+
+export interface FooterCopyrightBlock extends EmailBlockBase {
+  type: "footer_copyright";
+  text: string;
+  inlineLinks?: InlineTextLink[];
+  showFooterLogo?: boolean;
+  footerLogoUrl?: string;
+  footerLogoImageId?: string;
+  footerLogoAlt?: string;
+  footerLogoWidthPx?: number;
+  footerLogoLinkUrl?: string;
+  footerLogoLinkOpenInNewTab?: boolean;
+  style?: BlockStyleConfig;
+}
+
+export interface FooterLegalBlock extends EmailBlockBase {
+  type: "footer_legal";
+  heading: string;
+  text: string;
+  inlineLinks?: InlineTextLink[];
+  style?: BlockStyleConfig;
+}
+
+export interface FooterPoweredByBlock extends EmailBlockBase {
+  type: "footer_powered_by";
+  text: string;
+  linkLabel?: string;
+  linkUrl?: string;
+  linkColor?: string;
+  underline?: boolean;
+  openInNewTab?: boolean;
+  linkHidden?: boolean;
   style?: BlockStyleConfig;
 }
 
@@ -576,7 +808,12 @@ export type EmailBlock =
   | IconLinkGridBlock
   | ImageWithListBlock
   | FooterNavBlock
-  | LegalSectionBlock;
+  | LegalSectionBlock
+  | FooterContactBlock
+  | FooterAuthenticityBlock
+  | FooterCopyrightBlock
+  | FooterLegalBlock
+  | FooterPoweredByBlock;
 
 export interface EmailTemplateBranding {
   accentBarEnabled: boolean;
@@ -594,11 +831,13 @@ export interface EmailTemplateBranding {
   logoImageId?: string;
   logoAlt?: string;
   logoWidthPx?: number;
+  logoLinkUrl?: string;
+  logoLinkOpenInNewTab?: boolean;
 }
 
 export interface EmailTemplateVariant {
-  /** Schema version: undefined or 1 = legacy classic layout (byte-for-byte preserved), 2 = modern responsive layout */
-  schemaVersion?: 1 | 2;
+  /** Schema version: undefined/1 = legacy classic default (byte-for-byte preserved), 2 = legacy modern layout, 3 = pure block-driven footer layout, 4 = fully editable links */
+  schemaVersion?: 1 | 2 | 3 | 4;
   subject: string;
   preheader: string;
   branding: EmailTemplateBranding;
@@ -659,6 +898,12 @@ export interface HotelEmailSettings {
     website?: string;
   };
   legalImprint?: string;
+  /** Optional reusable per-hotel footer blocks (per language), copied into drafts only when applied */
+  defaultFooterBlocks?: Partial<Record<SupportedEmailLanguage, EmailBlock[]>>;
+  /** Optional hotel-level default links (single URL + optional EN/DE per-language overrides) */
+  defaultLinks?: HotelDefaultLinks;
+  /** Optional reusable default footer navigation links (per language), copied into drafts only when applied */
+  defaultFooterNavLinks?: Partial<Record<SupportedEmailLanguage, FooterNavLinkItem[]>>;
   updatedBy?: string;
   updatedAt?: string;
 }

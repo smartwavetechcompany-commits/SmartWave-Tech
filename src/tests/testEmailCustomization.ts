@@ -7,6 +7,7 @@ import {
   EMAIL_ICON_TONES,
   type CustomizableEmailEventType,
   type EmailRenderContext,
+  type EmailTemplateDocument,
   type EmailTemplateVariant,
   type HotelEmailSettings,
 } from "../modules/emailCustomization/shared/types.ts";
@@ -17,16 +18,28 @@ import {
 import {
   EMAIL_PLACEHOLDER_IMAGES,
   STARTER_LAYOUT_PRESETS,
+  buildDefaultFooterBlocks,
   buildStarterPresetVariant,
+  replaceFooterBlocksInList,
 } from "../modules/emailCustomization/shared/presets.ts";
-import { isModernV2Variant } from "../modules/emailCustomization/shared/renderer.ts";
 import {
+  isModernV2Variant,
+  renderEmailTemplate,
+} from "../modules/emailCustomization/shared/renderer.ts";
+import {
+  applyDefaultFooterToTemplateDoc,
+  applyDefaultLinksToTemplateDoc,
+} from "../modules/emailCustomization/server/resolver.ts";
+import {
+  buildTemplateVariablesMap,
+  extractTemplateLinksOverview,
   formatEmailCurrency,
   formatEmailDate,
   formatEmailTime,
   measureEmailHtmlBytes,
   validateEmailUrl,
   validateHotelEmailSettings,
+  validateLinkLabelAgainstUrl,
   validateTemplateVariant,
   validateTemplateVariables,
 } from "../modules/emailCustomization/shared/validation.ts";
@@ -1708,13 +1721,18 @@ async function run() {
     }
   });
 
-  // 26. All 4 starter layout presets (EN & DE) validate with 0 issues, render < 90 KB, and contain zero third-party brands
-  await test("26. All 4 starter layout presets (EN & DE) validate cleanly, stay under 90 KB HTML, and contain zero third-party trademarks", () => {
+  // 26. All 4 starter layout presets (EN & DE) validate with 0 issues, use schemaVersion 3 standalone footers, render < 90 KB, and contain zero third-party brands
+  await test("26. All 4 starter layout presets (EN & DE) validate cleanly (v3 editable footers), stay under 90 KB HTML, and contain zero third-party trademarks", () => {
     const forbiddenTerms = ["marriott", "bonvoy", "hilton", "hyatt", "airbnb"];
     for (const preset of STARTER_LAYOUT_PRESETS) {
       for (const lang of ["en", "de"] as const) {
         const variant = buildStarterPresetVariant(preset.id, "booking_confirmation", lang, "https://tidehotels.de");
-        assert.strictEqual(variant.schemaVersion, 2);
+        assert.strictEqual(variant.schemaVersion, 3, `Preset ${preset.id} (${lang}) should use schemaVersion 3`);
+        assert.ok(variant.blocks.some((b) => b.type === "footer_contact"), `Preset ${preset.id} missing footer_contact`);
+        assert.ok(variant.blocks.some((b) => b.type === "footer_authenticity"), `Preset ${preset.id} missing footer_authenticity`);
+        assert.ok(variant.blocks.some((b) => b.type === "footer_copyright"), `Preset ${preset.id} missing footer_copyright`);
+        assert.ok(!variant.blocks.some((b) => b.type === "footer_powered_by"), `Preset ${preset.id} must NOT include footer_powered_by by default`);
+
         const issues = validateTemplateVariant(variant);
         assert.strictEqual(issues.length, 0, `Preset ${preset.id} (${lang}) failed validation: ${JSON.stringify(issues)}`);
 
@@ -1937,6 +1955,1239 @@ async function run() {
       assert.strictEqual(sentPayloads.length, 1);
       assert.ok(!sentPayloads[0].html.includes("v:roundrect"), "Rollback must render classic v1 default HTML");
       assert.ok(sentPayloads[0].html.includes("Harborview Suites"));
+    } finally {
+      if (prevFlag === undefined) delete process.env.EMAIL_CUSTOMIZATION_ENABLED;
+      else process.env.EMAIL_CUSTOMIZATION_ENABLED = prevFlag;
+    }
+  });
+
+  // 29. Untouched v1 default template remains byte-for-byte identical (including footer)
+  await test("29. Untouched default template stays byte-for-byte identical (including classic footer and zero v2/v3 leak)", async () => {
+    const v1Default = buildDefaultTemplateForHotel("booking_confirmation", SAMPLE_HOTEL, "en");
+    assert.strictEqual(v1Default.schemaVersion, undefined, "Untouched default template must stay v1");
+    assert.ok(v1Default.blocks.some((b) => b.type === "footer"), "Untouched default keeps classic footer block");
+    assert.ok(!v1Default.blocks.some((b) => b.type === "footer_contact"), "Untouched default must not silently convert to v3 blocks");
+
+    const renderedDefault = renderHotelEmailServerSide({
+      variant: v1Default,
+      context: BASE_CONTEXT,
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "en",
+      usedDefaultLayout: true,
+    });
+
+    // Dispatch via sendHotelEmail with untouched default resolver and verify exact byte-for-byte match
+    const dispatched: SendEmailParams[] = [];
+    const dispatchRes = await sendHotelEmail("hotel_alpha", "booking_confirmation", {
+      reservationId: "RES8A4F2",
+      preloaded: {
+        hotel: SAMPLE_HOTEL,
+        reservation: {
+          id: "RES8A4F2",
+          hotelId: "hotel_alpha",
+          guestName: "Alex Morgan",
+          guestEmail: "alex.morgan@example.com",
+          roomNumber: "204",
+          roomType: "Deluxe King Suite",
+          checkIn: "2026-11-24",
+          checkInTime: "14:00",
+          checkOut: "2026-11-27",
+          checkOutTime: "12:00",
+          totalAmount: 270000,
+          depositAmount: 90000,
+          status: "confirmed",
+        },
+        guest: null,
+        room: null,
+      },
+      overrides: {
+        appUrl: "https://tidehotels.de",
+        resolveTemplateFn: async () => ({
+          enabled: true,
+          language: "en",
+          variant: v1Default,
+          settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+          usedDefaultLayout: true,
+          publishedVersion: 0,
+        }),
+        sendEmailFn: async (p) => {
+          dispatched.push(p);
+          return {
+            success: true,
+            messageId: "msg_v1_byte_parity",
+            deliveryState: "accepted_by_provider",
+            provider: "resend",
+            statusCode: 200,
+          };
+        },
+        persistMarkerFn: async () => true,
+      },
+    });
+
+    assert.strictEqual(dispatchRes.ok, true);
+    assert.strictEqual(dispatchRes.usedDefaultLayout, true);
+    assert.strictEqual(dispatched.length, 1);
+    assert.strictEqual(dispatched[0].html, renderedDefault.html, "Dispatched untouched default HTML must be byte-for-byte identical");
+    assert.strictEqual(dispatched[0].text, renderedDefault.text, "Dispatched untouched default plain text must be byte-for-byte identical");
+    assert.ok(renderedDefault.html.includes("Harborview Suites Contact"), "Classic v1 footer contact heading preserved");
+    assert.ok(renderedDefault.html.includes("Address: 100 Marina Blvd, Coastal City"), "Classic v1 footer address preserved");
+    assert.ok(!renderedDefault.html.includes("ec-stack"), "Untouched v1 default must contain zero v2/v3 CSS classes");
+  });
+
+  // 30. Edited Contact Us, Confirmation Authenticity, and Copyright blocks render with custom wording & styling in HTML and plain text
+  await test("30. Edited Contact Us, Confirmation Authenticity, and Copyright blocks appear in rendered HTML and plain text with custom styling", () => {
+    const preset = buildStarterPresetVariant("modern_resort", "booking_confirmation", "en", "https://tidehotels.de");
+    preset.blocks = preset.blocks.map((b) => {
+      if (b.type === "footer_contact") {
+        return {
+          ...b,
+          heading: "Concierge Desk 24/7",
+          text: "Speak directly with {{hotel_name}} Concierge at {{hotel_phone}} or {{hotel_email}}.",
+          style: {
+            align: "center",
+            fontFamily: "georgia",
+            fontSizePx: 14,
+            accentColor: "#0f766e",
+            textColor: "#334155",
+            paddingY: 16,
+          },
+        };
+      }
+      if (b.type === "footer_authenticity") {
+        return {
+          ...b,
+          heading: "Official Booking Verification",
+          text: "Verified record {{booking_reference}} issued exclusively by {{hotel_name}}.",
+          style: { align: "right", fontSizePx: 12 },
+        };
+      }
+      if (b.type === "footer_copyright") {
+        return {
+          ...b,
+          text: "© 2026 {{hotel_name}} Hospitality Group · {{hotel_address}}",
+          style: { align: "center", fontFamily: "verdana", fontSizePx: 11, textColor: "#475569" },
+        };
+      }
+      return b;
+    });
+
+    const issues = validateTemplateVariant(preset);
+    assert.strictEqual(issues.length, 0, `Edited v3 footer must validate cleanly: ${JSON.stringify(issues)}`);
+
+    const rendered = renderHotelEmailServerSide({
+      variant: preset,
+      context: BASE_CONTEXT,
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+
+    assert.ok(rendered.html.includes("Concierge Desk 24/7"));
+    assert.ok(rendered.html.includes("Speak directly with Harborview Suites Concierge at +49 30 555 0199"));
+    assert.ok(rendered.html.includes("Official Booking Verification"));
+    assert.ok(rendered.html.includes("Verified record RES8A4F2 issued exclusively by Harborview Suites."));
+    assert.ok(rendered.html.includes("© 2026 Harborview Suites Hospitality Group · 100 Marina Blvd, Coastal City"));
+    assert.ok(rendered.html.includes("Georgia"), "Custom block fontFamily must render in HTML");
+    assert.ok(rendered.html.includes("font-size:14px"), "Custom block fontSizePx must render in HTML");
+    assert.ok(rendered.html.includes("color:#0f766e"), "Custom heading accentColor must render in HTML");
+
+    assert.ok(rendered.text.includes("Concierge Desk 24/7"));
+    assert.ok(rendered.text.includes("Official Booking Verification"));
+    assert.ok(rendered.text.includes("© 2026 Harborview Suites Hospitality Group · 100 Marina Blvd, Coastal City"));
+  });
+
+  // 31. Deleted or hidden footer blocks never appear in rendered HTML or plain text
+  await test("31. Deleting or hiding (hidden: true) a footer block completely removes it from HTML and plain text", () => {
+    const preset = buildStarterPresetVariant("minimal", "booking_confirmation", "en", "https://tidehotels.de");
+    // Delete footer_authenticity AND hide footer_contact
+    preset.blocks = preset.blocks
+      .filter((b) => b.type !== "footer_authenticity")
+      .map((b) => (b.type === "footer_contact" ? { ...b, hidden: true } : b));
+
+    const issues = validateTemplateVariant(preset);
+    assert.strictEqual(issues.length, 0);
+
+    const rendered = renderHotelEmailServerSide({
+      variant: preset,
+      context: BASE_CONTEXT,
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+
+    assert.ok(!rendered.html.includes("Confirmation Authenticity"), "Deleted footer_authenticity must not appear in HTML");
+    assert.ok(!rendered.text.includes("Confirmation Authenticity"), "Deleted footer_authenticity must not appear in text");
+    assert.ok(!rendered.html.includes("For questions regarding your reservation"), "Hidden footer_contact must not appear in HTML");
+    assert.ok(!rendered.text.includes("For questions regarding your reservation"), "Hidden footer_contact must not appear in text");
+    // Remaining copyright block still renders
+    assert.ok(rendered.html.includes("© Harborview Suites · 100 Marina Blvd, Coastal City"));
+    assert.ok(rendered.text.includes("© Harborview Suites · 100 Marina Blvd, Coastal City"));
+  });
+
+  // 32. Added extra Legal / Impressum blocks render cleanly & resolve {{legal_imprint}} + track footer logo image refs
+  await test("32. Added Legal / Impressum & Cancellation Policy blocks render cleanly, resolve {{legal_imprint}}, and track footerLogoImageId", () => {
+    const preset = buildStarterPresetVariant("business_hotel", "booking_confirmation", "en", "https://tidehotels.de");
+    preset.blocks.push(
+      {
+        id: "legal_impressum",
+        type: "footer_legal",
+        heading: "Impressum / Legal Notice",
+        text: "{{legal_imprint}}",
+      },
+      {
+        id: "legal_cancel",
+        type: "footer_legal",
+        heading: "Cancellation Policy",
+        text: "Free cancellation up to 48 hours before {{check_in_date}} at {{hotel_name}}.",
+      }
+    );
+    preset.blocks = preset.blocks.map((b) =>
+      b.type === "footer_copyright"
+        ? {
+            ...b,
+            footerLogoImageId: "img_footer_mark",
+            footerLogoUrl: "https://cdn.example/footer-mark.png",
+          }
+        : b
+    );
+
+    const settingsWithImprint: HotelEmailSettings = {
+      ...DEFAULT_HOTEL_EMAIL_SETTINGS,
+      legalImprint: "Harborview Suites GmbH · HRB 99120 Berlin · VAT DE123456789",
+    };
+
+    const issues = validateTemplateVariant(preset);
+    assert.strictEqual(issues.length, 0);
+
+    const rendered = renderHotelEmailServerSide({
+      variant: preset,
+      context: BASE_CONTEXT,
+      settings: settingsWithImprint,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+
+    assert.ok(rendered.html.includes("Impressum / Legal Notice"));
+    assert.ok(rendered.html.includes("Harborview Suites GmbH · HRB 99120 Berlin · VAT DE123456789"));
+    assert.ok(rendered.html.includes("Cancellation Policy"));
+    assert.ok(rendered.html.includes("Free cancellation up to 48 hours before 2026-11-24 at Harborview Suites."));
+    assert.ok(rendered.text.includes("Harborview Suites GmbH · HRB 99120 Berlin · VAT DE123456789"));
+    assert.ok(rendered.text.includes("Cancellation Policy"));
+
+    const refs = extractReferencedImages(preset);
+    assert.ok(refs.imageIds.has("img_footer_mark"), "extractReferencedImages must track footer_copyright.footerLogoImageId");
+    assert.ok(refs.urls.has("https://cdn.example/footer-mark.png"));
+  });
+
+  // 33. Email Settings (legalImprint, hotelFooterNotes) do NOT silently inject into schemaVersion 3 emails
+  await test("33. Settings legalImprint and hotelFooterNotes are NEVER silently injected into v3 templates unless referenced by a block", () => {
+    const preset = buildStarterPresetVariant("minimal", "booking_confirmation", "en", "https://tidehotels.de");
+    // Remove all footer blocks so the email has zero footer references
+    preset.blocks = preset.blocks.filter(
+      (b) => b.type !== "footer_contact" && b.type !== "footer_authenticity" && b.type !== "footer_copyright"
+    );
+
+    const rendered = renderHotelEmailServerSide({
+      variant: preset,
+      context: {
+        ...BASE_CONTEXT,
+        hotelFooterNotes: "SECRET_SILENT_HOTEL_NOTE_999",
+      },
+      settings: {
+        ...DEFAULT_HOTEL_EMAIL_SETTINGS,
+        legalImprint: "SECRET_SILENT_IMPRINT_888",
+      },
+      language: "en",
+      usedDefaultLayout: false,
+    });
+
+    assert.ok(!rendered.html.includes("SECRET_SILENT_IMPRINT_888"), "settings.legalImprint must NOT be silently appended in v3");
+    assert.ok(!rendered.text.includes("SECRET_SILENT_IMPRINT_888"), "settings.legalImprint must NOT appear in v3 plain text");
+    assert.ok(!rendered.html.includes("SECRET_SILENT_HOTEL_NOTE_999"), "hotelFooterNotes must NOT be silently appended in v3");
+    assert.ok(!rendered.html.includes("Contact Us"), "Removed Contact Us must not reappear from renderer");
+    assert.ok(!rendered.html.includes("Confirmation Authenticity"), "Removed Authenticity must not reappear from renderer");
+  });
+
+  // 34. Unknown variables and template logic in footer blocks & defaultFooterBlocks are rejected on save
+  await test("34. Unknown variables and template logic in footer blocks and settings.defaultFooterBlocks are rejected", () => {
+    const preset = buildStarterPresetVariant("minimal", "booking_confirmation", "en", "https://tidehotels.de");
+    preset.blocks.push(
+      {
+        id: "bad_var_footer",
+        type: "footer_contact",
+        heading: "Reach Us",
+        text: "Secret token: {{admin_api_secret}}",
+      },
+      {
+        id: "bad_logic_footer",
+        type: "footer_legal",
+        heading: "Terms",
+        text: "{{#if guest_name}}Hidden branch{{/if}}",
+      }
+    );
+
+    const issues = validateTemplateVariant(preset);
+    assert.ok(issues.some((i) => i.message.includes("admin_api_secret") || i.message.includes("unsupported variable")));
+    assert.ok(issues.some((i) => i.message.includes("logic") || i.message.includes("helpers")));
+
+    // Same strict rules enforced on settings.defaultFooterBlocks
+    const badSettings: HotelEmailSettings = {
+      ...DEFAULT_HOTEL_EMAIL_SETTINGS,
+      defaultFooterBlocks: {
+        en: [
+          {
+            id: "def_bad",
+            type: "footer_copyright",
+            text: "© {{unknown_company_var}}",
+          },
+        ],
+      },
+    };
+    const settingsIssues = validateHotelEmailSettings(badSettings);
+    assert.ok(settingsIssues.some((i) => i.path.startsWith("defaultFooterBlocks.en")));
+  });
+
+  // 35. Dangerous HTML and javascript: links in footer blocks are rejected on save and stripped/escaped on render
+  await test("35. Dangerous HTML (<script>, onerror) and javascript: links in footer blocks are rejected and neutralized", () => {
+    const preset = buildStarterPresetVariant("minimal", "booking_confirmation", "en", "https://tidehotels.de");
+    preset.blocks.push(
+      {
+        id: "xss_legal",
+        type: "footer_legal",
+        heading: '<img src=x onerror="alert(1)">Notice',
+        text: '<script>evil()</script>Safe legal copy.',
+      },
+      {
+        id: "bad_powered",
+        type: "footer_powered_by",
+        text: "Powered by Evil",
+        linkLabel: "Click",
+        linkUrl: "javascript:alert(document.cookie)",
+      },
+      {
+        id: "bad_logo_copy",
+        type: "footer_copyright",
+        text: "© {{hotel_name}}",
+        footerLogoUrl: "http://insecure.example/logo.png",
+      }
+    );
+
+    const issues = validateTemplateVariant(preset);
+    assert.ok(issues.some((i) => i.path.includes(".linkUrl")), "javascript: linkUrl on footer_powered_by must be rejected");
+    assert.ok(issues.some((i) => i.path.includes(".footerLogoUrl")), "Non-HTTPS footerLogoUrl must be rejected");
+
+    const rendered = renderHotelEmailServerSide({
+      variant: preset,
+      context: BASE_CONTEXT,
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+    assert.ok(!rendered.html.includes("<script>"), "Script tag must be escaped in footer HTML");
+    assert.ok(!rendered.html.includes('onerror="alert(1)"'), "Raw HTML event handler must be escaped");
+    assert.ok(!rendered.html.includes("javascript:"), "javascript: link must be stripped from footer_powered_by");
+    assert.ok(rendered.html.includes("Safe legal copy."));
+  });
+
+  // 36. EN and DE footers render independently per language
+  await test("36. EN and DE standalone footers render independently per language", () => {
+    const enVariant = buildStarterPresetVariant("modern_resort", "booking_confirmation", "en", "https://tidehotels.de");
+    const deVariant = buildStarterPresetVariant("modern_resort", "booking_confirmation", "de", "https://tidehotels.de");
+
+    enVariant.blocks = enVariant.blocks.map((b) =>
+      b.type === "footer_contact" ? { ...b, heading: "English Front Desk" } : b
+    );
+    deVariant.blocks = deVariant.blocks.map((b) =>
+      b.type === "footer_contact" ? { ...b, heading: "Deutsche Rezeption" } : b
+    );
+
+    const enRendered = renderHotelEmailServerSide({
+      variant: enVariant,
+      context: BASE_CONTEXT,
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+    const deRendered = renderHotelEmailServerSide({
+      variant: deVariant,
+      context: BASE_CONTEXT,
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "de",
+      usedDefaultLayout: false,
+    });
+
+    assert.ok(enRendered.html.includes("English Front Desk") && !enRendered.html.includes("Deutsche Rezeption"));
+    assert.ok(deRendered.html.includes("Deutsche Rezeption") && !deRendered.html.includes("English Front Desk"));
+    assert.ok(deRendered.html.includes("Echtheit dieser Bestätigung"), "DE default authenticity heading must be German");
+    assert.ok(enRendered.html.includes("Confirmation Authenticity"), "EN default authenticity heading must be English");
+  });
+
+  // 37. Reusable default footer applies to drafts ONLY across events (published untouched) & footer_powered_by is OFF by default
+  await test("37. applyDefaultFooterToTemplateDoc updates drafts ONLY (published untouched) and footer_powered_by is OFF by default", () => {
+    const stdEn = buildDefaultFooterBlocks("en");
+    const stdDe = buildDefaultFooterBlocks("de");
+    assert.strictEqual(stdEn.length, 3);
+    assert.strictEqual(stdDe.length, 3);
+    assert.ok(!stdEn.some((b) => b.type === "footer_powered_by"), "footer_powered_by must be OFF by default in EN");
+    assert.ok(!stdDe.some((b) => b.type === "footer_powered_by"), "footer_powered_by must be OFF by default in DE");
+
+    const publishedEn = buildDefaultTemplateForHotel("booking_confirmation", SAMPLE_HOTEL, "en");
+    const publishedDe = buildDefaultTemplateForHotel("booking_confirmation", SAMPLE_HOTEL, "de");
+    const originalPublishedJson = JSON.stringify({ en: publishedEn, de: publishedDe });
+
+    const doc: EmailTemplateDocument = {
+      eventType: "booking_confirmation",
+      enabled: true,
+      isCustomized: true,
+      defaultLanguage: "en",
+      publishedVersion: 4,
+      published: { en: JSON.parse(JSON.stringify(publishedEn)), de: JSON.parse(JSON.stringify(publishedDe)) },
+      draft: { en: JSON.parse(JSON.stringify(publishedEn)), de: JSON.parse(JSON.stringify(publishedDe)) },
+      versions: [],
+      updatedAt: "2026-11-01T00:00:00.000Z",
+      updatedBy: "admin@harborview.example",
+    };
+
+    const customDefaultFooters = {
+      en: [
+        { id: "c1", type: "footer_contact" as const, heading: "Hotel Support", text: "Call {{hotel_phone}}." },
+        { id: "c2", type: "footer_copyright" as const, text: "© {{hotel_name}} Custom" },
+      ],
+      de: [
+        { id: "d1", type: "footer_contact" as const, heading: "Hotel-Support", text: "Rufen Sie {{hotel_phone}} an." },
+      ],
+    };
+
+    const nextDoc = applyDefaultFooterToTemplateDoc(
+      doc,
+      customDefaultFooters,
+      "admin@harborview.example",
+      "2026-11-20T12:00:00.000Z"
+    );
+
+    // Published snapshot, version, and isCustomized are 100% untouched
+    assert.strictEqual(JSON.stringify(nextDoc.published), originalPublishedJson, "Published templates MUST NOT change");
+    assert.strictEqual(nextDoc.publishedVersion, 4);
+    assert.strictEqual(nextDoc.isCustomized, true);
+
+    // Drafts updated to v3 with the new footer blocks while body blocks remain intact
+    assert.strictEqual(nextDoc.draft.en?.schemaVersion, 3);
+    assert.ok(nextDoc.draft.en?.blocks.some((b) => b.type === "footer_contact" && b.heading === "Hotel Support"));
+    assert.ok(nextDoc.draft.en?.blocks.some((b) => b.type === "heading"), "Body blocks must be preserved");
+    assert.ok(!nextDoc.draft.en?.blocks.some((b) => b.type === "footer"), "Old combined footer block replaced");
+
+    assert.strictEqual(nextDoc.draft.de?.schemaVersion, 3);
+    assert.ok(nextDoc.draft.de?.blocks.some((b) => b.type === "footer_contact" && b.heading === "Hotel-Support"));
+
+    // replaceFooterBlocksInList preserves footer_nav by default
+    const withNav = replaceFooterBlocksInList(
+      [
+        { id: "h1", type: "heading", level: 2, text: "Hello" },
+        { id: "n1", type: "footer_nav", links: [{ id: "l1", label: "Web", url: "{{hotel_website}}" }] },
+        { id: "f1", type: "footer_copyright", text: "Old" },
+      ],
+      [{ id: "f2", type: "footer_copyright", text: "New" }],
+      { replaceNav: false }
+    );
+    assert.ok(withNav.some((b) => b.type === "heading"));
+    assert.ok(withNav.some((b) => b.type === "footer_nav"));
+    assert.ok(withNav.some((b) => b.type === "footer_copyright" && b.text === "New"));
+  });
+
+  // 38. Feature flag EMAIL_CUSTOMIZATION_ENABLED=false forces default templates even when v3 footers exist
+  await test("38. EMAIL_CUSTOMIZATION_ENABLED=false forces exact untouched default templates (including default footer)", async () => {
+    const prevFlag = process.env.EMAIL_CUSTOMIZATION_ENABLED;
+    process.env.EMAIL_CUSTOMIZATION_ENABLED = "false";
+    const sent: SendEmailParams[] = [];
+    try {
+      const res = await sendHotelEmail("hotel_alpha", "booking_confirmation", {
+        reservationId: "RES_FLAG_OFF_V3",
+        preloaded: {
+          hotel: SAMPLE_HOTEL,
+          reservation: {
+            id: "RES_FLAG_OFF_V3",
+            hotelId: "hotel_alpha",
+            guestName: "Alex Morgan",
+            guestEmail: "alex@example.com",
+            roomNumber: "204",
+            checkIn: "2026-11-24",
+            checkOut: "2026-11-27",
+            status: "confirmed",
+          },
+          guest: null,
+          room: null,
+        },
+        overrides: {
+          appUrl: "https://tidehotels.de",
+          resolveTemplateFn: async () => {
+            throw new Error("Resolver must NOT run when feature flag is false");
+          },
+          sendEmailFn: async (p) => {
+            sent.push(p);
+            return {
+              success: true,
+              messageId: "msg_flag_off_v3",
+              deliveryState: "accepted_by_provider",
+              provider: "resend",
+              statusCode: 200,
+            };
+          },
+          persistMarkerFn: async () => true,
+        },
+      });
+      assert.strictEqual(res.ok, true);
+      assert.strictEqual(res.usedDefaultLayout, true);
+      assert.strictEqual(sent.length, 1);
+      assert.ok(sent[0].html.includes("Harborview Suites"));
+      assert.ok(!sent[0].html.includes("em-stack"), "Flag OFF must output classic v1 default");
+    } finally {
+      if (prevFlag === undefined) delete process.env.EMAIL_CUSTOMIZATION_ENABLED;
+      else process.env.EMAIL_CUSTOMIZATION_ENABLED = prevFlag;
+    }
+  });
+
+  // 39. Untouched default emails remain byte-for-byte identical (including every default link & plain text)
+  await test("39. Untouched v1 default templates remain byte-for-byte identical including all default links", () => {
+    for (const eventType of CUSTOMIZABLE_EMAIL_EVENTS) {
+      const enDefault = buildDefaultTemplateForHotel(eventType, SAMPLE_HOTEL, "en");
+      const deDefault = buildDefaultTemplateForHotel(eventType, SAMPLE_HOTEL, "de");
+      const r1 = renderHotelEmailServerSide({
+        variant: enDefault,
+        context: BASE_CONTEXT,
+        settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+        language: "en",
+        usedDefaultLayout: true,
+      });
+      const r2 = renderEmailTemplate({
+        variant: enDefault,
+        context: BASE_CONTEXT,
+        settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+        language: "en",
+        usedDefaultLayout: true,
+      });
+      assert.strictEqual(r1.html, r2.html, `${eventType} EN server & shared renderer must match byte-for-byte`);
+      assert.strictEqual(r1.text, r2.text, `${eventType} EN plain text must match byte-for-byte`);
+      assert.strictEqual(enDefault.schemaVersion, undefined, `${eventType} untouched default remains v1`);
+      assert.ok(!r1.html.includes("[[link:"), `${eventType} untouched default must not leak inline link tokens`);
+      assert.ok(r1.html.includes('href="mailto:reservations@harborview.example"'), `${eventType} default mailto preserved`);
+      assert.ok(r1.html.includes('href="tel:+49 30 555 0199"'), `${eventType} v1 default tel parity preserved`);
+      assert.ok(!r1.html.includes('href="mailto:reservations@harborview.example" target="_blank"'), "mailto must never open in new tab");
+
+      const rDe = renderHotelEmailServerSide({
+        variant: deDefault,
+        context: BASE_CONTEXT,
+        settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+        language: "de",
+        usedDefaultLayout: true,
+      });
+      assert.ok(!rDe.html.includes("undefined"), `${eventType} DE untouched default has no undefined`);
+    }
+  });
+
+  // 40. Editing every link type updates rendered HTML & plain text ("text (URL)") in EN and DE; mailto:/tel: never get target="_blank"
+  await test("40. Editing every link type (button, inline paragraph, image, header logo, footer nav, mailto/tel contact, social) renders cleanly in EN & DE", () => {
+    const settings: HotelEmailSettings = {
+      ...DEFAULT_HOTEL_EMAIL_SETTINGS,
+      defaultLinks: {
+        website: {
+          defaultUrl: "https://harborview.example",
+          byLanguage: { en: "https://harborview.example/en", de: "https://harborview.example/de" },
+        },
+        review: { defaultUrl: "https://harborview.example/review" },
+        directions: { defaultUrl: "https://maps.example/harborview" },
+        socialInstagram: { defaultUrl: "https://instagram.com/harborview" },
+      },
+    };
+
+    const variant: EmailTemplateVariant = {
+      schemaVersion: 4,
+      subject: "Your Stay at {{hotel_name}}",
+      preheader: "Every link edited cleanly",
+      branding: {
+        logoUrl: "https://cdn.example/hotel-logo.png",
+        logoLinkUrl: "{{hotel_website}}",
+        logoLinkOpenInNewTab: true,
+        accentBarColor: "#0f766e",
+        buttonColor: "#0f766e",
+        buttonTextColor: "#ffffff",
+      },
+      blocks: [
+        {
+          id: "bh1",
+          type: "brand_header",
+          logoUrl: "https://cdn.example/hotel-logo.png",
+          logoLinkUrl: "{{hotel_website}}",
+          logoLinkOpenInNewTab: true,
+          showHotelName: true,
+          showAddress: true,
+          addressLinkUrl: "{{directions_link}}",
+          showPhone: true,
+          phoneAsLink: true,
+          phoneLinkOverride: "tel:+49 30 999 0001",
+          showEmail: true,
+          emailAsLink: true,
+          emailLinkOverride: "mailto:vip@harborview.example",
+        },
+        {
+          id: "p1",
+          type: "paragraph",
+          text: "Review our [[link:l_guide]] or [[link:l_email]] before arrival.",
+          inlineLinks: [
+            {
+              id: "l_guide",
+              label: "Arrival Guide",
+              url: "https://harborview.example/guide",
+              openInNewTab: true,
+              underline: true,
+              color: "#0f766e",
+            },
+            {
+              id: "l_email",
+              label: "email concierge",
+              url: "mailto:concierge@harborview.example",
+              underline: false,
+            },
+          ],
+        },
+        {
+          id: "img1",
+          type: "image",
+          src: "https://cdn.example/pool.png",
+          alt: "Pool deck",
+          linkUrl: "https://harborview.example/pool",
+          linkOpenInNewTab: true,
+        },
+        {
+          id: "btn1",
+          type: "button",
+          label: "Leave Feedback",
+          url: "{{review_link}}",
+          openInNewTab: true,
+          backgroundColor: "#0f766e",
+          textColor: "#ffffff",
+          borderColor: "#134e4a",
+          borderRadius: 10,
+        },
+        {
+          id: "soc1",
+          type: "social_links",
+          links: [
+            { platform: "instagram", label: "Instagram", url: "{{social_instagram}}", openInNewTab: true },
+            { platform: "website", label: "Hotel Site", url: "{{hotel_website}}", openInNewTab: false },
+          ],
+        },
+        {
+          id: "fnav1",
+          type: "footer_nav",
+          links: [
+            { id: "fn1", label: "Terms", url: "https://harborview.example/terms", underline: true, color: "#0f766e" },
+            { id: "fn2", label: "Call Desk", url: "tel:+49 30 555 0199" },
+            { id: "fn3", label: "Email Desk", url: "mailto:desk@harborview.example" },
+          ],
+        },
+        {
+          id: "fc1",
+          type: "footer_contact",
+          heading: "Concierge",
+          text: "Reach us via [[link:fc_call]] or [[link:fc_mail]].",
+          inlineLinks: [
+            { id: "fc_call", label: "+49 30 555 0199", url: "tel:{{hotel_phone}}" },
+            { id: "fc_mail", label: "{{hotel_email}}", url: "mailto:{{hotel_email}}" },
+          ],
+        },
+      ],
+    };
+
+    const issues = validateTemplateVariant(variant);
+    assert.strictEqual(issues.length, 0, `Valid v4 link template must pass validation: ${JSON.stringify(issues)}`);
+
+    const enRendered = renderHotelEmailServerSide({
+      variant,
+      context: BASE_CONTEXT,
+      settings,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+    const deRendered = renderHotelEmailServerSide({
+      variant,
+      context: BASE_CONTEXT,
+      settings,
+      language: "de",
+      usedDefaultLayout: false,
+    });
+
+    // HTML assertions (EN)
+    assert.ok(enRendered.html.includes('href="https://harborview.example/en"'), "Header logo & site link resolved EN URL");
+    assert.ok(enRendered.html.includes('href="https://maps.example/harborview"'), "Address link resolved directions_link");
+    assert.ok(enRendered.html.includes('href="tel:+49309990001"'), "Phone override normalized cleanly");
+    assert.ok(enRendered.html.includes('href="mailto:vip@harborview.example"'), "Email override rendered");
+    assert.ok(enRendered.html.includes('href="https://harborview.example/guide" target="_blank" rel="noopener noreferrer"'));
+    assert.ok(enRendered.html.includes('href="mailto:concierge@harborview.example"'));
+    assert.ok(!enRendered.html.includes('href="mailto:concierge@harborview.example" target="_blank"'), "mailto inline link must NOT have target=_blank");
+    assert.ok(!enRendered.html.includes('href="tel:+49305550199" target="_blank"'), "tel footer link must NOT have target=_blank");
+    assert.ok(enRendered.html.includes('href="https://harborview.example/pool"'), "Image link rendered");
+    assert.ok(enRendered.html.includes('href="https://harborview.example/review"'), "Button review link rendered");
+    assert.ok(enRendered.html.includes('href="https://instagram.com/harborview"'), "Social Instagram link rendered");
+    assert.ok(enRendered.html.includes('href="https://harborview.example/terms"'), "Footer nav Terms link rendered");
+
+    // Plain-text assertions ("label (URL)")
+    assert.ok(enRendered.text.includes("Arrival Guide (https://harborview.example/guide)"), "Plain text renders inline link as label (URL)");
+    assert.ok(enRendered.text.includes("email concierge (mailto:concierge@harborview.example)"), "Plain text renders mailto inline link");
+    assert.ok(enRendered.text.includes("Leave Feedback: https://harborview.example/review"), "Plain text renders button link");
+    assert.ok(enRendered.text.includes("Terms (https://harborview.example/terms)"), "Plain text renders footer nav link");
+
+    // DE language override resolves DE URL
+    assert.ok(deRendered.html.includes('href="https://harborview.example/de"'), "DE render resolved DE language URL override");
+    assert.ok(!deRendered.html.includes('href="https://harborview.example/en"'), "DE render did not leak EN override");
+
+    // Links overview extracts all links cleanly
+    const overview = extractTemplateLinksOverview(variant, BASE_CONTEXT, settings, "en");
+    assert.ok(overview.length >= 10, `Expected >= 10 links in overview, got ${overview.length}`);
+    assert.ok(overview.every((item) => item.status !== "invalid"), "All valid links must not be marked invalid");
+  });
+
+  // 41. Hiding or deleting links removes them from both HTML and plain text; renderer injects zero links outside blocks
+  await test("41. Hiding (hidden/buttonHidden/linkHidden) or deleting links completely removes them from HTML and plain text", () => {
+    const variant: EmailTemplateVariant = {
+      schemaVersion: 4,
+      subject: "Minimal Notice",
+      branding: {
+        logoUrl: "https://cdn.example/logo.png",
+        logoLinkUrl: "",
+        accentBarColor: "#0f766e",
+        buttonColor: "#0f766e",
+        buttonTextColor: "#ffffff",
+      },
+      blocks: [
+        {
+          id: "p_hide",
+          type: "paragraph",
+          text: "Visible copy [[link:h1]] end.",
+          inlineLinks: [
+            { id: "h1", label: "SECRET_HIDDEN_LINK", url: "https://harborview.example/hidden", hidden: true },
+          ],
+        },
+        {
+          id: "hero_hide",
+          type: "hero_text",
+          headline: "Hello {{guest_name}}",
+          body: "No CTA shown.",
+          buttonLabel: "HIDDEN_CTA_BUTTON",
+          buttonUrl: "https://harborview.example/cta",
+          buttonHidden: true,
+        },
+        {
+          id: "img_hide",
+          type: "image",
+          src: "https://cdn.example/pic.png",
+          alt: "Lobby",
+          linkUrl: "https://harborview.example/img-hidden",
+          linkHidden: true,
+        },
+        {
+          id: "fnav_hide",
+          type: "footer_nav",
+          links: [
+            { id: "fn_vis", label: "Visible Link", url: "https://harborview.example/visible" },
+            { id: "fn_hid", label: "Hidden Footer Link", url: "https://harborview.example/hidden-nav", hidden: true },
+          ],
+        },
+        {
+          id: "soc_hide",
+          type: "social_links",
+          links: [
+            { platform: "instagram", label: "Hidden Insta", url: "https://instagram.com/hidden", hidden: true },
+          ],
+        },
+        {
+          id: "bh_plain",
+          type: "brand_header",
+          showHotelName: true,
+          showAddress: true,
+          showPhone: true,
+          phoneAsLink: false,
+          showEmail: true,
+          emailAsLink: false,
+        },
+      ],
+    };
+
+    const rendered = renderHotelEmailServerSide({
+      variant,
+      context: BASE_CONTEXT,
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+
+    assert.ok(!rendered.html.includes("SECRET_HIDDEN_LINK") && !rendered.text.includes("SECRET_HIDDEN_LINK"));
+    assert.ok(!rendered.html.includes("https://harborview.example/hidden"));
+    assert.ok(!rendered.html.includes("HIDDEN_CTA_BUTTON") && !rendered.text.includes("HIDDEN_CTA_BUTTON"));
+    assert.ok(!rendered.html.includes("https://harborview.example/img-hidden"));
+    assert.ok(!rendered.html.includes("Hidden Footer Link") && !rendered.text.includes("Hidden Footer Link"));
+    assert.ok(!rendered.html.includes("Hidden Insta"));
+    assert.ok(rendered.html.includes('href="https://harborview.example/visible"'));
+    // phoneAsLink: false & emailAsLink: false -> rendered as plain text, not mailto:/tel: anchors
+    assert.ok(!rendered.html.includes("tel:") && !rendered.html.includes("mailto:"), "Contact info renders as plain text when *AsLink is false");
+    assert.ok(rendered.html.includes("+49 30 555 0199") && rendered.html.includes("reservations@harborview.example"));
+  });
+
+  // 42. Link variables resolve from settings.defaultLinks with EN/DE fallback, portalUrlOverride priority, and clean empty-variable hiding
+  await test("42. Link variables resolve with EN/DE fallback, portalUrlOverride priority, and empty variables hide cleanly without broken anchors", () => {
+    const settings: HotelEmailSettings = {
+      ...DEFAULT_HOTEL_EMAIL_SETTINGS,
+      defaultLanguage: "en",
+      portalUrl: "https://portal-global.example",
+      defaultLinks: {
+        portal: {
+          defaultUrl: "https://portal-primary.example",
+          byLanguage: { de: "https://portal-de.example" },
+        },
+        review: {
+          defaultUrl: "https://reviews.example/primary",
+          byLanguage: { en: "https://reviews.example/en" },
+        },
+        wifiGuide: { defaultUrl: "https://wifi.example/guide" },
+        // directions deliberately left unset to test clean hiding
+      },
+    };
+
+    const varsEn = buildTemplateVariablesMap(BASE_CONTEXT, settings, "en");
+    const varsDe = buildTemplateVariablesMap(BASE_CONTEXT, settings, "de");
+    assert.strictEqual(varsEn.review_link, "https://reviews.example/en");
+    assert.strictEqual(varsDe.review_link, "https://reviews.example/primary", "DE without override falls back to primary URL");
+    assert.strictEqual(varsEn.portal_link, "https://portal-primary.example");
+    assert.strictEqual(varsDe.portal_link, "https://portal-de.example");
+    assert.strictEqual(varsEn.wifi_guide_link, "https://wifi.example/guide");
+    assert.strictEqual(varsEn.directions_link, "");
+
+    // Per-email portalUrlOverride wins over hotel default portal link
+    const varsOverride = buildTemplateVariablesMap(BASE_CONTEXT, settings, "de", "https://override-stay.example/abc");
+    assert.strictEqual(varsOverride.portal_link, "https://override-stay.example/abc");
+
+    // Empty variable in a template hides the link cleanly (no empty <a href=""> or "undefined")
+    const variant: EmailTemplateVariant = {
+      schemaVersion: 4,
+      subject: "Test Empty Link Vars",
+      branding: { accentBarColor: "#0f766e", buttonColor: "#0f766e", buttonTextColor: "#ffffff" },
+      blocks: [
+        { id: "b_empty", type: "button", label: "Get Directions", url: "{{directions_link}}" },
+        {
+          id: "p_empty",
+          type: "paragraph",
+          text: "Open [[link:i_empty]] for directions.",
+          inlineLinks: [{ id: "i_empty", label: "Directions Map", url: "{{directions_link}}" }],
+        },
+        {
+          id: "fn_empty",
+          type: "footer_nav",
+          links: [
+            { id: "f1", label: "Wi-Fi", url: "{{wifi_guide_link}}" },
+            { id: "f2", label: "Directions", url: "{{directions_link}}" },
+          ],
+        },
+      ],
+    };
+
+    const rendered = renderHotelEmailServerSide({
+      variant,
+      context: BASE_CONTEXT,
+      settings,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+    assert.ok(!rendered.html.includes('href=""'), "Empty link variable must NEVER render empty href=''");
+    assert.ok(!rendered.html.includes("undefined"), "Empty link variable must NEVER render 'undefined'");
+    assert.ok(!rendered.html.includes("Get Directions"), "Button with empty variable URL hides cleanly");
+    assert.ok(rendered.html.includes("Directions Map") && !rendered.html.includes('href="">Directions Map'), "Inline link with empty variable degrades to plain text cleanly");
+    assert.ok(rendered.html.includes('href="https://wifi.example/guide"'));
+  });
+
+  // 43. Unsafe URLs rejected on save AND neutralized on render
+  await test("43. Unsafe URLs (http, javascript, data, vbscript, file, credentials, localhost, IP, >2048 chars, mailto ?query) rejected on save & neutralized on render", () => {
+    const unsafeUrls = [
+      "http://insecure.example/page",
+      "javascript:alert(1)",
+      "data:text/html,<script>alert(1)</script>",
+      "vbscript:msgbox(1)",
+      "file:///etc/passwd",
+      "https://user:pass@harborview.example/secret",
+      "https://localhost:3000/admin",
+      "https://127.0.0.1/internal",
+      "https://[::1]/internal",
+      "https://192.168.1.5/admin",
+      "https://harborview.example/" + "a".repeat(2050),
+      "mailto:desk@harborview.example?cc=attacker@evil.example&body=injected",
+      "mailto:desk@harborview.example?subject=Hack",
+      "mailto:not-an-email",
+      "tel:abc",
+    ];
+
+    for (const bad of unsafeUrls) {
+      const check = validateEmailUrl(bad, { allowContact: true });
+      assert.strictEqual(check.valid, false, `Expected unsafe URL to be rejected: ${bad}`);
+    }
+
+    // Valid safe URLs including international tel with spaces & clean mailto
+    assert.strictEqual(validateEmailUrl("https://harborview.example/stay?id=123", { allowContact: true }).valid, true);
+    assert.strictEqual(validateEmailUrl("mailto:frontdesk@harborview.example", { allowContact: true }).valid, true);
+    const telOk = validateEmailUrl("tel:+49 30 555-0199", { allowContact: true });
+    assert.strictEqual(telOk.valid, true);
+    assert.strictEqual(telOk.normalized, "tel:+4930555-0199");
+
+    // Neutralized on render even if stored directly bypassing validation
+    const maliciousVariant: EmailTemplateVariant = {
+      schemaVersion: 4,
+      subject: "Security Render Check",
+      branding: {
+        logoUrl: "https://cdn.example/logo.png",
+        logoLinkUrl: "javascript:alert(1)",
+        accentBarColor: "#0f766e",
+        buttonColor: "#0f766e",
+        buttonTextColor: "#ffffff",
+      },
+      blocks: [
+        { id: "b1", type: "button", label: "Malicious Button", url: "https://user:pass@evil.example" },
+        { id: "b2", type: "button", label: "Localhost Button", url: "https://localhost/admin" },
+        {
+          id: "p1",
+          type: "paragraph",
+          text: "Click [[link:m1]] or [[link:m2]].",
+          inlineLinks: [
+            { id: "m1", label: "Bad Mailto", url: "mailto:a@b.com?bcc=spy@evil.example" },
+            { id: "m2", label: "Bad Data", url: "data:text/html,evil" },
+          ],
+        },
+        {
+          id: "fn1",
+          type: "footer_nav",
+          links: [{ id: "f1", label: "File Link", url: "file:///etc/passwd" }],
+        },
+      ],
+    };
+
+    const issues = validateTemplateVariant(maliciousVariant);
+    assert.ok(issues.length >= 5, `Expected >= 5 validation issues for malicious URLs, got ${issues.length}`);
+
+    const rendered = renderHotelEmailServerSide({
+      variant: maliciousVariant,
+      context: BASE_CONTEXT,
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+    assert.ok(!rendered.html.includes("javascript:"));
+    assert.ok(!rendered.html.includes("user:pass@"));
+    assert.ok(!rendered.html.includes("localhost/admin"));
+    assert.ok(!rendered.html.includes("bcc=spy"));
+    assert.ok(!rendered.html.includes("data:text/html"));
+    assert.ok(!rendered.html.includes("file:///etc/passwd"));
+  });
+
+  // 44. Phishing visible-URL mismatch rejected on save AND neutralized on render
+  await test("44. Mismatched visible-URL text (phishing guard) rejected on save and neutralized on render", () => {
+    const mismatch = validateLinkLabelAgainstUrl("https://trusted-hotel.com", "https://evil-phish.example/login");
+    assert.strictEqual(mismatch.valid, false, "Mismatched URL text vs href must be rejected");
+
+    const bareHostMismatch = validateLinkLabelAgainstUrl("paypal.com", "https://evil.example/steal");
+    assert.strictEqual(bareHostMismatch.valid, false, "Mismatched bare domain text vs href must be rejected");
+
+    // Matching hostname and normal descriptive labels must PASS
+    assert.strictEqual(
+      validateLinkLabelAgainstUrl("https://harborview.example/stay", "https://www.harborview.example/stay").valid,
+      true
+    );
+    assert.strictEqual(validateLinkLabelAgainstUrl("Manage Your Stay", "https://harborview.example/stay").valid, true);
+
+    const phishVariant: EmailTemplateVariant = {
+      schemaVersion: 4,
+      subject: "Phishing Check",
+      branding: { accentBarColor: "#0f766e", buttonColor: "#0f766e", buttonTextColor: "#ffffff" },
+      blocks: [
+        { id: "pb1", type: "button", label: "https://trusted-bank.com", url: "https://evil-phish.example" },
+        {
+          id: "pp1",
+          type: "paragraph",
+          text: "Visit [[link:pl1]] now.",
+          inlineLinks: [
+            { id: "pl1", label: "trusted-bank.com", url: "https://evil-phish.example/login" },
+          ],
+        },
+      ],
+    };
+
+    const issues = validateTemplateVariant(phishVariant);
+    assert.ok(issues.length >= 2, `Expected phishing mismatch errors, got: ${JSON.stringify(issues)}`);
+
+    const rendered = renderHotelEmailServerSide({
+      variant: phishVariant,
+      context: BASE_CONTEXT,
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+    assert.ok(!rendered.html.includes("evil-phish.example"), "Phishing mismatched href must be neutralized on render");
+  });
+
+  // 45. Inline links cannot inject raw HTML in labels or surrounding text
+  await test("45. Inline links escape raw HTML tags (<script>, <img onerror>, <a>) in both label and surrounding body text", () => {
+    const xssVariant: EmailTemplateVariant = {
+      schemaVersion: 4,
+      subject: "Inline XSS Test",
+      branding: { accentBarColor: "#0f766e", buttonColor: "#0f766e", buttonTextColor: "#ffffff" },
+      blocks: [
+        {
+          id: "px1",
+          type: "paragraph",
+          text: '<b>Hello</b> <script>alert(1)</script> [[link:xl1]] <img src=x onerror="evil()">',
+          inlineLinks: [
+            {
+              id: "xl1",
+              label: '<script>steal()</script>Click "Here"',
+              url: "https://harborview.example/safe",
+            },
+          ],
+        },
+      ],
+    };
+
+    const rendered = renderHotelEmailServerSide({
+      variant: xssVariant,
+      context: BASE_CONTEXT,
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+
+    assert.ok(!rendered.html.includes("<script>"), "Raw <script> must be escaped");
+    assert.ok(!rendered.html.includes('onerror="evil()"'), "Raw onerror attribute must be escaped");
+    assert.ok(!rendered.html.includes("<b>Hello</b>"), "Raw <b> HTML must be escaped");
+    assert.ok(rendered.html.includes('href="https://harborview.example/safe"'), "Safe inline link anchor still renders");
+    assert.ok(rendered.html.includes("&lt;script&gt;steal()&lt;/script&gt;"), "Label HTML is safely escaped");
+  });
+
+  // 46. applyDefaultLinksToTemplateDoc updates drafts ONLY (never modifies published, publishedVersion, or isCustomized)
+  await test("46. applyDefaultLinksToTemplateDoc updates drafts ONLY while leaving published templates 100% untouched", () => {
+    const publishedEn = buildStarterPresetVariant("modern_resort", "booking_confirmation", "en", "https://tidehotels.de");
+    const publishedDe = buildStarterPresetVariant("modern_resort", "booking_confirmation", "de", "https://tidehotels.de");
+    const originalPublishedJson = JSON.stringify({ en: publishedEn, de: publishedDe });
+
+    const doc: EmailTemplateDocument = {
+      eventType: "booking_confirmation",
+      enabled: true,
+      isCustomized: true,
+      defaultLanguage: "en",
+      publishedVersion: 7,
+      published: { en: JSON.parse(JSON.stringify(publishedEn)), de: JSON.parse(JSON.stringify(publishedDe)) },
+      draft: { en: JSON.parse(JSON.stringify(publishedEn)), de: JSON.parse(JSON.stringify(publishedDe)) },
+      versions: [],
+      updatedAt: "2026-11-01T00:00:00.000Z",
+      updatedBy: "admin@harborview.example",
+    };
+
+    const nextDoc = applyDefaultLinksToTemplateDoc(
+      doc,
+      {
+        en: [
+          { id: "new_en_1", label: "Privacy Policy", url: "https://harborview.example/privacy" },
+          { id: "new_en_2", label: "Email Support", url: "mailto:support@harborview.example" },
+        ],
+        de: [
+          { id: "new_de_1", label: "Datenschutz", url: "https://harborview.example/datenschutz" },
+        ],
+      },
+      "admin@harborview.example",
+      "2026-11-20T15:00:00.000Z"
+    );
+
+    assert.strictEqual(JSON.stringify(nextDoc.published), originalPublishedJson, "Published templates MUST NOT be altered");
+    assert.strictEqual(nextDoc.publishedVersion, 7);
+    assert.strictEqual(nextDoc.isCustomized, true);
+
+    const enNav = nextDoc.draft.en?.blocks.find((b) => b.type === "footer_nav");
+    const deNav = nextDoc.draft.de?.blocks.find((b) => b.type === "footer_nav");
+    assert.ok(enNav && enNav.type === "footer_nav" && enNav.links.some((l) => l.label === "Privacy Policy"));
+    assert.ok(deNav && deNav.type === "footer_nav" && deNav.links.some((l) => l.label === "Datenschutz"));
+    assert.strictEqual(nextDoc.draft.en?.schemaVersion, 4);
+    assert.strictEqual(nextDoc.draft.de?.schemaVersion, 4);
+  });
+
+  // 47. Live preview HTML matches sent Resend HTML byte-for-byte for edited links
+  await test("47. Live preview HTML matches dispatched sent HTML byte-for-byte after publishing v4 edited links", async () => {
+    const v4Variant: EmailTemplateVariant = {
+      schemaVersion: 4,
+      subject: "Booking {{booking_reference}} Ready",
+      preheader: "Check your links",
+      branding: {
+        logoUrl: "https://cdn.example/logo.png",
+        logoLinkUrl: "{{hotel_website}}",
+        accentBarColor: "#0f766e",
+        buttonColor: "#0f766e",
+        buttonTextColor: "#ffffff",
+      },
+      blocks: [
+        {
+          id: "p1",
+          type: "paragraph",
+          text: "Welcome {{guest_name}}! Check [[link:a1]] or [[link:a2]].",
+          inlineLinks: [
+            { id: "a1", label: "Directions", url: "{{directions_link}}", openInNewTab: true },
+            { id: "a2", label: "Front Desk", url: "mailto:{{hotel_email}}" },
+          ],
+        },
+        { id: "b1", type: "button", label: "Manage Reservation", url: "{{portal_link}}" },
+        {
+          id: "fn1",
+          type: "footer_nav",
+          links: [
+            { id: "l1", label: "Privacy", url: "https://harborview.example/privacy" },
+            { id: "l2", label: "Call Us", url: "tel:{{hotel_phone}}" },
+          ],
+        },
+      ],
+    };
+
+    const settings: HotelEmailSettings = {
+      ...DEFAULT_HOTEL_EMAIL_SETTINGS,
+      portalUrl: "https://harborview.example/portal",
+      defaultLinks: {
+        directions: { defaultUrl: "https://maps.example/harborview" },
+      },
+    };
+
+    const preview = renderEmailTemplate({
+      variant: v4Variant,
+      context: BASE_CONTEXT,
+      settings,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+
+    const dispatched: SendEmailParams[] = [];
+    const dispatchRes = await sendHotelEmail("hotel_alpha", "booking_confirmation", {
+      reservationId: "RES8A4F2",
+      preloaded: {
+        hotel: SAMPLE_HOTEL,
+        reservation: {
+          id: "RES8A4F2",
+          hotelId: "hotel_alpha",
+          guestName: "Alex Morgan",
+          guestEmail: "alex.morgan@example.com",
+          roomNumber: "204",
+          roomType: "Deluxe King Suite",
+          checkIn: "2026-11-24",
+          checkInTime: "14:00",
+          checkOut: "2026-11-27",
+          checkOutTime: "12:00",
+          totalAmount: 270000,
+          depositAmount: 90000,
+          status: "confirmed",
+        },
+        guest: null,
+        room: null,
+      },
+      overrides: {
+        appUrl: "https://tidehotels.de",
+        resolveTemplateFn: async () => ({
+          enabled: true,
+          language: "en",
+          variant: v4Variant,
+          settings,
+          usedDefaultLayout: false,
+          publishedVersion: 2,
+        }),
+        sendEmailFn: async (p) => {
+          dispatched.push(p);
+          return {
+            success: true,
+            messageId: "msg_v4_preview_parity",
+            deliveryState: "accepted_by_provider",
+            provider: "resend",
+            statusCode: 200,
+          };
+        },
+        persistMarkerFn: async () => true,
+      },
+    });
+
+    assert.strictEqual(dispatchRes.ok, true);
+    assert.strictEqual(dispatched.length, 1);
+    assert.strictEqual(dispatched[0].html, preview.html, "Preview HTML and sent HTML MUST match byte-for-byte");
+    assert.strictEqual(dispatched[0].text, preview.text, "Preview plain text and sent plain text MUST match byte-for-byte");
+  });
+
+  // 48. Tenant isolation & RBAC: cross-hotel admin and non-admin staff cannot manage links or settings
+  await test("48. Cross-hotel admin and non-admin staff cannot edit links or settings (RBAC & hotel scoping)", () => {
+    const hotelAlphaAdmin = {
+      uid: "u_alpha_admin",
+      email: "admin@harborview.example",
+      role: "hotel_admin",
+      hotelId: "hotel_alpha",
+    };
+    const hotelBetaAdmin = {
+      uid: "u_beta_admin",
+      email: "admin@otherhotel.example",
+      role: "hotel_admin",
+      hotelId: "hotel_beta",
+    };
+    const receptionist = {
+      uid: "u_staff",
+      email: "desk@harborview.example",
+      role: "receptionist",
+      hotelId: "hotel_alpha",
+    };
+
+    assert.strictEqual(callerHasEmailModuleAccess(hotelAlphaAdmin, "hotel_alpha", "manage").allowed, true);
+    assert.strictEqual(callerHasEmailModuleAccess(hotelBetaAdmin, "hotel_alpha", "manage").allowed, false);
+    assert.strictEqual(callerHasEmailModuleAccess(receptionist, "hotel_alpha", "manage").allowed, false);
+    assert.strictEqual(callerIsStrictHotelAdmin(receptionist), false);
+  });
+
+  // 49. Feature flag EMAIL_CUSTOMIZATION_ENABLED=false disables v4 custom links and reverts to untouched defaults
+  await test("49. EMAIL_CUSTOMIZATION_ENABLED=false disables v4 edited links and outputs exact untouched default", async () => {
+    const prevFlag = process.env.EMAIL_CUSTOMIZATION_ENABLED;
+    process.env.EMAIL_CUSTOMIZATION_ENABLED = "false";
+    const sent: SendEmailParams[] = [];
+    try {
+      const res = await sendHotelEmail("hotel_alpha", "booking_confirmation", {
+        reservationId: "RES_FLAG_OFF_V4",
+        preloaded: {
+          hotel: SAMPLE_HOTEL,
+          reservation: {
+            id: "RES_FLAG_OFF_V4",
+            hotelId: "hotel_alpha",
+            guestName: "Alex Morgan",
+            guestEmail: "alex@example.com",
+            roomNumber: "204",
+            checkIn: "2026-11-24",
+            checkOut: "2026-11-27",
+            status: "confirmed",
+          },
+          guest: null,
+          room: null,
+        },
+        overrides: {
+          appUrl: "https://tidehotels.de",
+          resolveTemplateFn: async () => {
+            throw new Error("Resolver must NOT be called when EMAIL_CUSTOMIZATION_ENABLED=false");
+          },
+          sendEmailFn: async (p) => {
+            sent.push(p);
+            return {
+              success: true,
+              messageId: "msg_flag_off_v4",
+              deliveryState: "accepted_by_provider",
+              provider: "resend",
+              statusCode: 200,
+            };
+          },
+          persistMarkerFn: async () => true,
+        },
+      });
+      assert.strictEqual(res.ok, true);
+      assert.strictEqual(res.usedDefaultLayout, true);
+      assert.strictEqual(sent.length, 1);
+      assert.ok(sent[0].html.includes("Harborview Suites"));
     } finally {
       if (prevFlag === undefined) delete process.env.EMAIL_CUSTOMIZATION_ENABLED;
       else process.env.EMAIL_CUSTOMIZATION_ENABLED = prevFlag;

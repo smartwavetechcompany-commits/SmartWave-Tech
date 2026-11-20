@@ -75,6 +75,7 @@ export function extractReferencedImages(variant: EmailTemplateVariant | undefine
         record(block.badgeImageId, block.badgeImageUrl);
         break;
       case "legal_section":
+      case "footer_copyright":
         record(block.footerLogoImageId, block.footerLogoUrl);
         break;
       default:

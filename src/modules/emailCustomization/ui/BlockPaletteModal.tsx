@@ -155,13 +155,41 @@ export const BLOCK_CATALOG: readonly BlockCatalogMeta[] = [
     category: "Links",
     isModern: true,
   },
+  // Footer
+  {
+    type: "footer_contact",
+    label: "Contact Us",
+    description: "Editable contact heading & message with hotel phone/email variables",
+    category: "Footer",
+    isModern: true,
+  },
+  {
+    type: "footer_authenticity",
+    label: "Confirmation Authenticity",
+    description: "Editable reservation authenticity notice with booking reference",
+    category: "Footer",
+    isModern: true,
+  },
+  {
+    type: "footer_copyright",
+    label: "Copyright / Legal Line",
+    description: "Editable copyright line with optional bottom hotel logo",
+    category: "Footer",
+    isModern: true,
+  },
+  {
+    type: "footer_legal",
+    label: "Legal / Impressum",
+    description: "Impressum, privacy note, cancellation policy, or custom legal notice",
+    category: "Footer",
+    isModern: true,
+  },
   {
     type: "social_links",
     label: "Social Links",
-    description: "Row of hotel website or social links",
-    category: "Links",
+    description: "Row of hotel website or social media links",
+    category: "Footer",
   },
-  // Footer
   {
     type: "footer_nav",
     label: "Footer Navigation",
@@ -170,17 +198,24 @@ export const BLOCK_CATALOG: readonly BlockCatalogMeta[] = [
     isModern: true,
   },
   {
-    type: "legal_section",
-    label: "Legal & Footer Logo",
-    description: "Small-print sections, copyright & centered bottom logo",
+    type: "footer_powered_by",
+    label: "Powered By Credit",
+    description: "Optional credit line (off by default, fully editable or removable)",
     category: "Footer",
     isModern: true,
   },
   {
     type: "footer",
     label: "Classic Contact Footer",
-    description: "Hotel contact block, footer note & legal imprint",
+    description: "Structured hotel contact block, footer note & legal imprint",
     category: "Footer",
+  },
+  {
+    type: "legal_section",
+    label: "Combined Legal Block",
+    description: "Legacy multi-section legal & copyright container",
+    category: "Footer",
+    isModern: true,
   },
 ] as const;
 
@@ -332,6 +367,29 @@ function BlockWireframeThumb({ type }: { type: EmailBlockType }) {
             <div className="w-full h-1 rounded bg-zinc-700" />
           </div>
           <div className="w-6 h-2 rounded bg-zinc-600 mx-auto" />
+        </div>
+      );
+    case "footer_contact":
+    case "footer_authenticity":
+    case "footer_legal":
+      return (
+        <div className="w-full h-11 rounded bg-zinc-950 border border-zinc-800 px-2.5 py-2 flex flex-col justify-center gap-1.5">
+          <div className="w-16 h-1.5 rounded bg-zinc-300" />
+          <div className="w-full h-1 rounded bg-zinc-600" />
+          <div className="w-4/5 h-1 rounded bg-zinc-700" />
+        </div>
+      );
+    case "footer_copyright":
+      return (
+        <div className="w-full h-11 rounded bg-zinc-950 border border-zinc-800 px-2.5 flex flex-col items-center justify-center gap-1.5">
+          <div className="w-28 h-1.5 rounded bg-zinc-500" />
+          <div className="w-8 h-2 rounded bg-zinc-700" />
+        </div>
+      );
+    case "footer_powered_by":
+      return (
+        <div className="w-full h-11 rounded bg-zinc-950 border border-dashed border-zinc-800 px-2.5 flex items-center justify-center">
+          <div className="w-24 h-1.5 rounded bg-zinc-600" />
         </div>
       );
     default:

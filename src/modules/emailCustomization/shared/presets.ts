@@ -1,4 +1,5 @@
 import {
+  FOOTER_SECTION_BLOCK_TYPES,
   type CustomizableEmailEventType,
   type EmailBlock,
   type EmailIconName,
@@ -7,6 +8,102 @@ import {
   type EmailTemplateVariant,
   type SupportedEmailLanguage,
 } from "./types.ts";
+
+const FOOTER_SECTION_TYPE_SET = new Set<string>(FOOTER_SECTION_BLOCK_TYPES);
+
+/**
+ * Builds the 3 standalone, fully editable default footer blocks (Contact Us, Confirmation Authenticity,
+ * and Copyright / legal line) using allow-listed merge variables.
+ * Note: "Powered by" is intentionally omitted (OFF by default).
+ */
+export function buildDefaultFooterBlocks(
+  language: SupportedEmailLanguage = "en",
+  options: {
+    prefix?: string;
+    logoUrl?: string;
+    logoImageId?: string;
+  } = {}
+): EmailBlock[] {
+  const isDe = language === "de";
+  const p = options.prefix || "ftr";
+  const logoUrl = options.logoUrl?.trim() || "";
+
+  return [
+    {
+      id: `${p}_contact`,
+      type: "footer_contact",
+      heading: isDe ? "Kontakt" : "Contact Us",
+      text: isDe
+        ? "Bei Fragen zu Ihrer Reservierung erreichen Sie {{hotel_name}} telefonisch unter {{hotel_phone}} oder per E-Mail an {{hotel_email}}."
+        : "For questions regarding your reservation, reach {{hotel_name}} at {{hotel_phone}} or {{hotel_email}}.",
+      style: {
+        backgroundColor: "#fafafa",
+        textColor: "#52525b",
+        borderColor: "#e4e4e7",
+        align: "left",
+        paddingY: 16,
+        paddingX: 28,
+        fontSizePx: 12,
+      },
+    },
+    {
+      id: `${p}_authenticity`,
+      type: "footer_authenticity",
+      heading: isDe ? "Echtheit dieser Bestätigung" : "Confirmation Authenticity",
+      text: isDe
+        ? "Diese transaktionale Nachricht wurde automatisch für Ihre Buchung {{booking_reference}} erstellt. Maßgeblich sind die im Reservierungssystem hinterlegten Daten."
+        : "This transactional confirmation reflects our official reservation record for {{booking_reference}} at {{hotel_name}}.",
+      style: {
+        backgroundColor: "#fafafa",
+        textColor: "#52525b",
+        align: "left",
+        paddingY: 10,
+        paddingX: 28,
+        fontSizePx: 12,
+      },
+    },
+    {
+      id: `${p}_copyright`,
+      type: "footer_copyright",
+      text: "© {{hotel_name}} · {{hotel_address}}",
+      showFooterLogo: Boolean(logoUrl),
+      footerLogoUrl: logoUrl || undefined,
+      footerLogoImageId: options.logoImageId,
+      footerLogoAlt: "{{hotel_name}}",
+      footerLogoWidthPx: 110,
+      style: {
+        backgroundColor: "#fafafa",
+        textColor: "#52525b",
+        align: "left",
+        paddingY: 14,
+        paddingX: 28,
+        fontSizePx: 11,
+      },
+    },
+  ];
+}
+
+/**
+ * Replaces ONLY footer blocks in a template's block list while leaving all header and body
+ * blocks intact. Used by "Reset footer to default" and "Apply default footer to all events".
+ */
+export function replaceFooterBlocksInList(
+  blocks: EmailBlock[],
+  replacementFooterBlocks: EmailBlock[],
+  options: { replaceNav?: boolean; replaceSocial?: boolean } = {}
+): EmailBlock[] {
+  const removeTypes = new Set<string>(FOOTER_SECTION_TYPE_SET);
+  if (options.replaceNav) removeTypes.add("footer_nav");
+  if (options.replaceSocial) removeTypes.add("social_links");
+
+  const kept = (blocks || []).filter((b) => b && !removeTypes.has(b.type));
+  const clonedFooter = (replacementFooterBlocks || []).map((b, idx) => ({
+    ...JSON.parse(JSON.stringify(b)),
+    id: `${b.type}_${Date.now().toString(36)}_${idx}_${Math.random().toString(36).slice(2, 5)}`,
+  })) as EmailBlock[];
+
+  return [...kept, ...clonedFooter];
+}
 
 export type StarterLayoutPresetId = "modern_resort" | "business_hotel" | "minimal" | "boutique";
 
@@ -335,44 +432,11 @@ export function buildStarterPresetVariant(
     style: { backgroundColor: "#ffffff", paddingY: 20, paddingX: 24, borderColor: "#e4e4e7" },
   };
 
-  const commonLegalSection: EmailBlock = {
-    id: `${presetId}_legal`,
-    type: "legal_section",
-    sections: isDe
-      ? [
-          {
-            id: "lg1",
-            heading: "Kontakt",
-            body: "Bei Fragen zu Ihrer Reservierung erreichen Sie {{hotel_name}} telefonisch unter {{hotel_phone}} oder per E-Mail an {{hotel_email}}.",
-          },
-          {
-            id: "lg2",
-            heading: "Echtheit dieser Bestätigung",
-            body: "Diese transaktionale Nachricht wurde automatisch für Ihre Buchung {{booking_reference}} erstellt. Maßgeblich sind die im Reservierungssystem hinterlegten Daten.",
-          },
-        ]
-      : [
-          {
-            id: "lg1",
-            heading: "Contact Us",
-            body: "For questions regarding your reservation, reach {{hotel_name}} at {{hotel_phone}} or {{hotel_email}}.",
-          },
-          {
-            id: "lg2",
-            heading: "Confirmation Authenticity",
-            body: "This transactional confirmation reflects our official reservation record for {{booking_reference}} at {{hotel_name}}.",
-          },
-        ],
-    copyrightText: isDe
-      ? "© {{hotel_name}} · {{hotel_address}}"
-      : "© {{hotel_name}} · {{hotel_address}}",
-    showFooterLogo: Boolean(logoUrl),
-    footerLogoUrl: logoUrl || undefined,
-    footerLogoImageId: logoImageId,
-    footerLogoAlt: "{{hotel_name}}",
-    footerLogoWidthPx: 110,
-    style: { backgroundColor: "#fafafa", textColor: "#52525b", paddingY: 22, paddingX: 28 },
-  };
+  const commonFooterBlocks = buildDefaultFooterBlocks(language, {
+    prefix: `${presetId}_ftr`,
+    logoUrl,
+    logoImageId,
+  });
 
   if (presetId === "modern_resort") {
     const blocks: EmailBlock[] = [
@@ -585,11 +649,11 @@ export function buildStarterPresetVariant(
         style: { backgroundColor: "#ffffff", textColor: "#18181b", borderRadius: 12, paddingY: 22, paddingX: 28 },
       },
       commonFooterNav,
-      commonLegalSection,
+      ...commonFooterBlocks,
     ];
 
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       subject: copy.subject,
       preheader: copy.preheader,
       branding: baseBranding,
@@ -712,11 +776,11 @@ export function buildStarterPresetVariant(
         style: { backgroundColor: "#ffffff", textColor: "#0f172a", paddingY: 18, paddingX: 28 },
       },
       commonFooterNav,
-      commonLegalSection,
+      ...commonFooterBlocks,
     ];
 
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       subject: copy.subject,
       preheader: copy.preheader,
       branding: baseBranding,
@@ -807,11 +871,11 @@ export function buildStarterPresetVariant(
             ],
       },
       commonFooterNav,
-      commonLegalSection,
+      ...commonFooterBlocks,
     ];
 
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       subject: copy.subject,
       preheader: copy.preheader,
       branding: baseBranding,
@@ -945,11 +1009,11 @@ export function buildStarterPresetVariant(
       style: { backgroundColor: "#faf8f5", textColor: "#292524", paddingY: 20, paddingX: 28, borderRadius: 8 },
     },
     commonFooterNav,
-    commonLegalSection,
+    ...commonFooterBlocks,
   ];
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     subject: copy.subject,
     preheader: copy.preheader,
     branding: baseBranding,

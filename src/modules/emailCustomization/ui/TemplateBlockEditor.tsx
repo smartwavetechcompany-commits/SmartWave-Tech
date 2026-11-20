@@ -8,6 +8,7 @@ import {
   History,
   Image as ImageIcon,
   LayoutTemplate,
+  Link2,
   Loader2,
   Monitor,
   RotateCcw,
@@ -21,8 +22,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  ALLOWED_DEFAULT_FOOTER_BLOCK_TYPES,
   ALLOWED_TEMPLATE_VARIABLES,
+  FOOTER_SECTION_BLOCK_TYPES,
   MODERN_EMAIL_BLOCK_TYPES,
+  STANDALONE_FOOTER_BLOCK_TYPES,
   SUPPORTED_EMAIL_LANGUAGES,
   VARIABLE_DESCRIPTIONS,
   WEB_SAFE_FONTS,
@@ -39,12 +43,16 @@ import {
 } from "../shared/types";
 import { OPTIONAL_SECTION_PRESETS } from "../shared/defaultTemplates";
 import {
+  buildDefaultFooterBlocks,
   buildStarterPresetVariant,
+  replaceFooterBlocksInList,
   STARTER_LAYOUT_PRESETS,
   type StarterLayoutPresetId,
 } from "../shared/presets";
 import { renderEmailTemplate } from "../shared/renderer";
 import {
+  buildTemplateVariablesMap,
+  extractTemplateLinksOverview,
   measureEmailHtmlBytes,
   validateEmailUrl,
   validateTemplateVariant,
@@ -52,6 +60,7 @@ import {
 import { emailCustomizationApi } from "./apiClient";
 import { ImageLibraryPanel } from "./ImageLibraryModal";
 import { StarterLayoutPickerModal } from "./BlockPaletteModal";
+import { LinkDestinationField, LinksOverviewPanel } from "./LinkControls";
 import {
   applyImageAssetToEmailBlock,
   BlockEditor,
@@ -69,9 +78,13 @@ interface TemplateBlockEditorProps {
   callerEmail: string;
   onBack: () => void;
   onDocumentUpdated: (doc: EmailTemplateDocument) => void;
+  onSettingsUpdated?: (settings: HotelEmailSettings) => void;
 }
 
 const MODERN_BLOCK_SET = new Set<string>(MODERN_EMAIL_BLOCK_TYPES);
+const STANDALONE_FOOTER_SET = new Set<string>(STANDALONE_FOOTER_BLOCK_TYPES);
+const FOOTER_SECTION_SET = new Set<string>(FOOTER_SECTION_BLOCK_TYPES);
+const ALLOWED_DEFAULT_FOOTER_SET = new Set<string>(ALLOWED_DEFAULT_FOOTER_BLOCK_TYPES);
 
 function makeId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
@@ -88,6 +101,7 @@ export function TemplateBlockEditor({
   callerEmail,
   onBack,
   onDocumentUpdated,
+  onSettingsUpdated,
 }: TemplateBlockEditorProps) {
   const [doc, setDoc] = useState<EmailTemplateDocument>(initialDoc);
   const [language, setLanguage] = useState<SupportedEmailLanguage>(
@@ -105,6 +119,7 @@ export function TemplateBlockEditor({
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
   const [includeLoyaltySample, setIncludeLoyaltySample] = useState(false);
   const [brandingOpen, setBrandingOpen] = useState(false);
+  const [linksOverviewOpen, setLinksOverviewOpen] = useState(false);
   const [variablesOpen, setVariablesOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [starterPickerOpen, setStarterPickerOpen] = useState(false);
@@ -125,6 +140,7 @@ export function TemplateBlockEditor({
   const directFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [saving, setSaving] = useState<"draft" | "publish" | null>(null);
+  const [savingDefaultFooter, setSavingDefaultFooter] = useState(false);
   const [testing, setTesting] = useState(false);
   const [restoring, setRestoring] = useState<number | null>(null);
   const [resetting, setResetting] = useState(false);
@@ -132,6 +148,27 @@ export function TemplateBlockEditor({
 
   const variant = (variantsByLang[language] || variantsByLang.en)!;
   const appUrl = (sampleContext.appUrl || "https://tidehotels.de").replace(/\/+$/, "");
+
+  const hasFooterBlocks = useMemo(
+    () => variant.blocks.some((b) => FOOTER_SECTION_SET.has(b.type)),
+    [variant.blocks]
+  );
+
+  const liveLabel =
+    doc.isCustomized && doc.publishedVersion > 0
+      ? `v${doc.publishedVersion}`
+      : "Default";
+
+  const hasUnpublishedDraft = useMemo(() => {
+    if (dirty) return true;
+    const publishedVariant = doc.published?.[language];
+    if (!publishedVariant) return true;
+    try {
+      return JSON.stringify(variant) !== JSON.stringify(publishedVariant);
+    } catch {
+      return true;
+    }
+  }, [dirty, doc.published, language, variant]);
 
   const updateVariant = (updater: (prev: EmailTemplateVariant) => EmailTemplateVariant) => {
     setVariantsByLang((prev) => {
@@ -169,17 +206,54 @@ export function TemplateBlockEditor({
     [liveRendered.html]
   );
 
+  const resolvedVariables = useMemo(() => {
+    const built = buildTemplateVariablesMap(
+      effectiveSampleContext,
+      settings,
+      variant.portalUrlOverride,
+      language
+    );
+    return built.variables as Record<string, string>;
+  }, [effectiveSampleContext, settings, variant.portalUrlOverride, language]);
+
+  const templateLinksSummary = useMemo(() => {
+    const all = extractTemplateLinksOverview(variant, effectiveSampleContext, settings, language);
+    const warnings = all.filter(
+      (i) => !i.hidden && (i.status === "invalid" || i.status === "empty_variable")
+    ).length;
+    return { total: all.length, warnings };
+  }, [variant, effectiveSampleContext, settings, language]);
+
   const resolvedPortalUrl = useMemo(() => {
     if (variant.portalUrlOverride?.trim()) {
       const c = validateEmailUrl(variant.portalUrlOverride.trim());
       if (c.valid && c.normalized) return c.normalized;
+    }
+    if (resolvedVariables.portal_link) {
+      return resolvedVariables.portal_link;
     }
     if (settings.portalUrl?.trim()) {
       const c = validateEmailUrl(settings.portalUrl.trim());
       if (c.valid && c.normalized) return c.normalized;
     }
     return appUrl;
-  }, [variant.portalUrlOverride, settings.portalUrl, appUrl]);
+  }, [variant.portalUrlOverride, resolvedVariables.portal_link, settings.portalUrl, appUrl]);
+
+  const handleJumpToLinkBlock = (blockId: string) => {
+    if (blockId === "__branding__") {
+      setBrandingOpen(true);
+      setLinksOverviewOpen(false);
+      return;
+    }
+    setExpandedBlockId(blockId);
+    setLinksOverviewOpen(false);
+    setTimeout(() => {
+      const el = document.querySelector(`[data-block-id="${CSS.escape(blockId)}"]`);
+      if (el && typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 60);
+  };
 
   const handleSave = async (publish: boolean) => {
     setServerErrors([]);
@@ -384,23 +458,41 @@ export function TemplateBlockEditor({
     }
   };
 
+  const findTrailingFooterInsertIndex = (blocks: EmailBlock[]): number => {
+    let idx = blocks.length;
+    while (idx > 0 && FOOTER_SECTION_SET.has(blocks[idx - 1].type)) {
+      idx -= 1;
+    }
+    return idx;
+  };
+
   const addBlock = (type: EmailBlockType) => {
-    const newBlock = createEmailBlock(type, appUrl);
+    const newBlock = createEmailBlock(type, appUrl, language);
+    const upgradesToV3 = STANDALONE_FOOTER_SET.has(type);
     const upgradesToV2 = MODERN_BLOCK_SET.has(type);
     updateVariant((prev) => {
-      const nextSchema = upgradesToV2 ? 2 : prev.schemaVersion;
-      const last = prev.blocks[prev.blocks.length - 1];
-      if (
-        (last?.type === "footer" || last?.type === "legal_section") &&
-        type !== "footer" &&
-        type !== "legal_section" &&
-        type !== "footer_nav"
-      ) {
-        return {
-          ...prev,
-          ...(nextSchema ? { schemaVersion: nextSchema } : {}),
-          blocks: [...prev.blocks.slice(0, -1), newBlock, last],
-        };
+      const nextSchema: 1 | 2 | 3 | 4 | undefined =
+        prev.schemaVersion === 4
+          ? 4
+          : upgradesToV3 || prev.schemaVersion === 3
+          ? 3
+          : upgradesToV2
+          ? 2
+          : prev.schemaVersion;
+
+      if (!FOOTER_SECTION_SET.has(type)) {
+        const insertAt = findTrailingFooterInsertIndex(prev.blocks);
+        if (insertAt < prev.blocks.length) {
+          return {
+            ...prev,
+            ...(nextSchema ? { schemaVersion: nextSchema } : {}),
+            blocks: [
+              ...prev.blocks.slice(0, insertAt),
+              newBlock,
+              ...prev.blocks.slice(insertAt),
+            ],
+          };
+        }
       }
       return {
         ...prev,
@@ -419,6 +511,58 @@ export function TemplateBlockEditor({
     }
   };
 
+  const handleResetFooter = () => {
+    const defaultFooters = buildDefaultFooterBlocks(language, {
+      logoUrl: variant.branding.logoUrl,
+      logoImageId: variant.branding.logoImageId,
+    });
+    updateVariant((prev) => ({
+      ...prev,
+      schemaVersion: 3,
+      blocks: replaceFooterBlocksInList(prev.blocks, defaultFooters, {
+        replaceNav: false,
+        replaceSocial: false,
+      }),
+    }));
+    if (defaultFooters[0]?.id) {
+      setExpandedBlockId(defaultFooters[0].id);
+    }
+    toast.success(
+      "Footer reset to default editable blocks in draft. Review and click Publish when ready."
+    );
+  };
+
+  const handleSaveFooterAsDefault = async () => {
+    const footerBlocks = variant.blocks.filter((b) =>
+      ALLOWED_DEFAULT_FOOTER_SET.has(b.type)
+    );
+    if (footerBlocks.length === 0) {
+      toast.error("Add at least one editable footer block before saving as default.");
+      return;
+    }
+    try {
+      setSavingDefaultFooter(true);
+      const nextSettings: HotelEmailSettings = {
+        ...settings,
+        defaultFooterBlocks: {
+          ...(settings.defaultFooterBlocks || {}),
+          [language]: JSON.parse(JSON.stringify(footerBlocks)),
+        },
+      };
+      const res = await emailCustomizationApi.saveSettings(nextSettings, hotelId);
+      if (res.settings) {
+        onSettingsUpdated?.(res.settings);
+      }
+      toast.success(
+        `Saved ${language.toUpperCase()} footer as your reusable default in Email Settings.`
+      );
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to save default footer.");
+    } finally {
+      setSavingDefaultFooter(false);
+    }
+  };
+
   const addOptionalSection = (presetId: string) => {
     const preset = OPTIONAL_SECTION_PRESETS.find((p) => p.id === presetId);
     if (!preset) return;
@@ -426,9 +570,16 @@ export function TemplateBlockEditor({
       .createBlocks()
       .map((b) => ({ ...JSON.parse(JSON.stringify(b)), id: makeId("blk") }));
     updateVariant((prev) => {
-      const last = prev.blocks[prev.blocks.length - 1];
-      if (last?.type === "footer" || last?.type === "legal_section") {
-        return { ...prev, blocks: [...prev.blocks.slice(0, -1), ...cloned, last] };
+      const insertAt = findTrailingFooterInsertIndex(prev.blocks);
+      if (insertAt < prev.blocks.length) {
+        return {
+          ...prev,
+          blocks: [
+            ...prev.blocks.slice(0, insertAt),
+            ...cloned,
+            ...prev.blocks.slice(insertAt),
+          ],
+        };
       }
       return { ...prev, blocks: [...prev.blocks, ...cloned] };
     });
@@ -593,6 +744,23 @@ export function TemplateBlockEditor({
 
           <button
             type="button"
+            onClick={() => setLinksOverviewOpen((v) => !v)}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium whitespace-nowrap transition-colors ${
+              linksOverviewOpen
+                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+                : templateLinksSummary.warnings > 0
+                ? "border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300"
+                : "border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
+            }`}
+          >
+            <Link2 size={13} /> Links ({templateLinksSummary.total})
+            {templateLinksSummary.warnings > 0 && (
+              <span className="text-[10px] font-semibold">· {templateLinksSummary.warnings}</span>
+            )}
+          </button>
+
+          <button
+            type="button"
             onClick={() => setHistoryOpen(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-xs font-medium text-zinc-300 whitespace-nowrap"
           >
@@ -717,6 +885,18 @@ export function TemplateBlockEditor({
                 })}
           </ul>
         </div>
+      )}
+
+      {/* Links Overview Panel (Inspect all links across this template & jump to edit) */}
+      {linksOverviewOpen && (
+        <LinksOverviewPanel
+          variant={variant}
+          sampleContext={effectiveSampleContext}
+          settings={settings}
+          language={language}
+          onSelectBlock={handleJumpToLinkBlock}
+          onClose={() => setLinksOverviewOpen(false)}
+        />
       )}
 
       {/* Split Workspace: Left Editor / Right Live Sandboxed Preview */}
@@ -994,6 +1174,32 @@ export function TemplateBlockEditor({
                   </div>
                 </div>
 
+                {variant.branding.showLogo && (
+                  <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5">
+                    <LinkDestinationField
+                      label="Optional Header Logo Click Link"
+                      url={variant.branding.logoLinkUrl || ""}
+                      visibleLabel={variant.branding.logoAlt || "{{hotel_name}}"}
+                      onChangeUrl={(logoLinkUrl) =>
+                        updateVariant((prev) => ({
+                          ...prev,
+                          branding: { ...prev.branding, logoLinkUrl },
+                        }))
+                      }
+                      allowEmpty
+                      resolvedVariables={resolvedVariables}
+                      openInNewTab={variant.branding.logoLinkOpenInNewTab}
+                      onChangeOpenInNewTab={(logoLinkOpenInNewTab) =>
+                        updateVariant((prev) => ({
+                          ...prev,
+                          branding: { ...prev.branding, logoLinkOpenInNewTab },
+                        }))
+                      }
+                      compact
+                    />
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-[11px] text-zinc-400 mb-1">
                     Template Portal URL Override (Optional, HTTPS)
@@ -1021,6 +1227,7 @@ export function TemplateBlockEditor({
             blocks={variant.blocks}
             appUrl={appUrl}
             resolvedPortalUrl={resolvedPortalUrl}
+            resolvedVariables={resolvedVariables}
             validationIssues={validationIssues}
             expandedBlockId={expandedBlockId}
             onExpandBlock={setExpandedBlockId}
@@ -1031,6 +1238,9 @@ export function TemplateBlockEditor({
             onReorderBlock={reorderBlock}
             onDuplicateBlock={duplicateBlock}
             onRemoveBlock={removeBlock}
+            onResetFooter={handleResetFooter}
+            onSaveFooterAsDefault={() => void handleSaveFooterAsDefault()}
+            savingDefaultFooter={savingDefaultFooter}
             imageActions={{
               onPickLibrary: (blockId, field) =>
                 setImagePickerTarget({ kind: "block", blockId, field }),
@@ -1039,14 +1249,35 @@ export function TemplateBlockEditor({
               uploadingKey,
             }}
           />
+
+          {!hasFooterBlocks && (
+            <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-900/40 px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="text-[11px] text-zinc-400">
+                No footer blocks are currently in this template.
+              </div>
+              <button
+                type="button"
+                onClick={handleResetFooter}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-[11px] font-medium text-zinc-200 whitespace-nowrap"
+              >
+                <RotateCcw size={11} /> Restore Default Footer Blocks
+              </button>
+            </div>
+          )}
         </div>
 
         {/* RIGHT PANE: Sandboxed Live Preview */}
         <div className="xl:col-span-6 xl:sticky xl:top-4 space-y-3">
           <div className="rounded-xl bg-zinc-900/60 border border-zinc-800 overflow-hidden">
             <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-semibold text-zinc-200">Live Preview</span>
+                <span
+                  className="px-2 py-0.5 rounded bg-zinc-800/90 border border-zinc-700 text-[10px] font-medium text-zinc-300 tabular-nums"
+                  title="Version currently sent to guests for live reservations"
+                >
+                  Live: {liveLabel}
+                </span>
                 <div className="inline-flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5">
                   <button
                     type="button"
@@ -1117,6 +1348,24 @@ export function TemplateBlockEditor({
                 </span>
               </div>
             )}
+
+            {/* Preview of Draft vs. Live Status Banner */}
+            <div
+              className={`px-4 py-2 border-b text-[11px] flex flex-wrap items-center justify-between gap-2 ${
+                hasUnpublishedDraft
+                  ? "bg-amber-500/10 border-amber-500/25 text-amber-200"
+                  : "bg-zinc-900/90 border-zinc-800 text-zinc-300"
+              }`}
+            >
+              <span className="font-semibold">
+                Preview of draft ({language.toUpperCase()})
+              </span>
+              <span className="text-[11px] opacity-90">
+                {hasUnpublishedDraft
+                  ? `Unpublished changes — live guest emails still send ${liveLabel} until you click Publish.`
+                  : `Matches live ${liveLabel}. Uses the exact same renderer as sent emails.`}
+              </span>
+            </div>
 
             {/* Simulated Inbox Envelope */}
             <div className="px-4 py-2.5 bg-zinc-950/70 border-b border-zinc-800 text-xs space-y-1">

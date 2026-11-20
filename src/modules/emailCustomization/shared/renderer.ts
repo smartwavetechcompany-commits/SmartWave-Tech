@@ -11,6 +11,7 @@ import {
   type EmailRenderContext,
   type EmailTemplateVariant,
   type HotelEmailSettings,
+  type InlineTextLink,
   type ModernButtonStyle,
   type RenderedEmailOutput,
   type SupportedEmailLanguage,
@@ -30,16 +31,23 @@ import {
   sanitizeHexColor,
   stripDangerousMarkup,
   validateEmailUrl,
+  validateLinkLabelAgainstUrl,
 } from "./validation.ts";
 
 const MODERN_BLOCK_SET = new Set<string>(MODERN_EMAIL_BLOCK_TYPES);
 
 /**
- * Determines whether a variant uses the modern v2 responsive shell or must stay
+ * Determines whether a variant uses the modern v2/v3/v4 responsive shell or must stay
  * byte-for-byte identical to the v1 classic email template renderer.
  */
 export function isModernV2Variant(variant: EmailTemplateVariant): boolean {
-  if (variant.schemaVersion === 2) return true;
+  if (
+    variant.schemaVersion === 2 ||
+    variant.schemaVersion === 3 ||
+    variant.schemaVersion === 4
+  ) {
+    return true;
+  }
   return (variant.blocks || []).some((b) => b && MODERN_BLOCK_SET.has(b.type));
 }
 
@@ -72,18 +80,116 @@ function shouldRenderCondition(
   return true;
 }
 
+function isContactSchemeUrl(url: string): boolean {
+  const lower = url.toLowerCase();
+  return lower.startsWith("mailto:") || lower.startsWith("tel:");
+}
+
+function buildLinkTargetAttrs(url: string, openInNewTab?: boolean): string {
+  if (isContactSchemeUrl(url)) return "";
+  if (openInNewTab === false) return "";
+  return ' target="_blank" rel="noopener noreferrer"';
+}
+
 function resolveSafeUrlOnRender(
   rawUrl: string,
   variables: Record<AllowedTemplateVariable, string>,
-  allowContactSchemes = false
+  allowContactSchemes = false,
+  visibleLabelForPhishingCheck?: string
 ): string {
   const substituted = substituteVariablesRaw(rawUrl, variables);
+  if (!substituted) return "";
   const check = validateEmailUrl(substituted, { allowContactSchemes });
-  return check.valid && check.normalized ? check.normalized : "";
+  if (!check.valid || !check.normalized) return "";
+  if (visibleLabelForPhishingCheck) {
+    const phish = validateLinkLabelAgainstUrl(visibleLabelForPhishingCheck, check.normalized);
+    if (!phish.valid) return "";
+  }
+  return check.normalized;
 }
 
 function renderMultilineEscaped(text: string): string {
   return escapeHtml(text).replace(/\r?\n/g, "<br />");
+}
+
+/**
+ * Safely renders text containing structured inline link placeholders (`[[link:<id>]]`).
+ * - Fast path when no inlineLinks exist guarantees exact byte-for-byte v1/v2/v3 output.
+ * - Escapes ALL plain text and link labels (zero raw HTML).
+ * - Omits hidden links or links whose variable resolves empty / unsafe (never empty `<a>` or "undefined").
+ * - Plain text formats active inline links as "label (URL)".
+ */
+function renderTextWithInlineLinks(
+  rawTemplate: string,
+  inlineLinks: InlineTextLink[] | undefined,
+  variables: Record<AllowedTemplateVariable, string>,
+  defaultLinkColor: string
+): { html: string; text: string } {
+  if (!rawTemplate) return { html: "", text: "" };
+  if (!inlineLinks || inlineLinks.length === 0) {
+    const plain = substituteVariablesRaw(rawTemplate, variables);
+    return { html: renderMultilineEscaped(plain), text: plain };
+  }
+
+  const linkMap = new Map<string, InlineTextLink>();
+  for (const l of inlineLinks) {
+    if (l && l.id) linkMap.set(l.id, l);
+  }
+
+  const tokenRe = /\[\[link:([a-zA-Z0-9_-]+)\]\]/g;
+  const htmlChunks: string[] = [];
+  const textChunks: string[] = [];
+  let lastIdx = 0;
+  let match: RegExpExecArray | null;
+
+  const pushPlain = (segment: string) => {
+    if (!segment) return;
+    const cleaned = stripDangerousMarkup(segment).replace(
+      /\{\{\s*([a-z0-9_]+)\s*\}\}/g,
+      (_m, key: string) => {
+        const val = (variables as Record<string, string | undefined>)[key];
+        return typeof val === "string" ? val : "";
+      }
+    );
+    htmlChunks.push(renderMultilineEscaped(cleaned));
+    textChunks.push(cleaned);
+  };
+
+  while ((match = tokenRe.exec(rawTemplate)) !== null) {
+    if (match.index > lastIdx) {
+      pushPlain(rawTemplate.slice(lastIdx, match.index));
+    }
+    const id = match[1];
+    const link = linkMap.get(id);
+    if (link && link.hidden !== true) {
+      const label = substituteVariablesRaw(link.label || "", variables);
+      const safeUrl = label
+        ? resolveSafeUrlOnRender(link.url || "", variables, true, label)
+        : "";
+      if (label && safeUrl) {
+        const col = sanitizeHexColor(link.color, defaultLinkColor);
+        const deco = link.underline === false ? "none" : "underline";
+        const targetAttrs = buildLinkTargetAttrs(safeUrl, link.openInNewTab);
+        htmlChunks.push(
+          `<a href="${escapeHtml(safeUrl)}"${targetAttrs} style="color:${escapeHtml(col)};text-decoration:${deco};">${escapeHtml(label)}</a>`
+        );
+        textChunks.push(`${label} (${safeUrl})`);
+      }
+    }
+    lastIdx = match.index + match[0].length;
+  }
+
+  if (lastIdx < rawTemplate.length) {
+    pushPlain(rawTemplate.slice(lastIdx));
+  }
+
+  const html = htmlChunks.join("").replace(/  +/g, " ").trim();
+  const text = textChunks
+    .join("")
+    .replace(/\s*\(\s*\)/g, "")
+    .replace(/  +/g, " ")
+    .trim();
+  return { html, text };
 }
 
 function clampInt(val: unknown, fallback: number, min: number, max: number): number {
@@ -126,6 +232,8 @@ function renderModernButton(options: {
   corner?: ButtonCornerStyle;
   bgColor?: string;
   textColor?: string;
+  borderColor?: string;
+  openInNewTab?: boolean;
   defaultBrandColor: string;
   fontCss: string;
   align?: "left" | "center" | "right";
@@ -158,17 +266,17 @@ function renderModernButton(options: {
   let fgColor: string;
 
   if (style === "outlined") {
-    const stroke = sanitizeHexColor(options.bgColor, "#18181b");
+    const stroke = sanitizeHexColor(options.borderColor || options.bgColor, "#18181b");
     fillBg = "transparent";
     borderColor = stroke;
     fgColor = sanitizeHexColor(options.textColor, stroke);
   } else if (style === "dark") {
     fillBg = sanitizeHexColor(options.bgColor, "#18181b");
-    borderColor = fillBg;
+    borderColor = sanitizeHexColor(options.borderColor, fillBg);
     fgColor = sanitizeHexColor(options.textColor, "#ffffff");
   } else {
     fillBg = sanitizeHexColor(options.bgColor, defaultBrandColor);
-    borderColor = fillBg;
+    borderColor = sanitizeHexColor(options.borderColor, fillBg);
     fgColor = sanitizeHexColor(options.textColor, "#ffffff");
   }
 
@@ -180,6 +288,7 @@ function renderModernButton(options: {
   const tableAlignAttr = align === "center" ? 'align="center"' : align === "right" ? 'align="right"' : 'align="left"';
   const marginCss = align === "center" ? "margin:0 auto;" : align === "right" ? "margin:0 0 0 auto;" : "margin:0;";
   const tdBgStyle = style === "outlined" ? "background-color:transparent;" : `background-color:${escapeHtml(fillBg)};`;
+  const targetAttrs = buildLinkTargetAttrs(url, options.openInNewTab);
 
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" ${tableAlignAttr} style="border-collapse:separate;${marginCss}">
   <tr>
@@ -192,7 +301,7 @@ function renderModernButton(options: {
       </v:roundrect>
       <![endif]-->
       <!--[if !mso]><!-- -->
-      <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:${padV}px ${padH}px;font-family:${fontCss};font-size:${fontSize}px;line-height:1.25;font-weight:700;color:${escapeHtml(fgColor)};text-decoration:none;border-radius:${radiusPx}px;mso-hide:all;">${escapeHtml(label)}</a>
+      <a href="${escapeHtml(url)}"${targetAttrs} style="display:inline-block;padding:${padV}px ${padH}px;font-family:${fontCss};font-size:${fontSize}px;line-height:1.25;font-weight:700;color:${escapeHtml(fgColor)};text-decoration:none;border-radius:${radiusPx}px;mso-hide:all;">${escapeHtml(label)}</a>
       <!--<![endif]-->
     </td>
   </tr>
@@ -265,6 +374,9 @@ export function renderEmailTemplate(options: {
   const safeLogoUrl = rawLogoCandidate
     ? resolveSafeUrlOnRender(rawLogoCandidate, variables, false)
     : "";
+  const safeLogoLinkUrl = branding.logoLinkUrl
+    ? resolveSafeUrlOnRender(branding.logoLinkUrl, variables, false)
+    : "";
   const logoAlt =
     substituteVariablesRaw(branding.logoAlt || "{{hotel_name}}", variables) || variables.hotel_name;
   const logoWidth = Math.max(40, Math.min(260, Number(branding.logoWidthPx) || 160));
@@ -286,7 +398,7 @@ export function renderEmailTemplate(options: {
     }
 
     for (const block of variant.blocks) {
-      if (!block || !shouldRenderCondition(block.condition, conditions)) {
+      if (!block || block.hidden === true || !shouldRenderCondition(block.condition, conditions)) {
         continue;
       }
 
@@ -301,6 +413,8 @@ export function renderEmailTemplate(options: {
         hotelLogoUrl: context.hotelLogoUrl,
         hotelFooterNotes: context.hotelFooterNotes,
         settingsLegalImprint: settings.legalImprint,
+        isPureV3: false,
+        modernMode: false,
       });
 
       if (rendered.html) htmlParts.push(rendered.html);
@@ -315,8 +429,15 @@ export function renderEmailTemplate(options: {
       ? `<tr><td style="height:${accentThickness}px;line-height:${accentThickness}px;font-size:1px;background-color:${escapeHtml(accentBarColor)};">&nbsp;</td></tr>`
       : "";
 
+    const logoImgTag = safeLogoUrl
+      ? `<img src="${escapeHtml(safeLogoUrl)}" alt="${escapeHtml(logoAlt)}" width="${logoWidth}" style="display:block;max-width:${logoWidth}px;max-height:56px;height:auto;border:0;background-color:#f4f4f5;" />`
+      : "";
     const logoHtml = safeLogoUrl
-      ? `<div style="margin:0 0 14px 0;"><img src="${escapeHtml(safeLogoUrl)}" alt="${escapeHtml(logoAlt)}" width="${logoWidth}" style="display:block;max-width:${logoWidth}px;max-height:56px;height:auto;border:0;background-color:#f4f4f5;" /></div>`
+      ? `<div style="margin:0 0 14px 0;">${
+          safeLogoLinkUrl
+            ? `<a href="${escapeHtml(safeLogoLinkUrl)}"${buildLinkTargetAttrs(safeLogoLinkUrl, branding.logoLinkOpenInNewTab)} style="text-decoration:none;border:0;">${logoImgTag}</a>`
+            : logoImgTag
+        }</div>`
       : "";
 
     const eyebrowHtml = eyebrowText
@@ -370,17 +491,29 @@ ${preheaderHtml}
     };
   }
 
-  // --- MODERN V2 RESPONSIVE LAYOUT PATH ---
+  // --- MODERN V2 / V3 / V4 RESPONSIVE LAYOUT PATH ---
+  const isPureV3 = variant.schemaVersion === 3 || variant.schemaVersion === 4;
   const hasBrandHeader = variant.blocks.some(
-    (b) => b && b.type === "brand_header" && shouldRenderCondition(b.condition, conditions)
+    (b) =>
+      b &&
+      b.hidden !== true &&
+      b.type === "brand_header" &&
+      shouldRenderCondition(b.condition, conditions)
   );
 
   const rowParts: string[] = [];
   const textParts: string[] = [];
 
   if (!hasBrandHeader && (safeLogoUrl || eyebrowText)) {
+    const legacyLogoImg = safeLogoUrl
+      ? `<img src="${escapeHtml(safeLogoUrl)}" alt="${escapeHtml(logoAlt)}" width="${logoWidth}" style="display:block;max-width:${logoWidth}px;max-height:56px;height:auto;border:0;background-color:#ffffff;" />`
+      : "";
     const legacyLogoHtml = safeLogoUrl
-      ? `<div style="margin:0 0 10px 0;"><img src="${escapeHtml(safeLogoUrl)}" alt="${escapeHtml(logoAlt)}" width="${logoWidth}" style="display:block;max-width:${logoWidth}px;max-height:56px;height:auto;border:0;background-color:#ffffff;" /></div>`
+      ? `<div style="margin:0 0 10px 0;">${
+          safeLogoLinkUrl
+            ? `<a href="${escapeHtml(safeLogoLinkUrl)}"${buildLinkTargetAttrs(safeLogoLinkUrl, branding.logoLinkOpenInNewTab)} style="text-decoration:none;border:0;">${legacyLogoImg}</a>`
+            : legacyLogoImg
+        }</div>`
       : "";
     const legacyEyebrowHtml = eyebrowText
       ? `<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:${escapeHtml(primaryColor)};font-family:${fontCss};">${escapeHtml(eyebrowText)}</div>`
@@ -392,7 +525,7 @@ ${preheaderHtml}
   }
 
   for (const block of variant.blocks) {
-    if (!block || !shouldRenderCondition(block.condition, conditions)) {
+    if (!block || block.hidden === true || !shouldRenderCondition(block.condition, conditions)) {
       continue;
     }
 
@@ -405,15 +538,17 @@ ${preheaderHtml}
       fontCss,
       appUrl: assetBaseUrl,
       hotelLogoUrl: context.hotelLogoUrl,
-      hotelFooterNotes: context.hotelFooterNotes,
-      settingsLegalImprint: settings.legalImprint,
+      hotelFooterNotes: isPureV3 ? undefined : context.hotelFooterNotes,
+      settingsLegalImprint: isPureV3 ? undefined : settings.legalImprint,
+      isPureV3,
+      modernMode: true,
     });
 
     if (rendered.html) {
       if (MODERN_BLOCK_SET.has(block.type)) {
         rowParts.push(rendered.html);
       } else {
-        // Legacy blocks inside a v2 template get comfortable section padding
+        // Legacy blocks inside a v2/v3/v4 template get comfortable section padding
         rowParts.push(
           `<tr><td class="ec-pad-sm" style="padding:8px 28px;background-color:#ffffff;font-family:${fontCss};color:#18181b;">${rendered.html}</td></tr>`
         );
@@ -513,12 +648,18 @@ interface BlockRenderCtx {
   hotelLogoUrl?: string;
   hotelFooterNotes?: string;
   settingsLegalImprint?: string;
+  isPureV3?: boolean;
+  modernMode?: boolean;
 }
 
 function getSectionPadding(style: BlockStyleConfig | undefined, defY: number, defX: number): string {
   const py = clampInt(style?.paddingY, defY, 0, 40);
   const px = clampInt(style?.paddingX, defX, 0, 40);
   return `${py}px ${px}px`;
+}
+
+function getBlockFontCss(style: BlockStyleConfig | undefined, defaultFontCss: string): string {
+  return style?.fontFamily ? resolveWebSafeFontCss(style.fontFamily) : defaultFontCss;
 }
 
 function renderSingleBlock(
@@ -543,8 +684,13 @@ function renderSingleBlock(
     }
 
     case "paragraph": {
-      const content = substituteVariablesRaw(block.text, variables);
-      if (!content) return { html: "", text: "" };
+      const rendered = renderTextWithInlineLinks(
+        block.text,
+        block.inlineLinks,
+        variables,
+        primaryColor
+      );
+      if (!rendered.text && !rendered.html) return { html: "", text: "" };
       const align = block.align || "left";
       const color =
         block.tone === "muted"
@@ -554,8 +700,8 @@ function renderSingleBlock(
             : "#27272a";
       const fontSize = block.tone === "muted" ? "13px" : "14px";
       return {
-        html: `<p style="margin:0 0 14px 0;font-size:${fontSize};line-height:1.6;color:${escapeHtml(color)};text-align:${align};font-family:${fontCss};">${renderMultilineEscaped(content)}</p>`,
-        text: content,
+        html: `<p style="margin:0 0 14px 0;font-size:${fontSize};line-height:1.6;color:${escapeHtml(color)};text-align:${align};font-family:${fontCss};">${rendered.html}</p>`,
+        text: rendered.text,
       };
     }
 
@@ -566,12 +712,13 @@ function renderSingleBlock(
       const width = Math.max(80, Math.min(544, Number(block.widthPx) || 544));
       const align = block.align || "center";
       const bg = sanitizeHexColor(block.fallbackBg, "#f4f4f5");
-      const safeLink = block.linkUrl
-        ? resolveSafeUrlOnRender(block.linkUrl, variables, false)
-        : "";
+      const safeLink =
+        block.linkUrl && block.linkHidden !== true
+          ? resolveSafeUrlOnRender(block.linkUrl, variables, false)
+          : "";
       const imgTag = `<img src="${escapeHtml(safeSrc)}" alt="${escapeHtml(altText)}" width="${width}" style="display:block;width:100%;max-width:${width}px;height:auto;border:0;border-radius:6px;background-color:${escapeHtml(bg)};" />`;
       const wrapped = safeLink
-        ? `<a href="${escapeHtml(safeLink)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;border:0;">${imgTag}</a>`
+        ? `<a href="${escapeHtml(safeLink)}"${buildLinkTargetAttrs(safeLink, block.linkOpenInNewTab)} style="text-decoration:none;border:0;">${imgTag}</a>`
         : imgTag;
       return {
         html: `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0;"><tr><td align="${align}">${wrapped}</td></tr></table>`,
@@ -580,34 +727,63 @@ function renderSingleBlock(
     }
 
     case "button": {
-      const safeUrl = resolveSafeUrlOnRender(block.url, variables, false);
       const label = substituteVariablesRaw(block.label, variables);
+      const safeUrl = label
+        ? resolveSafeUrlOnRender(block.url, variables, true, label)
+        : "";
       const prefix = substituteVariablesRaw(block.prefixText || "", variables);
       if (!safeUrl || !label) return { html: "", text: "" };
       const align = block.align || "left";
       const bg = sanitizeHexColor(block.bgColor || buttonColor, buttonColor);
       const fg = sanitizeHexColor(block.textColor || buttonTextColor, buttonTextColor);
+      const borderCol = sanitizeHexColor(block.borderColor || bg, bg);
+      const radiusPx =
+        block.borderRadiusPx !== undefined
+          ? clampInt(block.borderRadiusPx, 6, 0, 999)
+          : 6;
+      const targetAttrs = buildLinkTargetAttrs(safeUrl, block.openInNewTab);
 
       if (block.displayStyle === "text_link") {
         const prefixHtml = prefix ? `${escapeHtml(prefix)}: ` : "";
+        const linkColor = block.textColor
+          ? sanitizeHexColor(block.textColor, primaryColor)
+          : primaryColor;
+        const textDeco = block.underline === false ? "none" : "underline";
+        const isUntouchedLegacy =
+          !ctx.modernMode &&
+          !block.textColor &&
+          block.underline === undefined &&
+          block.openInNewTab === undefined;
         return {
-          html: `<p style="margin:20px 0 0 0;font-size:14px;line-height:1.6;text-align:${align};font-family:${fontCss};color:#18181b;">${prefixHtml}<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" style="color:${escapeHtml(primaryColor)};text-decoration:underline;word-break:break-all;">${escapeHtml(label)}</a></p>`,
-          text: prefix ? `${prefix}: ${safeUrl}` : `${label}: ${safeUrl}`,
+          html: `<p style="margin:20px 0 0 0;font-size:14px;line-height:1.6;text-align:${align};font-family:${fontCss};color:#18181b;">${prefixHtml}<a href="${escapeHtml(safeUrl)}"${targetAttrs} style="color:${escapeHtml(linkColor)};text-decoration:${textDeco};word-break:break-all;">${escapeHtml(label)}</a></p>`,
+          text: isUntouchedLegacy
+            ? prefix
+              ? `${prefix}: ${safeUrl}`
+              : `${label}: ${safeUrl}`
+            : prefix
+              ? `${prefix}: ${label} (${safeUrl})`
+              : `${label} (${safeUrl})`,
         };
       }
 
       const isOutline = block.displayStyle === "outline";
       const btnStyle = isOutline
-        ? `display:inline-block;padding:11px 22px;font-size:14px;font-weight:600;color:${escapeHtml(bg)};background-color:#ffffff;border:1px solid ${escapeHtml(bg)};border-radius:6px;text-decoration:none;font-family:${fontCss};`
-        : `display:inline-block;padding:12px 24px;font-size:14px;font-weight:600;color:${escapeHtml(fg)};background-color:${escapeHtml(bg)};border:1px solid ${escapeHtml(bg)};border-radius:6px;text-decoration:none;font-family:${fontCss};`;
+        ? `display:inline-block;padding:11px 22px;font-size:14px;font-weight:600;color:${escapeHtml(block.textColor ? fg : bg)};background-color:#ffffff;border:1px solid ${escapeHtml(borderCol)};border-radius:${radiusPx}px;text-decoration:none;font-family:${fontCss};`
+        : `display:inline-block;padding:12px 24px;font-size:14px;font-weight:600;color:${escapeHtml(fg)};background-color:${escapeHtml(bg)};border:1px solid ${escapeHtml(borderCol)};border-radius:${radiusPx}px;text-decoration:none;font-family:${fontCss};`;
 
       return {
         html: `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 4px 0;"><tr><td align="${align}">${
           prefix
             ? `<div style="margin:0 0 8px 0;font-size:13px;color:#52525b;font-family:${fontCss};">${escapeHtml(prefix)}</div>`
             : ""
-        }<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" style="${btnStyle}">${escapeHtml(label)}</a></td></tr></table>`,
-        text: prefix ? `${prefix}\n${label}: ${safeUrl}` : `${label}: ${safeUrl}`,
+        }<a href="${escapeHtml(safeUrl)}"${targetAttrs} style="${btnStyle}">${escapeHtml(label)}</a></td></tr></table>`,
+        text: ctx.modernMode
+          ? prefix
+            ? `${prefix}\n${label} (${safeUrl})`
+            : `${label} (${safeUrl})`
+          : prefix
+            ? `${prefix}\n${label}: ${safeUrl}`
+            : `${label}: ${safeUrl}`,
       };
     }
 
@@ -665,26 +841,38 @@ function renderSingleBlock(
 
     case "two_column_text": {
       const leftTitle = substituteVariablesRaw(block.leftTitle || "", variables);
-      const leftText = substituteVariablesRaw(block.leftText || "", variables);
+      const leftRendered = renderTextWithInlineLinks(
+        block.leftText || "",
+        block.inlineLinks,
+        variables,
+        primaryColor
+      );
       const rightTitle = substituteVariablesRaw(block.rightTitle || "", variables);
-      const rightText = substituteVariablesRaw(block.rightText || "", variables);
-      if (!leftText && !rightText && !leftTitle && !rightTitle) return { html: "", text: "" };
+      const rightRendered = renderTextWithInlineLinks(
+        block.rightText || "",
+        block.inlineLinks,
+        variables,
+        primaryColor
+      );
+      if (!leftRendered.text && !rightRendered.text && !leftTitle && !rightTitle) {
+        return { html: "", text: "" };
+      }
 
       const html = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:16px 0;border:1px solid #e4e4e7;border-radius:6px;background-color:#fafafa;">
         <tr>
           <td width="50%" valign="top" style="padding:14px;font-family:${fontCss};border-right:1px solid #e4e4e7;">
             ${leftTitle ? `<div style="font-size:12px;font-weight:700;color:${escapeHtml(secondaryColor)};margin:0 0 6px 0;">${escapeHtml(leftTitle)}</div>` : ""}
-            <div style="font-size:13px;line-height:1.5;color:#27272a;">${renderMultilineEscaped(leftText)}</div>
+            <div style="font-size:13px;line-height:1.5;color:#27272a;">${leftRendered.html}</div>
           </td>
           <td width="50%" valign="top" style="padding:14px;font-family:${fontCss};">
             ${rightTitle ? `<div style="font-size:12px;font-weight:700;color:${escapeHtml(secondaryColor)};margin:0 0 6px 0;">${escapeHtml(rightTitle)}</div>` : ""}
-            <div style="font-size:13px;line-height:1.5;color:#27272a;">${renderMultilineEscaped(rightText)}</div>
+            <div style="font-size:13px;line-height:1.5;color:#27272a;">${rightRendered.html}</div>
           </td>
         </tr>
       </table>`;
       const text = [
-        [leftTitle, leftText].filter(Boolean).join(": "),
-        [rightTitle, rightText].filter(Boolean).join(": "),
+        [leftTitle, leftRendered.text].filter(Boolean).join(": "),
+        [rightTitle, rightRendered.text].filter(Boolean).join(": "),
       ]
         .filter(Boolean)
         .join("\n");
@@ -693,10 +881,18 @@ function renderSingleBlock(
 
     case "social_links": {
       const safeLinks = (block.links || [])
-        .map((item) => ({
-          label: substituteVariablesRaw(item.label, variables),
-          url: resolveSafeUrlOnRender(item.url, variables, false),
-        }))
+        .filter((item) => item && item.hidden !== true)
+        .map((item) => {
+          const label = substituteVariablesRaw(item.label, variables);
+          const url = label ? resolveSafeUrlOnRender(item.url, variables, false, label) : "";
+          return {
+            label,
+            url,
+            color: item.color ? sanitizeHexColor(item.color, primaryColor) : primaryColor,
+            underline: item.underline === false ? "none" : "underline",
+            openInNewTab: item.openInNewTab,
+          };
+        })
         .filter((item) => item.label && item.url);
       if (safeLinks.length === 0) return { html: "", text: "" };
       const align = block.align || "left";
@@ -704,7 +900,7 @@ function renderSingleBlock(
       const linksHtml = safeLinks
         .map(
           (l) =>
-            `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer" style="color:${escapeHtml(primaryColor)};text-decoration:underline;font-size:13px;font-weight:600;margin-right:14px;font-family:${fontCss};">${escapeHtml(l.label)}</a>`
+            `<a href="${escapeHtml(l.url)}"${buildLinkTargetAttrs(l.url, l.openInNewTab)} style="color:${escapeHtml(l.color)};text-decoration:${l.underline};font-size:13px;font-weight:600;margin-right:14px;font-family:${fontCss};">${escapeHtml(l.label)}</a>`
         )
         .join("");
       return {
@@ -715,7 +911,7 @@ function renderSingleBlock(
         }${linksHtml}</div>`,
         text: [
           ...(title ? [title] : []),
-          ...safeLinks.map((l) => `${l.label}: ${l.url}`),
+          ...safeLinks.map((l) => (ctx.modernMode ? `${l.label} (${l.url})` : `${l.label}: ${l.url}`)),
         ].join("\n"),
       };
     }
@@ -728,6 +924,9 @@ function renderSingleBlock(
           key: f.key,
           label: substituteVariablesRaw(f.label, variables),
           value: substituteVariablesRaw(f.valueTemplate, variables),
+          linkEnabled: f.linkEnabled,
+          linkColor: f.linkColor,
+          underline: f.underline,
         }))
         .filter((f) => f.label && f.value);
 
@@ -737,23 +936,41 @@ function renderSingleBlock(
       if (block.showContactBlock && visibleFields.length > 0) {
         for (const field of visibleFields) {
           let valueHtml = escapeHtml(field.value);
-          if (field.key === "email" && isValidEmail(field.value)) {
-            valueHtml = `<a href="mailto:${escapeHtml(field.value)}" style="color:#52525b;text-decoration:none;">${escapeHtml(field.value)}</a>`;
-          } else if (field.key === "phone") {
-            const telCheck = validateEmailUrl(`tel:${field.value}`, { allowContactSchemes: true });
-            if (telCheck.valid && telCheck.normalized) {
-              valueHtml = `<a href="${escapeHtml(telCheck.normalized)}" style="color:#52525b;text-decoration:none;">${escapeHtml(field.value)}</a>`;
+          let valueText = field.value;
+          const allowLink = field.linkEnabled !== false;
+          if (allowLink && field.key === "email" && isValidEmail(field.value)) {
+            const col = field.linkColor ? sanitizeHexColor(field.linkColor, "#52525b") : "#52525b";
+            const deco = field.underline === true ? "underline" : "none";
+            valueHtml = `<a href="mailto:${escapeHtml(field.value)}" style="color:${escapeHtml(col)};text-decoration:${deco};">${escapeHtml(field.value)}</a>`;
+            if (field.linkEnabled === true) {
+              valueText = `${field.value} (mailto:${field.value})`;
             }
-          } else if (field.key === "website") {
+          } else if (allowLink && field.key === "phone") {
+            // Preserve exact v1 snapshot parity when untouched (!modernMode && linkEnabled === undefined)
+            const legacyV1Untouched = !ctx.modernMode && field.linkEnabled === undefined;
+            if (!legacyV1Untouched || !/\s/.test(field.value)) {
+              const telCheck = validateEmailUrl(`tel:${field.value}`, { allowContactSchemes: true });
+              if (telCheck.valid && telCheck.normalized) {
+                const col = field.linkColor ? sanitizeHexColor(field.linkColor, "#52525b") : "#52525b";
+                const deco = field.underline === true ? "underline" : "none";
+                valueHtml = `<a href="${escapeHtml(telCheck.normalized)}" style="color:${escapeHtml(col)};text-decoration:${deco};">${escapeHtml(field.value)}</a>`;
+                if (field.linkEnabled === true) {
+                  valueText = `${field.value} (${telCheck.normalized})`;
+                }
+              }
+            }
+          } else if (allowLink && field.key === "website") {
             const urlCheck = validateEmailUrl(field.value);
             if (urlCheck.valid && urlCheck.normalized) {
-              valueHtml = `<a href="${escapeHtml(urlCheck.normalized)}" target="_blank" rel="noopener noreferrer" style="color:${escapeHtml(primaryColor)};text-decoration:underline;">${escapeHtml(field.value)}</a>`;
+              const col = field.linkColor ? sanitizeHexColor(field.linkColor, primaryColor) : primaryColor;
+              const deco = field.underline === false ? "none" : "underline";
+              valueHtml = `<a href="${escapeHtml(urlCheck.normalized)}" target="_blank" rel="noopener noreferrer" style="color:${escapeHtml(col)};text-decoration:${deco};">${escapeHtml(field.value)}</a>`;
             }
           }
           contactLinesHtml.push(
             `<div style="margin:2px 0;">${escapeHtml(field.label)}: ${valueHtml}</div>`
           );
-          contactLinesText.push(`${field.label}: ${field.value}`);
+          contactLinesText.push(`${field.label}: ${valueText}`);
         }
       }
 
@@ -804,13 +1021,19 @@ function renderSingleBlock(
 
       const logoCandidate = (block.logoUrl || ctx.hotelLogoUrl || "").trim();
       const safeLogo = logoCandidate ? resolveSafeUrlOnRender(logoCandidate, variables, false) : "";
+      const safeLogoLink = block.logoLinkUrl
+        ? resolveSafeUrlOnRender(block.logoLinkUrl, variables, false)
+        : "";
       const logoW = clampInt(block.logoWidthPx, 130, 48, 220);
       const logoAlt =
         substituteVariablesRaw(block.logoAlt || "{{hotel_name}}", variables) || variables.hotel_name;
 
-      const leftHtml = safeLogo
+      const leftInner = safeLogo
         ? `<img src="${escapeHtml(safeLogo)}" alt="${escapeHtml(logoAlt)}" width="${logoW}" style="display:block;max-width:${logoW}px;max-height:52px;height:auto;border:0;background-color:${escapeHtml(bg)};" />`
         : `<div style="font-size:18px;font-weight:700;letter-spacing:-0.01em;color:${escapeHtml(textCol)};font-family:${fontCss};">${escapeHtml(variables.hotel_name)}</div>`;
+      const leftHtml = safeLogoLink
+        ? `<a href="${escapeHtml(safeLogoLink)}"${buildLinkTargetAttrs(safeLogoLink, block.logoLinkOpenInNewTab)} style="text-decoration:none;border:0;color:inherit;">${leftInner}</a>`
+        : leftInner;
 
       const rightRows: string[] = [];
       const textLines: string[] = [];
@@ -819,7 +1042,7 @@ function renderSingleBlock(
           `<div style="font-size:13px;font-weight:700;color:${escapeHtml(textCol)};margin:0 0 3px 0;font-family:${fontCss};">${escapeHtml(variables.hotel_name)}</div>`
         );
       }
-      textLines.push(variables.hotel_name);
+      textLines.push(safeLogoLink ? `${variables.hotel_name} (${safeLogoLink})` : variables.hotel_name);
 
       if (block.showAddress && variables.hotel_address) {
         const pinImg = renderDecorativeIconImg(appUrl, tone, "location_pin", 13, "margin-right:5px;");
@@ -828,17 +1051,50 @@ function renderSingleBlock(
         );
         textLines.push(variables.hotel_address);
       }
-      if (block.showPhone && variables.hotel_phone) {
+
+      const resolvedPhone = block.phoneOverride
+        ? substituteVariablesRaw(block.phoneOverride, variables)
+        : variables.hotel_phone;
+      if (block.showPhone && resolvedPhone) {
         const phoneImg = renderDecorativeIconImg(appUrl, tone, "phone", 13, "margin-right:5px;");
-        const telCheck = validateEmailUrl(`tel:${variables.hotel_phone}`, { allowContactSchemes: true });
+        const phoneLinkEnabled = block.phoneLinkEnabled !== false;
+        const telCheck = phoneLinkEnabled
+          ? validateEmailUrl(`tel:${resolvedPhone}`, { allowContactSchemes: true })
+          : { valid: false, normalized: "" };
         const phoneInner =
           telCheck.valid && telCheck.normalized
-            ? `<a href="${escapeHtml(telCheck.normalized)}" style="color:#52525b;text-decoration:none;">${escapeHtml(variables.hotel_phone)}</a>`
-            : escapeHtml(variables.hotel_phone);
+            ? `<a href="${escapeHtml(telCheck.normalized)}" style="color:#52525b;text-decoration:none;">${escapeHtml(resolvedPhone)}</a>`
+            : escapeHtml(resolvedPhone);
         rightRows.push(
-          `<div style="font-size:11px;line-height:1.45;color:#52525b;margin:0;font-family:${fontCss};">${phoneImg}<span style="vertical-align:middle;">${phoneInner}</span></div>`
+          `<div style="font-size:11px;line-height:1.45;color:#52525b;margin:0 0 2px 0;font-family:${fontCss};">${phoneImg}<span style="vertical-align:middle;">${phoneInner}</span></div>`
         );
-        textLines.push(variables.hotel_phone);
+        textLines.push(
+          telCheck.valid && telCheck.normalized
+            ? `${resolvedPhone} (${telCheck.normalized})`
+            : resolvedPhone
+        );
+      }
+
+      const resolvedEmail = block.emailOverride
+        ? substituteVariablesRaw(block.emailOverride, variables)
+        : variables.hotel_email;
+      if (block.showEmail && resolvedEmail) {
+        const emailLinkEnabled = block.emailLinkEnabled !== false;
+        const mailCheck = emailLinkEnabled
+          ? validateEmailUrl(`mailto:${resolvedEmail}`, { allowContactSchemes: true })
+          : { valid: false, normalized: "" };
+        const emailInner =
+          mailCheck.valid && mailCheck.normalized
+            ? `<a href="${escapeHtml(mailCheck.normalized)}" style="color:#52525b;text-decoration:none;">${escapeHtml(resolvedEmail)}</a>`
+            : escapeHtml(resolvedEmail);
+        rightRows.push(
+          `<div style="font-size:11px;line-height:1.45;color:#52525b;margin:0;font-family:${fontCss};">${emailInner}</div>`
+        );
+        textLines.push(
+          mailCheck.valid && mailCheck.normalized
+            ? `${resolvedEmail} (${mailCheck.normalized})`
+            : resolvedEmail
+        );
       }
 
       const html = `<tr>
@@ -860,19 +1116,32 @@ function renderSingleBlock(
 
     case "promo_banner": {
       const text = substituteVariablesRaw(block.text, variables);
-      const btnLabel = substituteVariablesRaw(block.buttonLabel, variables);
-      const btnUrl = resolveSafeUrlOnRender(block.buttonUrl, variables, false);
+      const btnLabel = block.buttonHidden ? "" : substituteVariablesRaw(block.buttonLabel, variables);
+      const btnUrl =
+        btnLabel && !block.buttonHidden
+          ? resolveSafeUrlOnRender(block.buttonUrl, variables, true, btnLabel)
+          : "";
       if (!text && !btnLabel) return { html: "", text: "" };
 
       const bg = sanitizeHexColor(block.style?.backgroundColor, "#18181b");
       const fg = sanitizeHexColor(block.style?.textColor, "#ffffff");
       const pad = getSectionPadding(block.style, 14, 24);
       const safeImg = block.imageUrl ? resolveSafeUrlOnRender(block.imageUrl, variables, false) : "";
+      const safeImgLink = block.imageLinkUrl
+        ? resolveSafeUrlOnRender(block.imageLinkUrl, variables, false)
+        : "";
       const imgAlt = substituteVariablesRaw(block.imageAlt || "", variables) || variables.hotel_name;
 
+      const imgTag = safeImg
+        ? `<img src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" width="48" height="48" style="display:block;width:48px;height:48px;object-fit:cover;border-radius:6px;border:0;" />`
+        : "";
       const imgCell = safeImg
         ? `<td class="ec-hide-sm" width="56" valign="middle" style="padding-right:14px;">
-            <img src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" width="48" height="48" style="display:block;width:48px;height:48px;object-fit:cover;border-radius:6px;border:0;" />
+            ${
+              safeImgLink
+                ? `<a href="${escapeHtml(safeImgLink)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;border:0;">${imgTag}</a>`
+                : imgTag
+            }
           </td>`
         : "";
 
@@ -885,6 +1154,8 @@ function renderSingleBlock(
               corner: block.buttonCorner || "pill",
               bgColor: block.buttonBgColor || "#ffffff",
               textColor: block.buttonTextColor || "#ffffff",
+              borderColor: block.buttonBorderColor,
+              openInNewTab: block.buttonOpenInNewTab,
               defaultBrandColor: buttonColor,
               fontCss,
               align: "right",
@@ -911,7 +1182,7 @@ function renderSingleBlock(
 </tr>`;
       return {
         html,
-        text: btnLabel && btnUrl ? `${text} (${btnLabel}: ${btnUrl})` : text,
+        text: btnLabel && btnUrl ? `${text} - ${btnLabel} (${btnUrl})` : text,
       };
     }
 
@@ -925,9 +1196,12 @@ function renderSingleBlock(
       const borderCol = sanitizeHexColor(block.style?.borderColor, "#e4e4e7");
       const pad = getSectionPadding(block.style, 12, 24);
       const tone = safeTone(block.iconTone, "dark");
-      const safeLink = block.linkUrl ? resolveSafeUrlOnRender(block.linkUrl, variables, false) : "";
+      const safeLink =
+        block.linkUrl && block.linkHidden !== true
+          ? resolveSafeUrlOnRender(block.linkUrl, variables, false)
+          : "";
       const arrowImg =
-        block.showArrow !== false
+        block.showArrow !== false && (safeLink || !block.linkHidden)
           ? ` ${renderDecorativeIconImg(appUrl, tone, "arrow", 12, "margin-left:4px;")}`
           : "";
 
@@ -944,7 +1218,7 @@ function renderSingleBlock(
 
       const inner = `${pieces.join("")}${arrowImg}`;
       const wrapped = safeLink
-        ? `<a href="${escapeHtml(safeLink)}" target="_blank" rel="noopener noreferrer" style="color:${escapeHtml(fg)};text-decoration:none;font-family:${fontCss};">${inner}</a>`
+        ? `<a href="${escapeHtml(safeLink)}"${buildLinkTargetAttrs(safeLink, block.linkOpenInNewTab)} style="color:${escapeHtml(fg)};text-decoration:none;font-family:${fontCss};">${inner}</a>`
         : inner;
 
       const html = `<tr>
@@ -980,10 +1254,20 @@ function renderSingleBlock(
 
     case "hero_text": {
       const headline = substituteVariablesRaw(block.headline, variables);
-      const body = substituteVariablesRaw(block.body || "", variables);
-      const btnLabel = substituteVariablesRaw(block.buttonLabel || "", variables);
-      const btnUrl = block.buttonUrl ? resolveSafeUrlOnRender(block.buttonUrl, variables, false) : "";
-      if (!headline && !body) return { html: "", text: "" };
+      const bodyRendered = renderTextWithInlineLinks(
+        block.body || "",
+        block.inlineLinks,
+        variables,
+        primaryColor
+      );
+      const btnLabel = block.buttonHidden
+        ? ""
+        : substituteVariablesRaw(block.buttonLabel || "", variables);
+      const btnUrl =
+        btnLabel && !block.buttonHidden && block.buttonUrl
+          ? resolveSafeUrlOnRender(block.buttonUrl, variables, true, btnLabel)
+          : "";
+      if (!headline && !bodyRendered.text) return { html: "", text: "" };
 
       const bg = sanitizeHexColor(block.style?.backgroundColor, "#ffffff");
       const fg = sanitizeHexColor(block.style?.textColor, "#18181b");
@@ -999,6 +1283,8 @@ function renderSingleBlock(
               corner: block.buttonCorner || "rounded",
               bgColor: block.buttonBgColor,
               textColor: block.buttonTextColor,
+              borderColor: block.buttonBorderColor,
+              openInNewTab: block.buttonOpenInNewTab,
               defaultBrandColor: buttonColor,
               fontCss,
               align,
@@ -1009,18 +1295,22 @@ function renderSingleBlock(
   <td class="ec-pad-sm" align="${align}" style="padding:${pad};background-color:${escapeHtml(bg)};text-align:${align};font-family:${fontCss};">
     ${
       headline
-        ? `<h1 style="margin:0 0 ${body ? "12px" : "0"} 0;font-size:28px;line-height:1.22;font-weight:700;letter-spacing:-0.02em;color:${escapeHtml(fg)};font-family:${fontCss};">${escapeHtml(headline)}</h1>`
+        ? `<h1 style="margin:0 0 ${bodyRendered.html ? "12px" : "0"} 0;font-size:28px;line-height:1.22;font-weight:700;letter-spacing:-0.02em;color:${escapeHtml(fg)};font-family:${fontCss};">${escapeHtml(headline)}</h1>`
         : ""
     }
     ${
-      body
-        ? `<p style="margin:0;font-size:15px;line-height:1.6;color:#52525b;font-family:${fontCss};">${renderMultilineEscaped(body)}</p>`
+      bodyRendered.html
+        ? `<p style="margin:0;font-size:15px;line-height:1.6;color:#52525b;font-family:${fontCss};">${bodyRendered.html}</p>`
         : ""
     }
     ${btnHtml}
   </td>
 </tr>`;
-      const textParts = [headline, body, btnLabel && btnUrl ? `${btnLabel}: ${btnUrl}` : ""].filter(Boolean);
+      const textParts = [
+        headline,
+        bodyRendered.text,
+        btnLabel && btnUrl ? `${btnLabel} (${btnUrl})` : "",
+      ].filter(Boolean);
       return { html, text: textParts.join("\n") };
     }
 
@@ -1068,8 +1358,13 @@ function renderSingleBlock(
       const borderCol = sanitizeHexColor(block.style?.borderColor, "#d4d4d8");
       const pad = getSectionPadding(block.style, 16, 28);
 
-      const btnLabel = substituteVariablesRaw(block.buttonLabel || "", variables);
-      const btnUrl = block.buttonUrl ? resolveSafeUrlOnRender(block.buttonUrl, variables, false) : "";
+      const btnLabel = block.buttonHidden
+        ? ""
+        : substituteVariablesRaw(block.buttonLabel || "", variables);
+      const btnUrl =
+        btnLabel && !block.buttonHidden && block.buttonUrl
+          ? resolveSafeUrlOnRender(block.buttonUrl, variables, true, btnLabel)
+          : "";
       const btnHtml =
         btnLabel && btnUrl
           ? `<div style="margin-top:22px;">${renderModernButton({
@@ -1079,6 +1374,8 @@ function renderSingleBlock(
               corner: block.buttonCorner || "square",
               bgColor: block.buttonBgColor || "#18181b",
               textColor: block.buttonTextColor || "#18181b",
+              borderColor: block.buttonBorderColor,
+              openInNewTab: block.buttonOpenInNewTab,
               defaultBrandColor: buttonColor,
               fontCss,
               align: "center",
@@ -1112,15 +1409,23 @@ function renderSingleBlock(
       const textLines = [
         `${ciLabel}: ${[ciDate, ciTime].filter(Boolean).join(" ")}`,
         `${coLabel}: ${[coDate, coTime].filter(Boolean).join(" ")}`,
-        ...(btnLabel && btnUrl ? [`${btnLabel}: ${btnUrl}`] : []),
+        ...(btnLabel && btnUrl ? [`${btnLabel} (${btnUrl})`] : []),
       ];
       return { html, text: textLines.join("\n") };
     }
 
     case "feature_card": {
       const safeImg = resolveSafeUrlOnRender(block.imageUrl, variables, false);
+      const safeImgLink = block.imageLinkUrl
+        ? resolveSafeUrlOnRender(block.imageLinkUrl, variables, false)
+        : "";
       const title = substituteVariablesRaw(block.title, variables);
-      const body = substituteVariablesRaw(block.body || "", variables);
+      const bodyRendered = renderTextWithInlineLinks(
+        block.body || "",
+        block.inlineLinks,
+        variables,
+        primaryColor
+      );
       if (!safeImg || !title) return { html: "", text: "" };
 
       const imgAlt = substituteVariablesRaw(block.imageAlt || "", variables) || title;
@@ -1131,8 +1436,13 @@ function renderSingleBlock(
       const pad = getSectionPadding(block.style, 10, 24);
       const isImageRight = block.imagePosition === "right";
 
-      const btnLabel = substituteVariablesRaw(block.buttonLabel || "", variables);
-      const btnUrl = block.buttonUrl ? resolveSafeUrlOnRender(block.buttonUrl, variables, false) : "";
+      const btnLabel = block.buttonHidden
+        ? ""
+        : substituteVariablesRaw(block.buttonLabel || "", variables);
+      const btnUrl =
+        btnLabel && !block.buttonHidden && block.buttonUrl
+          ? resolveSafeUrlOnRender(block.buttonUrl, variables, true, btnLabel)
+          : "";
       const btnHtml =
         btnLabel && btnUrl
           ? `<div style="margin-top:16px;">${renderModernButton({
@@ -1142,19 +1452,26 @@ function renderSingleBlock(
               corner: block.buttonCorner || "rounded",
               bgColor: block.buttonBgColor,
               textColor: block.buttonTextColor,
+              borderColor: block.buttonBorderColor,
+              openInNewTab: block.buttonOpenInNewTab,
               defaultBrandColor: buttonColor,
               fontCss,
               align: "left",
             })}</div>`
           : "";
 
+      const imgTag = `<img class="ec-stack-img" src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" width="275" style="display:block;width:100%;max-width:100%;height:auto;border:0;object-fit:cover;" />`;
       // Use dir="rtl" on the row when imagePosition === "right" so DOM order puts image first -> mobile ALWAYS stacks image on top!
       const imgTd = `<td class="ec-stack" dir="ltr" width="48%" valign="top" style="padding:0;line-height:0;font-size:0;">
-          <img class="ec-stack-img" src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" width="275" style="display:block;width:100%;max-width:100%;height:auto;border:0;object-fit:cover;" />
+          ${
+            safeImgLink
+              ? `<a href="${escapeHtml(safeImgLink)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;border:0;display:block;">${imgTag}</a>`
+              : imgTag
+          }
         </td>`;
       const textTd = `<td class="ec-stack" dir="ltr" width="52%" valign="middle" style="padding:22px 24px;text-align:left;font-family:${fontCss};">
           <h3 style="margin:0 0 8px 0;font-size:18px;line-height:1.3;font-weight:700;color:${escapeHtml(fg)};font-family:${fontCss};">${escapeHtml(title)}</h3>
-          ${body ? `<p style="margin:0;font-size:13px;line-height:1.55;color:#52525b;font-family:${fontCss};">${renderMultilineEscaped(body)}</p>` : ""}
+          ${bodyRendered.html ? `<p style="margin:0;font-size:13px;line-height:1.55;color:#52525b;font-family:${fontCss};">${bodyRendered.html}</p>` : ""}
           ${btnHtml}
         </td>`;
 
@@ -1168,16 +1485,22 @@ function renderSingleBlock(
     </table>
   </td>
 </tr>`;
-      const textLines = [title, body, btnLabel && btnUrl ? `${btnLabel}: ${btnUrl}` : ""].filter(Boolean);
+      const textLines = [
+        title,
+        bodyRendered.text,
+        btnLabel && btnUrl ? `${btnLabel} (${btnUrl})` : "",
+      ].filter(Boolean);
       return { html, text: textLines.join("\n") };
     }
 
     case "benefits_list": {
       const heading = substituteVariablesRaw(block.heading, variables);
-      const items = (block.items || [])
-        .map((it) => substituteVariablesRaw(it.text, variables))
-        .filter(Boolean);
-      if (!heading && items.length === 0) return { html: "", text: "" };
+      const renderedItems = (block.items || [])
+        .map((it) =>
+          renderTextWithInlineLinks(it.text, block.inlineLinks, variables, primaryColor)
+        )
+        .filter((r) => r.text || r.html);
+      if (!heading && renderedItems.length === 0) return { html: "", text: "" };
 
       const bg = sanitizeHexColor(block.style?.backgroundColor, "#ffffff");
       const fg = sanitizeHexColor(block.style?.textColor, "#18181b");
@@ -1186,33 +1509,53 @@ function renderSingleBlock(
       const badgeImgUrl = block.badgeImageUrl
         ? resolveSafeUrlOnRender(block.badgeImageUrl, variables, false)
         : "";
+      const badgeImgLink = block.badgeImageLinkUrl
+        ? resolveSafeUrlOnRender(block.badgeImageLinkUrl, variables, false)
+        : "";
       const badgeImgAlt =
         substituteVariablesRaw(block.badgeImageAlt || "", variables) || variables.hotel_name;
-      const footnote = substituteVariablesRaw(block.footnote || "", variables);
+      const footnoteRendered = renderTextWithInlineLinks(
+        block.footnote || "",
+        block.inlineLinks,
+        variables,
+        primaryColor
+      );
       const tone = safeTone(block.iconTone, "dark");
       const iconName = safeIcon(block.itemIcon, "check");
 
+      const badgeImgTag = badgeImgUrl
+        ? `<img src="${escapeHtml(badgeImgUrl)}" alt="${escapeHtml(badgeImgAlt)}" width="96" style="display:block;max-width:120px;max-height:36px;height:auto;border:0;" />`
+        : "";
       const badgeHtml = badgeImgUrl
-        ? `<div style="margin:0 0 10px 0;"><img src="${escapeHtml(badgeImgUrl)}" alt="${escapeHtml(badgeImgAlt)}" width="96" style="display:block;max-width:120px;max-height:36px;height:auto;border:0;" /></div>`
+        ? `<div style="margin:0 0 10px 0;">${
+            badgeImgLink
+              ? `<a href="${escapeHtml(badgeImgLink)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;border:0;">${badgeImgTag}</a>`
+              : badgeImgTag
+          }</div>`
         : badgeText
           ? `<div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${escapeHtml(primaryColor)};margin:0 0 8px 0;font-family:${fontCss};">${escapeHtml(badgeText)}</div>`
           : "";
 
-      const rowsHtml = items
-        .map((itemText) => {
+      const rowsHtml = renderedItems
+        .map((item) => {
           const marker =
             block.listStyle === "icon"
               ? renderDecorativeIconImg(appUrl, tone, iconName, 16)
               : `<span style="color:${escapeHtml(fg)};font-size:14px;line-height:1;">&#8226;</span>`;
           return `<tr>
             <td width="22" valign="top" style="padding:4px 8px 4px 0;line-height:1.5;">${marker}</td>
-            <td valign="top" style="padding:4px 0;font-size:14px;line-height:1.55;color:#27272a;font-family:${fontCss};">${escapeHtml(itemText)}</td>
+            <td valign="top" style="padding:4px 0;font-size:14px;line-height:1.55;color:#27272a;font-family:${fontCss};">${item.html}</td>
           </tr>`;
         })
         .join("");
 
-      const btnLabel = substituteVariablesRaw(block.buttonLabel || "", variables);
-      const btnUrl = block.buttonUrl ? resolveSafeUrlOnRender(block.buttonUrl, variables, false) : "";
+      const btnLabel = block.buttonHidden
+        ? ""
+        : substituteVariablesRaw(block.buttonLabel || "", variables);
+      const btnUrl =
+        btnLabel && !block.buttonHidden && block.buttonUrl
+          ? resolveSafeUrlOnRender(block.buttonUrl, variables, true, btnLabel)
+          : "";
       const btnHtml =
         btnLabel && btnUrl
           ? `<div style="margin-top:18px;">${renderModernButton({
@@ -1222,6 +1565,8 @@ function renderSingleBlock(
               corner: block.buttonCorner || "square",
               bgColor: block.buttonBgColor || "#18181b",
               textColor: block.buttonTextColor || "#18181b",
+              borderColor: block.buttonBorderColor,
+              openInNewTab: block.buttonOpenInNewTab,
               defaultBrandColor: buttonColor,
               fontCss,
               align: "left",
@@ -1240,8 +1585,8 @@ function renderSingleBlock(
       ${rowsHtml}
     </table>
     ${
-      footnote
-        ? `<p style="margin:14px 0 0 0;font-size:11px;line-height:1.5;color:#71717a;font-family:${fontCss};">${renderMultilineEscaped(footnote)}</p>`
+      footnoteRendered.html
+        ? `<p style="margin:14px 0 0 0;font-size:11px;line-height:1.5;color:#71717a;font-family:${fontCss};">${footnoteRendered.html}</p>`
         : ""
     }
     ${btnHtml}
@@ -1251,20 +1596,26 @@ function renderSingleBlock(
       const textLines = [
         ...(badgeText ? [badgeText] : []),
         ...(heading ? [heading] : []),
-        ...items.map((i) => `- ${i}`),
-        ...(footnote ? [footnote] : []),
-        ...(btnLabel && btnUrl ? [`${btnLabel}: ${btnUrl}`] : []),
+        ...renderedItems.map((i) => `- ${i.text}`),
+        ...(footnoteRendered.text ? [footnoteRendered.text] : []),
+        ...(btnLabel && btnUrl ? [`${btnLabel} (${btnUrl})`] : []),
       ];
       return { html, text: textLines.join("\n") };
     }
 
     case "icon_link_grid": {
       const safeItems = (block.items || [])
-        .map((it) => ({
-          icon: safeIcon(it.icon, "star"),
-          label: substituteVariablesRaw(it.label, variables),
-          url: resolveSafeUrlOnRender(it.url, variables, false),
-        }))
+        .filter((it) => it && it.hidden !== true)
+        .map((it) => {
+          const label = substituteVariablesRaw(it.label, variables);
+          const url = label ? resolveSafeUrlOnRender(it.url, variables, true, label) : "";
+          return {
+            icon: safeIcon(it.icon, "star"),
+            label,
+            url,
+            openInNewTab: it.openInNewTab,
+          };
+        })
         .filter((it) => it.label && it.url);
       if (safeItems.length === 0) return { html: "", text: "" };
 
@@ -1284,7 +1635,7 @@ function renderSingleBlock(
         .map((item) => {
           const iconImg = renderDecorativeIconImg(appUrl, tone, item.icon, 28);
           return `<td class="ec-grid-cell" width="${colPct}%" align="center" valign="top" style="padding:10px 8px;">
-            <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;color:${escapeHtml(fg)};font-family:${fontCss};display:inline-block;">
+            <a href="${escapeHtml(item.url)}"${buildLinkTargetAttrs(item.url, item.openInNewTab)} style="text-decoration:none;color:${escapeHtml(fg)};font-family:${fontCss};display:inline-block;">
               <div style="margin:0 0 8px 0;">${iconImg}</div>
               <div style="font-size:13px;font-weight:600;color:${escapeHtml(fg)};line-height:1.35;font-family:${fontCss};">
                 <span style="vertical-align:middle;">${escapeHtml(item.label)}</span>${arrowImg}
@@ -1316,13 +1667,16 @@ function renderSingleBlock(
       const textLines = [
         ...(heading ? [heading] : []),
         ...(subheading ? [subheading] : []),
-        ...safeItems.map((it) => `${it.label}: ${it.url}`),
+        ...safeItems.map((it) => `${it.label} (${it.url})`),
       ];
       return { html, text: textLines.join("\n") };
     }
 
     case "image_with_list": {
       const safeImg = resolveSafeUrlOnRender(block.imageUrl, variables, false);
+      const safeImgLink = block.imageLinkUrl
+        ? resolveSafeUrlOnRender(block.imageLinkUrl, variables, false)
+        : "";
       const heading = substituteVariablesRaw(block.heading, variables);
       if (!safeImg && !heading) return { html: "", text: "" };
 
@@ -1335,23 +1689,37 @@ function renderSingleBlock(
       const isRight = block.imagePosition === "right";
 
       const items = (block.items || [])
-        .map((it) => ({
-          icon: safeIcon(it.icon, "check"),
-          text: substituteVariablesRaw(it.text, variables),
-        }))
-        .filter((it) => it.text);
+        .map((it) => {
+          const rendered = renderTextWithInlineLinks(
+            it.text,
+            block.inlineLinks,
+            variables,
+            primaryColor
+          );
+          return {
+            icon: safeIcon(it.icon, "check"),
+            html: rendered.html,
+            text: rendered.text,
+          };
+        })
+        .filter((it) => it.text || it.html);
 
       const listHtml = items
         .map(
           (it) => `<tr>
             <td width="26" valign="middle" style="padding:6px 10px 6px 0;">${renderDecorativeIconImg(appUrl, tone, it.icon, 18)}</td>
-            <td valign="middle" style="padding:6px 0;font-size:14px;line-height:1.45;color:#27272a;font-family:${fontCss};">${escapeHtml(it.text)}</td>
+            <td valign="middle" style="padding:6px 0;font-size:14px;line-height:1.45;color:#27272a;font-family:${fontCss};">${it.html}</td>
           </tr>`
         )
         .join("");
 
-      const btnLabel = substituteVariablesRaw(block.buttonLabel || "", variables);
-      const btnUrl = block.buttonUrl ? resolveSafeUrlOnRender(block.buttonUrl, variables, false) : "";
+      const btnLabel = block.buttonHidden
+        ? ""
+        : substituteVariablesRaw(block.buttonLabel || "", variables);
+      const btnUrl =
+        btnLabel && !block.buttonHidden && block.buttonUrl
+          ? resolveSafeUrlOnRender(block.buttonUrl, variables, true, btnLabel)
+          : "";
       const btnHtml =
         btnLabel && btnUrl
           ? `<div style="margin-top:18px;">${renderModernButton({
@@ -1361,15 +1729,24 @@ function renderSingleBlock(
               corner: block.buttonCorner || "square",
               bgColor: block.buttonBgColor || "#18181b",
               textColor: block.buttonTextColor || "#ffffff",
+              borderColor: block.buttonBorderColor,
+              openInNewTab: block.buttonOpenInNewTab,
               defaultBrandColor: buttonColor,
               fontCss,
               align: "left",
             })}</div>`
           : "";
 
+      const imgTag = safeImg
+        ? `<img class="ec-stack-img" src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" width="256" style="display:block;width:100%;max-width:100%;height:auto;border:0;border-radius:${radius}px;" />`
+        : "";
       const imgTd = safeImg
         ? `<td class="ec-stack" dir="ltr" width="46%" valign="middle" style="padding:0 0 12px 0;">
-            <img class="ec-stack-img" src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" width="256" style="display:block;width:100%;max-width:100%;height:auto;border:0;border-radius:${radius}px;" />
+            ${
+              safeImgLink
+                ? `<a href="${escapeHtml(safeImgLink)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;border:0;display:block;">${imgTag}</a>`
+                : imgTag
+            }
           </td>`
         : "";
       const listTd = `<td class="ec-stack" dir="ltr" width="${safeImg ? "54%" : "100%"}" valign="middle" style="padding:${safeImg ? (isRight ? "0 20px 0 0" : "0 0 0 22px") : "0"};text-align:left;font-family:${fontCss};">
@@ -1397,42 +1774,53 @@ function renderSingleBlock(
       const textLines = [
         ...(heading ? [heading] : []),
         ...items.map((it) => `- ${it.text}`),
-        ...(btnLabel && btnUrl ? [`${btnLabel}: ${btnUrl}`] : []),
+        ...(btnLabel && btnUrl ? [`${btnLabel} (${btnUrl})`] : []),
       ];
       return { html, text: textLines.join("\n") };
     }
 
     case "footer_nav": {
-      const safeLinks = (block.links || [])
-        .map((l) => ({
-          label: substituteVariablesRaw(l.label, variables),
-          url: resolveSafeUrlOnRender(l.url, variables, false),
-        }))
-        .filter((l) => l.label && l.url);
-
-      const secondaryText = substituteVariablesRaw(block.secondaryText || "", variables);
-      const secondaryUrl = block.secondaryLinkUrl
-        ? resolveSafeUrlOnRender(block.secondaryLinkUrl, variables, false)
-        : "";
-
-      if (safeLinks.length === 0 && !secondaryText) return { html: "", text: "" };
-
       const bg = sanitizeHexColor(block.style?.backgroundColor, "#ffffff");
       const fg = sanitizeHexColor(block.style?.textColor, "#18181b");
       const borderCol = sanitizeHexColor(block.style?.borderColor, "#e4e4e7");
       const pad = getSectionPadding(block.style, 20, 24);
 
+      const safeLinks = (block.links || [])
+        .filter((l) => l && l.hidden !== true)
+        .map((l) => {
+          const label = substituteVariablesRaw(l.label, variables);
+          const url = label ? resolveSafeUrlOnRender(l.url, variables, true, label) : "";
+          return {
+            label,
+            url,
+            color: l.color ? sanitizeHexColor(l.color, fg) : fg,
+            underline: l.underline === true ? "underline" : "none",
+            openInNewTab: l.openInNewTab,
+          };
+        })
+        .filter((l) => l.label && l.url);
+
+      const secondaryText = block.secondaryLinkHidden
+        ? ""
+        : substituteVariablesRaw(block.secondaryText || "", variables);
+      const secondaryUrl =
+        secondaryText && !block.secondaryLinkHidden && block.secondaryLinkUrl
+          ? resolveSafeUrlOnRender(block.secondaryLinkUrl, variables, true, secondaryText)
+          : "";
+
+      if (safeLinks.length === 0 && !secondaryText) return { html: "", text: "" };
+
       const linksHtml = safeLinks
         .map(
           (l) =>
-            `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:4px 10px;font-size:12px;font-weight:600;color:${escapeHtml(fg)};text-decoration:none;font-family:${fontCss};">${escapeHtml(l.label)}</a>`
+            `<a href="${escapeHtml(l.url)}"${buildLinkTargetAttrs(l.url, l.openInNewTab)} style="display:inline-block;padding:4px 10px;font-size:12px;font-weight:600;color:${escapeHtml(l.color)};text-decoration:${l.underline};font-family:${fontCss};">${escapeHtml(l.label)}</a>`
         )
         .join("");
 
       const secondaryHtml = secondaryText
         ? `<div style="margin-top:14px;font-size:12px;color:#52525b;font-family:${fontCss};">${
             secondaryUrl
-              ? `<a href="${escapeHtml(secondaryUrl)}" target="_blank" rel="noopener noreferrer" style="color:${escapeHtml(fg)};text-decoration:underline;">${escapeHtml(secondaryText)}</a>`
+              ? `<a href="${escapeHtml(secondaryUrl)}"${buildLinkTargetAttrs(secondaryUrl, block.secondaryLinkOpenInNewTab)} style="color:${escapeHtml(fg)};text-decoration:underline;">${escapeHtml(secondaryText)}</a>`
               : escapeHtml(secondaryText)
           }</div>`
         : "";
@@ -1444,7 +1832,7 @@ function renderSingleBlock(
   </td>
 </tr>`;
       const textLines = [
-        ...safeLinks.map((l) => `${l.label}: ${l.url}`),
+        ...safeLinks.map((l) => `${l.label} (${l.url})`),
         ...(secondaryText ? [secondaryUrl ? `${secondaryText} (${secondaryUrl})` : secondaryText] : []),
       ];
       return { html, text: textLines.join("\n") };
@@ -1452,11 +1840,21 @@ function renderSingleBlock(
 
     case "legal_section": {
       const sections = (block.sections || [])
-        .map((s) => ({
-          heading: substituteVariablesRaw(s.heading, variables),
-          body: substituteVariablesRaw(s.body, variables),
-        }))
-        .filter((s) => s.heading || s.body);
+        .map((s) => {
+          const heading = substituteVariablesRaw(s.heading, variables);
+          const bodyRendered = renderTextWithInlineLinks(
+            s.body,
+            block.inlineLinks,
+            variables,
+            primaryColor
+          );
+          return {
+            heading,
+            bodyHtml: bodyRendered.html,
+            bodyText: bodyRendered.text,
+          };
+        })
+        .filter((s) => s.heading || s.bodyText);
 
       const copyright = substituteVariablesRaw(block.copyrightText || "", variables);
       const settingsImprint = substituteVariablesRaw(ctx.settingsLegalImprint || "", variables);
@@ -1465,6 +1863,9 @@ function renderSingleBlock(
         : "";
       const safeFooterLogo = logoCandidate
         ? resolveSafeUrlOnRender(logoCandidate, variables, false)
+        : "";
+      const safeFooterLogoLink = block.footerLogoLinkUrl
+        ? resolveSafeUrlOnRender(block.footerLogoLinkUrl, variables, false)
         : "";
       const footerLogoAlt =
         substituteVariablesRaw(block.footerLogoAlt || "{{hotel_name}}", variables) || variables.hotel_name;
@@ -1482,7 +1883,7 @@ function renderSingleBlock(
         .map(
           (s) => `<div style="margin:0 0 12px 0;">
             ${s.heading ? `<div style="font-size:12px;font-weight:700;color:#27272a;margin:0 0 3px 0;font-family:${fontCss};">${escapeHtml(s.heading)}</div>` : ""}
-            ${s.body ? `<div style="font-size:11px;line-height:1.55;color:${escapeHtml(fg)};font-family:${fontCss};">${renderMultilineEscaped(s.body)}</div>` : ""}
+            ${s.bodyHtml ? `<div style="font-size:11px;line-height:1.55;color:${escapeHtml(fg)};font-family:${fontCss};">${s.bodyHtml}</div>` : ""}
           </div>`
         )
         .join("");
@@ -1495,8 +1896,15 @@ function renderSingleBlock(
         ? `<div style="margin:12px 0 0 0;font-size:11px;font-weight:600;color:#52525b;font-family:${fontCss};">${escapeHtml(copyright)}</div>`
         : "";
 
+      const footerLogoImg = safeFooterLogo
+        ? `<img src="${escapeHtml(safeFooterLogo)}" alt="${escapeHtml(footerLogoAlt)}" width="${footerLogoW}" style="display:inline-block;max-width:${footerLogoW}px;max-height:44px;height:auto;border:0;background-color:${escapeHtml(bg)};" />`
+        : "";
       const logoHtml = safeFooterLogo
-        ? `<div style="margin:18px 0 0 0;text-align:center;"><img src="${escapeHtml(safeFooterLogo)}" alt="${escapeHtml(footerLogoAlt)}" width="${footerLogoW}" style="display:inline-block;max-width:${footerLogoW}px;max-height:44px;height:auto;border:0;background-color:${escapeHtml(bg)};" /></div>`
+        ? `<div style="margin:18px 0 0 0;text-align:center;">${
+            safeFooterLogoLink
+              ? `<a href="${escapeHtml(safeFooterLogoLink)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;border:0;">${footerLogoImg}</a>`
+              : footerLogoImg
+          }</div>`
         : "";
 
       const html = `<tr>
@@ -1511,11 +1919,214 @@ function renderSingleBlock(
       const textLines: string[] = [];
       for (const s of sections) {
         if (s.heading) textLines.push(s.heading);
-        if (s.body) textLines.push(s.body);
+        if (s.bodyText) textLines.push(s.bodyText);
       }
       if (settingsImprint) textLines.push(settingsImprint);
       if (copyright) textLines.push(copyright);
       return { html, text: textLines.join("\n") };
+    }
+
+    // --- 5 STANDALONE EDITABLE FOOTER BLOCKS (PURE RENDERING — ZERO SILENT SETTINGS INJECTION) ---
+    case "footer_contact":
+    case "footer_authenticity":
+    case "footer_legal": {
+      const localVars =
+        block.type === "footer_contact" && (block.emailOverride || block.phoneOverride)
+          ? {
+              ...variables,
+              ...(block.emailOverride && block.emailOverride.trim()
+                ? { hotel_email: substituteVariablesRaw(block.emailOverride, variables) }
+                : {}),
+              ...(block.phoneOverride && block.phoneOverride.trim()
+                ? { hotel_phone: substituteVariablesRaw(block.phoneOverride, variables) }
+                : {}),
+            }
+          : variables;
+
+      const heading = substituteVariablesRaw(block.heading || "", localVars);
+      const linkColor =
+        block.type === "footer_contact" && block.linkColor
+          ? sanitizeHexColor(block.linkColor, primaryColor)
+          : primaryColor;
+      const bodyRendered = renderTextWithInlineLinks(
+        block.text || "",
+        block.inlineLinks,
+        localVars,
+        linkColor
+      );
+      if (!heading && !bodyRendered.text) return { html: "", text: "" };
+
+      const bg = sanitizeHexColor(block.style?.backgroundColor, "#fafafa");
+      const fg = sanitizeHexColor(block.style?.textColor, "#52525b");
+      const headingCol = sanitizeHexColor(block.style?.accentColor, "#18181b");
+      const borderCol = block.style?.borderColor
+        ? sanitizeHexColor(block.style.borderColor, "#e4e4e7")
+        : "";
+      const align = safeAlign(block.style?.align, "left");
+      const pad = getSectionPadding(block.style, 14, 28);
+      const blockFont = getBlockFontCss(block.style, fontCss);
+      const bodySize = clampInt(block.style?.fontSizePx, 12, 10, 24);
+      const headingSize = Math.min(24, bodySize + 1);
+      const borderTopCss = borderCol ? `border-top:1px solid ${escapeHtml(borderCol)};` : "";
+
+      let bodyHtmlContent = bodyRendered.html;
+      let bodyTextContent = bodyRendered.text;
+
+      // For footer_contact: when admin explicitly enables clickable email/phone links, linkify resolved hotel email & phone safely
+      if (block.type === "footer_contact") {
+        const contactLinkColor = block.linkColor
+          ? sanitizeHexColor(block.linkColor, fg)
+          : primaryColor;
+        const contactDeco = block.underline === false ? "none" : "underline";
+
+        if (block.emailLinkEnabled === true && localVars.hotel_email && isValidEmail(localVars.hotel_email)) {
+          const escapedEmail = escapeHtml(localVars.hotel_email);
+          const mailAnchor = `<a href="mailto:${escapedEmail}" style="color:${escapeHtml(contactLinkColor)};text-decoration:${contactDeco};">${escapedEmail}</a>`;
+          if (bodyHtmlContent.includes(escapedEmail) && !bodyHtmlContent.includes(`mailto:${escapedEmail}`)) {
+            bodyHtmlContent = bodyHtmlContent.replace(escapedEmail, mailAnchor);
+            bodyTextContent = bodyTextContent.replace(
+              localVars.hotel_email,
+              `${localVars.hotel_email} (mailto:${localVars.hotel_email})`
+            );
+          }
+        }
+        if (block.phoneLinkEnabled === true && localVars.hotel_phone) {
+          const telCheck = validateEmailUrl(`tel:${localVars.hotel_phone}`, {
+            allowContactSchemes: true,
+          });
+          if (telCheck.valid && telCheck.normalized) {
+            const escapedPhone = escapeHtml(localVars.hotel_phone);
+            const telAnchor = `<a href="${escapeHtml(telCheck.normalized)}" style="color:${escapeHtml(contactLinkColor)};text-decoration:${contactDeco};">${escapedPhone}</a>`;
+            if (bodyHtmlContent.includes(escapedPhone) && !bodyHtmlContent.includes(telCheck.normalized)) {
+              bodyHtmlContent = bodyHtmlContent.replace(escapedPhone, telAnchor);
+              bodyTextContent = bodyTextContent.replace(
+                localVars.hotel_phone,
+                `${localVars.hotel_phone} (${telCheck.normalized})`
+              );
+            }
+          }
+        }
+      }
+
+      const headingHtml = heading
+        ? `<div style="font-size:${headingSize}px;line-height:1.4;font-weight:700;color:${escapeHtml(headingCol)};margin:0 0 4px 0;font-family:${blockFont};">${escapeHtml(heading)}</div>`
+        : "";
+      const bodyHtml = bodyHtmlContent
+        ? `<div style="font-size:${bodySize}px;line-height:1.55;color:${escapeHtml(fg)};font-family:${blockFont};">${bodyHtmlContent}</div>`
+        : "";
+
+      const html = `<tr>
+  <td class="ec-pad-sm" align="${align}" style="padding:${pad};background-color:${escapeHtml(bg)};${borderTopCss}text-align:${align};font-family:${blockFont};">
+    ${headingHtml}
+    ${bodyHtml}
+  </td>
+</tr>`;
+
+      const textLines = [
+        ...(heading ? [heading] : []),
+        ...(bodyTextContent ? [bodyTextContent] : []),
+      ];
+      return { html, text: textLines.join("\n") };
+    }
+
+    case "footer_copyright": {
+      const copyRendered = renderTextWithInlineLinks(
+        block.text || "",
+        block.inlineLinks,
+        variables,
+        primaryColor
+      );
+      const logoCandidate = block.showFooterLogo
+        ? (block.footerLogoUrl || ctx.hotelLogoUrl || "").trim()
+        : "";
+      const safeFooterLogo = logoCandidate
+        ? resolveSafeUrlOnRender(logoCandidate, variables, false)
+        : "";
+      const safeFooterLogoLink = block.footerLogoLinkUrl
+        ? resolveSafeUrlOnRender(block.footerLogoLinkUrl, variables, false)
+        : "";
+      const footerLogoAlt =
+        substituteVariablesRaw(block.footerLogoAlt || "{{hotel_name}}", variables) ||
+        variables.hotel_name;
+      const footerLogoW = clampInt(block.footerLogoWidthPx, 110, 40, 200);
+
+      if (!copyRendered.text && !safeFooterLogo) return { html: "", text: "" };
+
+      const bg = sanitizeHexColor(block.style?.backgroundColor, "#fafafa");
+      const fg = sanitizeHexColor(block.style?.textColor, "#52525b");
+      const borderCol = block.style?.borderColor
+        ? sanitizeHexColor(block.style.borderColor, "#e4e4e7")
+        : "";
+      const align = safeAlign(block.style?.align, "left");
+      const pad = getSectionPadding(block.style, 14, 28);
+      const blockFont = getBlockFontCss(block.style, fontCss);
+      const fontSize = clampInt(block.style?.fontSizePx, 11, 10, 24);
+      const borderTopCss = borderCol ? `border-top:1px solid ${escapeHtml(borderCol)};` : "";
+
+      const copyHtml = copyRendered.html
+        ? `<div style="font-size:${fontSize}px;line-height:1.5;font-weight:600;color:${escapeHtml(fg)};font-family:${blockFont};">${copyRendered.html}</div>`
+        : "";
+      const footerLogoImg = safeFooterLogo
+        ? `<img src="${escapeHtml(safeFooterLogo)}" alt="${escapeHtml(footerLogoAlt)}" width="${footerLogoW}" style="display:inline-block;max-width:${footerLogoW}px;max-height:44px;height:auto;border:0;background-color:${escapeHtml(bg)};" />`
+        : "";
+      const logoHtml = safeFooterLogo
+        ? `<div style="margin:${copyRendered.text ? "14px" : "0"} 0 0 0;text-align:${align};">${
+            safeFooterLogoLink
+              ? `<a href="${escapeHtml(safeFooterLogoLink)}"${buildLinkTargetAttrs(safeFooterLogoLink, block.footerLogoLinkOpenInNewTab)} style="text-decoration:none;border:0;">${footerLogoImg}</a>`
+              : footerLogoImg
+          }</div>`
+        : "";
+
+      const html = `<tr>
+  <td class="ec-pad-sm" align="${align}" style="padding:${pad};background-color:${escapeHtml(bg)};${borderTopCss}text-align:${align};font-family:${blockFont};">
+    ${copyHtml}
+    ${logoHtml}
+  </td>
+</tr>`;
+
+      return { html, text: copyRendered.text };
+    }
+
+    case "footer_powered_by": {
+      const creditText = substituteVariablesRaw(block.text || "", variables);
+      const linkLabel = block.linkHidden
+        ? ""
+        : substituteVariablesRaw(block.linkLabel || "", variables);
+      const safeLinkUrl =
+        linkLabel && !block.linkHidden && block.linkUrl
+          ? resolveSafeUrlOnRender(block.linkUrl, variables, false, linkLabel)
+          : "";
+      if (!creditText && !linkLabel) return { html: "", text: "" };
+
+      const bg = sanitizeHexColor(block.style?.backgroundColor, "#fafafa");
+      const fg = sanitizeHexColor(block.style?.textColor, "#71717a");
+      const linkCol = block.linkColor ? sanitizeHexColor(block.linkColor, fg) : fg;
+      const deco = block.underline === false ? "none" : "underline";
+      const align = safeAlign(block.style?.align, "center");
+      const pad = getSectionPadding(block.style, 10, 24);
+      const blockFont = getBlockFontCss(block.style, fontCss);
+      const fontSize = clampInt(block.style?.fontSizePx, 11, 10, 20);
+
+      const linkHtml =
+        linkLabel && safeLinkUrl
+          ? ` <a href="${escapeHtml(safeLinkUrl)}"${buildLinkTargetAttrs(safeLinkUrl, block.openInNewTab)} style="color:${escapeHtml(linkCol)};text-decoration:${deco};font-weight:600;">${escapeHtml(linkLabel)}</a>`
+          : linkLabel
+            ? ` ${escapeHtml(linkLabel)}`
+            : "";
+
+      const html = `<tr>
+  <td class="ec-pad-sm" align="${align}" style="padding:${pad};background-color:${escapeHtml(bg)};text-align:${align};font-size:${fontSize}px;line-height:1.45;color:${escapeHtml(fg)};font-family:${blockFont};">
+    ${escapeHtml(creditText)}${linkHtml}
+  </td>
+</tr>`;
+
+      const textLine = [
+        creditText,
+        linkLabel && safeLinkUrl ? `${linkLabel} (${safeLinkUrl})` : linkLabel,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return { html, text: textLine };
     }
 
     default:

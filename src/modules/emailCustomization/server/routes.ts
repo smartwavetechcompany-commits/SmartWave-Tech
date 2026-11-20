@@ -38,6 +38,8 @@ import {
 } from "./imageService.ts";
 import { renderHotelEmailServerSide } from "./renderer.ts";
 import {
+  applyDefaultFooterToAllDrafts,
+  applyDefaultLinksToAllDrafts,
   getEmailTemplateDocument,
   getHotelEmailSettings,
   listEmailTemplatesOverview,
@@ -594,6 +596,94 @@ export function mountEmailCustomizationRoutes(
       return res
         .status(500)
         .json({ error: sanitizeErrorForClient(err, "Failed to save email settings.") });
+    }
+  });
+
+  // 10b. Apply saved Hotel Default Footer to ALL event DRAFTS ONLY (never alters published templates)
+  app.post("/api/email-customization/settings/apply-default-footer", async (req, res) => {
+    try {
+      const ctx = await requireEmailModuleAccess(req, res, "manage");
+      if (!ctx) return;
+
+      const rate = saveLimiter.check(`apply-footer:${ctx.caller.uid}`, 15, 60_000);
+      if (!rate.allowed) {
+        return res.status(429).json({ error: "Too many requests. Please wait a moment." });
+      }
+
+      const hotelDoc = await fsReadDoc(`hotels/${ctx.hotelId}`, ctx.bearerToken).catch(() => null);
+      const actor = ctx.caller.email || ctx.caller.uid;
+      const overrideFooterBlocks =
+        req.body?.defaultFooterBlocks && typeof req.body.defaultFooterBlocks === "object"
+          ? req.body.defaultFooterBlocks
+          : undefined;
+
+      const result = await applyDefaultFooterToAllDrafts(
+        ctx.hotelId,
+        hotelDoc,
+        actor,
+        ctx.bearerToken,
+        overrideFooterBlocks
+      );
+
+      if (!result.ok) {
+        return res.status(400).json({
+          error: result.error || "Could not apply default footer.",
+          issues: result.issues || [],
+        });
+      }
+
+      return res.json({
+        ok: true,
+        updatedEvents: result.updatedEvents || [],
+      });
+    } catch (err) {
+      return res
+        .status(500)
+        .json({ error: sanitizeErrorForClient(err, "Failed to apply default footer to drafts.") });
+    }
+  });
+
+  // 10c. Apply saved Default Footer Navigation Links to ALL event DRAFTS ONLY (never alters published templates)
+  app.post("/api/email-customization/settings/apply-default-links", async (req, res) => {
+    try {
+      const ctx = await requireEmailModuleAccess(req, res, "manage");
+      if (!ctx) return;
+
+      const rate = saveLimiter.check(`apply-links:${ctx.caller.uid}`, 15, 60_000);
+      if (!rate.allowed) {
+        return res.status(429).json({ error: "Too many requests. Please wait a moment." });
+      }
+
+      const hotelDoc = await fsReadDoc(`hotels/${ctx.hotelId}`, ctx.bearerToken).catch(() => null);
+      const actor = ctx.caller.email || ctx.caller.uid;
+      const overrideFooterNavLinks =
+        req.body?.defaultFooterNavLinks && typeof req.body.defaultFooterNavLinks === "object"
+          ? req.body.defaultFooterNavLinks
+          : undefined;
+
+      const result = await applyDefaultLinksToAllDrafts(
+        ctx.hotelId,
+        hotelDoc,
+        actor,
+        ctx.bearerToken,
+        overrideFooterNavLinks
+      );
+
+      if (!result.ok) {
+        return res.status(400).json({
+          error: result.error || "Could not apply default footer links.",
+          issues: result.issues || [],
+        });
+      }
+
+      return res.json({
+        ok: true,
+        updatedEvents: result.updatedEvents || [],
+      });
+    } catch (err) {
+      return res
+        .status(500)
+        .json({ error: sanitizeErrorForClient(err, "Failed to apply default footer links to drafts.") });
     }
   });
 

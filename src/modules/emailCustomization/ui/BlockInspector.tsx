@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  ArrowDown,
   ArrowUp,
   Eye,
   EyeOff,
@@ -10,6 +11,7 @@ import {
   Upload,
 } from "lucide-react";
 import {
+  WEB_SAFE_FONTS,
   type BlockStyleConfig,
   type BookingDetailsRowConfig,
   type ButtonCornerStyle,
@@ -18,8 +20,39 @@ import {
   type EmailIconTone,
   type FooterContactField,
   type ModernButtonStyle,
+  type WebSafeFontId,
 } from "../shared/types";
 import { EmailIconPicker } from "./BlockPaletteModal";
+import { InlineLinksEditor, LinkDestinationField } from "./LinkControls";
+
+const FOOTER_QUICK_VARS = [
+  "hotel_name",
+  "hotel_phone",
+  "hotel_email",
+  "hotel_address",
+  "booking_reference",
+  "legal_imprint",
+  "hotel_website",
+  "portal_link",
+] as const;
+
+function FooterVariableInsertBar({ onInsert }: { onInsert: (token: string) => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1 pt-0.5">
+      <span className="text-[10px] text-zinc-500 mr-0.5">Insert variable:</span>
+      {FOOTER_QUICK_VARS.map((v) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onInsert(`{{${v}}}`)}
+          className="px-1.5 py-0.5 rounded bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-[10px] font-mono text-emerald-400 transition-colors"
+        >
+          {`{{${v}}}`}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export interface ImageActionCallbacks {
   onPickLibrary: (blockId: string, field: string) => void;
@@ -31,6 +64,7 @@ interface BlockInspectorProps {
   block: EmailBlock;
   appUrl: string;
   resolvedPortalUrl: string;
+  resolvedVariables?: Record<string, string>;
   onChange: (updater: (b: EmailBlock) => EmailBlock) => void;
   imageActions: ImageActionCallbacks;
 }
@@ -136,7 +170,10 @@ function ModernButtonEditor({
   buttonCorner,
   buttonBgColor,
   buttonTextColor,
-  resolvedPortalUrl,
+  buttonBorderColor,
+  buttonOpenInNewTab,
+  buttonHidden,
+  resolvedVariables,
   onPatch,
 }: {
   label?: string;
@@ -145,7 +182,10 @@ function ModernButtonEditor({
   buttonCorner?: ButtonCornerStyle;
   buttonBgColor?: string;
   buttonTextColor?: string;
-  resolvedPortalUrl: string;
+  buttonBorderColor?: string;
+  buttonOpenInNewTab?: boolean;
+  buttonHidden?: boolean;
+  resolvedVariables?: Record<string, string>;
   onPatch: (patch: {
     buttonLabel?: string;
     buttonUrl?: string;
@@ -153,42 +193,47 @@ function ModernButtonEditor({
     buttonCorner?: ButtonCornerStyle;
     buttonBgColor?: string;
     buttonTextColor?: string;
+    buttonBorderColor?: string;
+    buttonOpenInNewTab?: boolean;
+    buttonHidden?: boolean;
   }) => void;
 }) {
-  const effectiveUrl =
-    url === "{{portal_link}}" ? resolvedPortalUrl : url || "";
-
   return (
-    <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5 space-y-2">
-      <div className="text-[11px] font-semibold text-zinc-300">Button (Optional)</div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <div>
-          <label className={labelClass}>Button Label</label>
+    <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5 space-y-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] font-semibold text-zinc-300">Button (Optional)</div>
+        <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer">
           <input
-            type="text"
-            value={label || ""}
-            onChange={(e) => onPatch({ buttonLabel: e.target.value })}
-            placeholder="Leave blank to hide button"
-            className={inputClass}
+            type="checkbox"
+            checked={Boolean(buttonHidden)}
+            onChange={(e) => onPatch({ buttonHidden: e.target.checked })}
           />
-        </div>
-        <div>
-          <label className={labelClass}>Button Link (HTTPS or variable)</label>
-          <input
-            type="text"
-            value={url || ""}
-            onChange={(e) => onPatch({ buttonUrl: e.target.value })}
-            placeholder="{{portal_link}} or https://..."
-            className={`${inputClass} font-mono`}
-          />
-        </div>
+          Hide button
+        </label>
       </div>
-      {effectiveUrl && (
-        <div className="text-[11px] text-zinc-500 truncate">
-          Final URL: <span className="text-emerald-400 font-mono">{effectiveUrl}</span>
-        </div>
-      )}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div>
+        <label className={labelClass}>Button Label</label>
+        <input
+          type="text"
+          value={label || ""}
+          onChange={(e) => onPatch({ buttonLabel: e.target.value })}
+          placeholder="Leave blank to hide button"
+          className={inputClass}
+        />
+      </div>
+      <LinkDestinationField
+        label="Button Destination"
+        url={url || ""}
+        visibleLabel={label}
+        onChangeUrl={(buttonUrl) => onPatch({ buttonUrl })}
+        allowContactSchemes
+        allowEmpty
+        resolvedVariables={resolvedVariables}
+        openInNewTab={buttonOpenInNewTab}
+        onChangeOpenInNewTab={(next) => onPatch({ buttonOpenInNewTab: next })}
+        compact
+      />
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         <div>
           <label className={labelClass}>Style</label>
           <select
@@ -214,7 +259,7 @@ function ModernButtonEditor({
           </select>
         </div>
         <div>
-          <label className={labelClass}>Button Color</label>
+          <label className={labelClass}>Fill Color</label>
           <input
             type="color"
             value={buttonBgColor || "#18181b"}
@@ -231,6 +276,15 @@ function ModernButtonEditor({
             className="w-full h-7 rounded bg-zinc-950 border border-zinc-800 cursor-pointer"
           />
         </div>
+        <div>
+          <label className={labelClass}>Border Color</label>
+          <input
+            type="color"
+            value={buttonBorderColor || "#18181b"}
+            onChange={(e) => onPatch({ buttonBorderColor: e.target.value })}
+            className="w-full h-7 rounded bg-zinc-950 border border-zinc-800 cursor-pointer"
+          />
+        </div>
       </div>
     </div>
   );
@@ -241,18 +295,24 @@ function BlockStyleControls({
   showAlign = false,
   showBorder = false,
   showRadius = false,
+  showTypography = false,
+  showHeadingColor = false,
   onChange,
 }: {
   style?: BlockStyleConfig;
   showAlign?: boolean;
   showBorder?: boolean;
   showRadius?: boolean;
+  showTypography?: boolean;
+  showHeadingColor?: boolean;
   onChange: (next: BlockStyleConfig) => void;
 }) {
   const s = style || {};
   return (
     <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5 space-y-2.5">
-      <div className="text-[11px] font-semibold text-zinc-400">Colors &amp; Spacing</div>
+      <div className="text-[11px] font-semibold text-zinc-400">
+        {showTypography ? "Typography, Colors & Spacing" : "Colors & Spacing"}
+      </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <div>
           <label className={labelClass}>Background</label>
@@ -272,9 +332,20 @@ function BlockStyleControls({
             className="w-full h-7 rounded bg-zinc-950 border border-zinc-800 cursor-pointer"
           />
         </div>
+        {showHeadingColor && (
+          <div>
+            <label className={labelClass}>Heading Color</label>
+            <input
+              type="color"
+              value={s.accentColor || "#18181b"}
+              onChange={(e) => onChange({ ...s, accentColor: e.target.value })}
+              className="w-full h-7 rounded bg-zinc-950 border border-zinc-800 cursor-pointer"
+            />
+          </div>
+        )}
         {showBorder && (
           <div>
-            <label className={labelClass}>Border Color</label>
+            <label className={labelClass}>Top Border</label>
             <input
               type="color"
               value={s.borderColor || "#e4e4e7"}
@@ -300,6 +371,45 @@ function BlockStyleControls({
           </div>
         )}
       </div>
+
+      {showTypography && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div>
+            <label className={labelClass}>Font Family</label>
+            <select
+              value={s.fontFamily || ""}
+              onChange={(e) =>
+                onChange({
+                  ...s,
+                  fontFamily: (e.target.value || undefined) as WebSafeFontId | undefined,
+                })
+              }
+              className={inputClass}
+            >
+              <option value="">Inherit template font</option>
+              {WEB_SAFE_FONTS.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <div className="flex justify-between text-[11px] text-zinc-400 mb-1 tabular-nums">
+              <span>Font Size</span>
+              <span>{s.fontSizePx ?? 12}px</span>
+            </div>
+            <input
+              type="range"
+              min={10}
+              max={24}
+              value={s.fontSizePx ?? 12}
+              onChange={(e) => onChange({ ...s, fontSizePx: Number(e.target.value) })}
+              className="w-full accent-emerald-500"
+            />
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <div>
@@ -355,9 +465,15 @@ export function BlockInspector({
   block,
   appUrl,
   resolvedPortalUrl,
+  resolvedVariables,
   onChange,
   imageActions,
 }: BlockInspectorProps) {
+  const effectiveVars: Record<string, string> = resolvedVariables || {
+    portal_link: resolvedPortalUrl,
+    app_url: appUrl,
+  };
+
   switch (block.type) {
     // --- 10 CLASSIC BLOCKS ---
     case "heading":
@@ -408,7 +524,7 @@ export function BlockInspector({
 
     case "paragraph":
       return (
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           <textarea
             rows={3}
             value={block.text}
@@ -449,12 +565,33 @@ export function BlockInspector({
               <option value="right">Right</option>
             </select>
           </div>
+          <InlineLinksEditor
+            inlineLinks={block.inlineLinks}
+            resolvedVariables={effectiveVars}
+            onChangeLinks={(inlineLinks) =>
+              onChange((b) => (b.type === "paragraph" ? { ...b, inlineLinks } : b))
+            }
+            onInsertToken={(token) =>
+              onChange((b) =>
+                b.type === "paragraph"
+                  ? { ...b, text: b.text ? `${b.text} ${token}` : token }
+                  : b
+              )
+            }
+            onRemoveToken={(token) =>
+              onChange((b) =>
+                b.type === "paragraph"
+                  ? { ...b, text: b.text.split(token).join("").replace(/\s{2,}/g, " ").trim() }
+                  : b
+              )
+            }
+          />
         </div>
       );
 
     case "image":
       return (
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           <ImageFieldControl
             blockId={block.id}
             fieldKey="src"
@@ -469,7 +606,7 @@ export function BlockInspector({
             }
             imageActions={imageActions}
           />
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
               <label className={labelClass}>Width (80–544px)</label>
               <input
@@ -503,65 +640,185 @@ export function BlockInspector({
                 <option value="right">Right</option>
               </select>
             </div>
-            <div>
-              <label className={labelClass}>Optional Link URL</label>
-              <input
-                type="text"
-                value={block.linkUrl || ""}
-                onChange={(e) =>
-                  onChange((b) => (b.type === "image" ? { ...b, linkUrl: e.target.value } : b))
-                }
-                placeholder="https://... or {{portal_link}}"
-                className={`${inputClass} font-mono`}
-              />
-            </div>
+          </div>
+          <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5">
+            <LinkDestinationField
+              label="Optional Image Click Link"
+              url={block.linkUrl || ""}
+              visibleLabel={block.alt}
+              onChangeUrl={(linkUrl) =>
+                onChange((b) => (b.type === "image" ? { ...b, linkUrl } : b))
+              }
+              allowEmpty
+              resolvedVariables={effectiveVars}
+              openInNewTab={block.linkOpenInNewTab}
+              onChangeOpenInNewTab={(linkOpenInNewTab) =>
+                onChange((b) => (b.type === "image" ? { ...b, linkOpenInNewTab } : b))
+              }
+              hidden={block.linkHidden}
+              onChangeHidden={(linkHidden) =>
+                onChange((b) => (b.type === "image" ? { ...b, linkHidden } : b))
+              }
+              compact
+            />
           </div>
         </div>
       );
 
     case "button":
       return (
-        <div className="space-y-2">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <input
-              type="text"
-              value={block.label}
-              onChange={(e) =>
-                onChange((b) => (b.type === "button" ? { ...b, label: e.target.value } : b))
-              }
-              placeholder="Button label"
-              className={inputClass}
-            />
-            <input
-              type="text"
-              value={block.url}
-              onChange={(e) =>
-                onChange((b) => (b.type === "button" ? { ...b, url: e.target.value } : b))
-              }
-              placeholder="{{portal_link}} or https://..."
-              className={`${inputClass} font-mono`}
-            />
-            <select
-              value={block.displayStyle}
-              onChange={(e) =>
-                onChange((b) =>
-                  b.type === "button"
-                    ? { ...b, displayStyle: e.target.value as "solid" | "outline" | "text_link" }
-                    : b
-                )
-              }
-              className={inputClass}
-            >
-              <option value="solid">Solid Button</option>
-              <option value="outline">Outline Button</option>
-              <option value="text_link">Inline Text Link</option>
-            </select>
+        <div className="space-y-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label className={labelClass}>Link / Button Text</label>
+              <input
+                type="text"
+                value={block.label}
+                onChange={(e) =>
+                  onChange((b) => (b.type === "button" ? { ...b, label: e.target.value } : b))
+                }
+                placeholder="Manage Your Stay"
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Display Style</label>
+              <select
+                value={block.displayStyle}
+                onChange={(e) =>
+                  onChange((b) =>
+                    b.type === "button"
+                      ? { ...b, displayStyle: e.target.value as "solid" | "outline" | "text_link" }
+                      : b
+                  )
+                }
+                className={inputClass}
+              >
+                <option value="solid">Solid Button</option>
+                <option value="outline">Outline Button</option>
+                <option value="text_link">Inline Text Link</option>
+              </select>
+            </div>
           </div>
-          {block.url === "{{portal_link}}" && (
-            <div className="text-[11px] text-zinc-500">
-              Resolves to: <span className="font-mono text-emerald-400">{resolvedPortalUrl}</span>
+          {block.displayStyle === "text_link" && (
+            <div>
+              <label className={labelClass}>Optional Prefix Text (before link)</label>
+              <input
+                type="text"
+                value={block.prefixText || ""}
+                onChange={(e) =>
+                  onChange((b) => (b.type === "button" ? { ...b, prefixText: e.target.value } : b))
+                }
+                placeholder="e.g. Manage your booking at "
+                className={inputClass}
+              />
             </div>
           )}
+          <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5">
+            <LinkDestinationField
+              label="Destination"
+              url={block.url}
+              visibleLabel={block.label}
+              onChangeUrl={(url) =>
+                onChange((b) => (b.type === "button" ? { ...b, url } : b))
+              }
+              allowContactSchemes
+              allowEmpty={false}
+              resolvedVariables={effectiveVars}
+              openInNewTab={block.openInNewTab}
+              onChangeOpenInNewTab={(openInNewTab) =>
+                onChange((b) => (b.type === "button" ? { ...b, openInNewTab } : b))
+              }
+              underline={block.displayStyle === "text_link" ? block.underline : undefined}
+              onChangeUnderline={
+                block.displayStyle === "text_link"
+                  ? (underline) =>
+                      onChange((b) => (b.type === "button" ? { ...b, underline } : b))
+                  : undefined
+              }
+              compact
+            />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            <div>
+              <label className={labelClass}>Alignment</label>
+              <select
+                value={block.align || "left"}
+                onChange={(e) =>
+                  onChange((b) =>
+                    b.type === "button"
+                      ? { ...b, align: e.target.value as "left" | "center" | "right" }
+                      : b
+                  )
+                }
+                className={inputClass}
+              >
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelClass}>
+                {block.displayStyle === "text_link" ? "Link Color" : "Fill Color"}
+              </label>
+              <input
+                type="color"
+                value={block.bgColor || "#059669"}
+                onChange={(e) =>
+                  onChange((b) => (b.type === "button" ? { ...b, bgColor: e.target.value } : b))
+                }
+                className="w-full h-7 rounded bg-zinc-950 border border-zinc-800 cursor-pointer"
+              />
+            </div>
+            {block.displayStyle !== "text_link" && (
+              <>
+                <div>
+                  <label className={labelClass}>Text Color</label>
+                  <input
+                    type="color"
+                    value={block.textColor || "#ffffff"}
+                    onChange={(e) =>
+                      onChange((b) =>
+                        b.type === "button" ? { ...b, textColor: e.target.value } : b
+                      )
+                    }
+                    className="w-full h-7 rounded bg-zinc-950 border border-zinc-800 cursor-pointer"
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Border Color</label>
+                  <input
+                    type="color"
+                    value={block.borderColor || block.bgColor || "#059669"}
+                    onChange={(e) =>
+                      onChange((b) =>
+                        b.type === "button" ? { ...b, borderColor: e.target.value } : b
+                      )
+                    }
+                    className="w-full h-7 rounded bg-zinc-950 border border-zinc-800 cursor-pointer"
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Radius (px)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={999}
+                    value={block.borderRadiusPx ?? 6}
+                    onChange={(e) =>
+                      onChange((b) =>
+                        b.type === "button"
+                          ? { ...b, borderRadiusPx: Math.max(0, Math.min(999, Number(e.target.value) || 0)) }
+                          : b
+                      )
+                    }
+                    className={inputClass}
+                  />
+                </div>
+              </>
+            )}
+          </div>
         </div>
       );
 
@@ -743,117 +1000,256 @@ export function BlockInspector({
 
     case "two_column_text":
       return (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <div className="space-y-1.5">
-            <input
-              type="text"
-              value={block.leftTitle || ""}
-              onChange={(e) =>
-                onChange((b) =>
-                  b.type === "two_column_text" ? { ...b, leftTitle: e.target.value } : b
-                )
-              }
-              placeholder="Left heading"
-              className={inputClass}
-            />
-            <textarea
-              rows={2}
-              value={block.leftText}
-              onChange={(e) =>
-                onChange((b) =>
-                  b.type === "two_column_text" ? { ...b, leftText: e.target.value } : b
-                )
-              }
-              className={inputClass}
-            />
+        <div className="space-y-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+              <input
+                type="text"
+                value={block.leftTitle || ""}
+                onChange={(e) =>
+                  onChange((b) =>
+                    b.type === "two_column_text" ? { ...b, leftTitle: e.target.value } : b
+                  )
+                }
+                placeholder="Left heading"
+                className={inputClass}
+              />
+              <textarea
+                rows={2}
+                value={block.leftText}
+                onChange={(e) =>
+                  onChange((b) =>
+                    b.type === "two_column_text" ? { ...b, leftText: e.target.value } : b
+                  )
+                }
+                className={inputClass}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <input
+                type="text"
+                value={block.rightTitle || ""}
+                onChange={(e) =>
+                  onChange((b) =>
+                    b.type === "two_column_text" ? { ...b, rightTitle: e.target.value } : b
+                  )
+                }
+                placeholder="Right heading"
+                className={inputClass}
+              />
+              <textarea
+                rows={2}
+                value={block.rightText}
+                onChange={(e) =>
+                  onChange((b) =>
+                    b.type === "two_column_text" ? { ...b, rightText: e.target.value } : b
+                  )
+                }
+                className={inputClass}
+              />
+            </div>
           </div>
-          <div className="space-y-1.5">
-            <input
-              type="text"
-              value={block.rightTitle || ""}
-              onChange={(e) =>
-                onChange((b) =>
-                  b.type === "two_column_text" ? { ...b, rightTitle: e.target.value } : b
-                )
-              }
-              placeholder="Right heading"
-              className={inputClass}
-            />
-            <textarea
-              rows={2}
-              value={block.rightText}
-              onChange={(e) =>
-                onChange((b) =>
-                  b.type === "two_column_text" ? { ...b, rightText: e.target.value } : b
-                )
-              }
-              className={inputClass}
-            />
-          </div>
+          <InlineLinksEditor
+            inlineLinks={block.inlineLinks}
+            resolvedVariables={effectiveVars}
+            helperHint="Place [[link:id]] in either the left or right column text."
+            onChangeLinks={(inlineLinks) =>
+              onChange((b) => (b.type === "two_column_text" ? { ...b, inlineLinks } : b))
+            }
+            onInsertToken={(token) =>
+              onChange((b) =>
+                b.type === "two_column_text"
+                  ? { ...b, leftText: b.leftText ? `${b.leftText} ${token}` : token }
+                  : b
+              )
+            }
+            onRemoveToken={(token) =>
+              onChange((b) =>
+                b.type === "two_column_text"
+                  ? {
+                      ...b,
+                      leftText: b.leftText.split(token).join("").replace(/\s{2,}/g, " ").trim(),
+                      rightText: b.rightText.split(token).join("").replace(/\s{2,}/g, " ").trim(),
+                    }
+                  : b
+              )
+            }
+          />
         </div>
       );
 
     case "social_links":
       return (
-        <div className="space-y-2">
-          <input
-            type="text"
-            value={block.title || ""}
-            onChange={(e) =>
-              onChange((b) => (b.type === "social_links" ? { ...b, title: e.target.value } : b))
-            }
-            placeholder="Heading"
-            className={inputClass}
-          />
-          {block.links.map((item) => (
-            <div key={item.id} className="flex items-center gap-1.5">
-              <input
-                type="text"
-                value={item.label}
-                onChange={(e) =>
+        <div className="space-y-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <input
+              type="text"
+              value={block.title || ""}
+              onChange={(e) =>
+                onChange((b) => (b.type === "social_links" ? { ...b, title: e.target.value } : b))
+              }
+              placeholder="Heading"
+              className={`${inputClass} sm:col-span-2`}
+            />
+            <select
+              value={block.align || "left"}
+              onChange={(e) =>
+                onChange((b) =>
+                  b.type === "social_links"
+                    ? { ...b, align: e.target.value as "left" | "center" | "right" }
+                    : b
+                )
+              }
+              className={inputClass}
+            >
+              <option value="left">Align Left</option>
+              <option value="center">Align Center</option>
+              <option value="right">Align Right</option>
+            </select>
+          </div>
+          {block.links.map((item, sIdx) => (
+            <div
+              key={item.id}
+              className={`rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2 space-y-2 ${
+                item.hidden ? "opacity-60" : ""
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={item.label}
+                  onChange={(e) =>
+                    onChange((b) =>
+                      b.type === "social_links"
+                        ? {
+                            ...b,
+                            links: b.links.map((l) =>
+                              l.id === item.id ? { ...l, label: e.target.value } : l
+                            ),
+                          }
+                        : b
+                    )
+                  }
+                  placeholder="Label (e.g. Instagram)"
+                  className={`${inputClass} flex-1`}
+                />
+                <button
+                  type="button"
+                  title={item.hidden ? "Show link" : "Hide link"}
+                  onClick={() =>
+                    onChange((b) =>
+                      b.type === "social_links"
+                        ? {
+                            ...b,
+                            links: b.links.map((l) =>
+                              l.id === item.id ? { ...l, hidden: !l.hidden } : l
+                            ),
+                          }
+                        : b
+                    )
+                  }
+                  className="p-1 text-zinc-400 hover:text-zinc-100"
+                >
+                  {item.hidden ? <EyeOff size={12} /> : <Eye size={12} />}
+                </button>
+                <button
+                  type="button"
+                  disabled={sIdx === 0}
+                  onClick={() =>
+                    onChange((b) => {
+                      if (b.type !== "social_links" || sIdx === 0) return b;
+                      const copy = [...b.links];
+                      const [m] = copy.splice(sIdx, 1);
+                      copy.splice(sIdx - 1, 0, m);
+                      return { ...b, links: copy };
+                    })
+                  }
+                  className="p-1 text-zinc-500 hover:text-zinc-200 disabled:opacity-30"
+                >
+                  <ArrowUp size={12} />
+                </button>
+                <button
+                  type="button"
+                  disabled={sIdx === block.links.length - 1}
+                  onClick={() =>
+                    onChange((b) => {
+                      if (b.type !== "social_links" || sIdx >= b.links.length - 1) return b;
+                      const copy = [...b.links];
+                      const [m] = copy.splice(sIdx, 1);
+                      copy.splice(sIdx + 1, 0, m);
+                      return { ...b, links: copy };
+                    })
+                  }
+                  className="p-1 text-zinc-500 hover:text-zinc-200 disabled:opacity-30"
+                >
+                  <ArrowDown size={12} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onChange((b) =>
+                      b.type === "social_links"
+                        ? { ...b, links: b.links.filter((l) => l.id !== item.id) }
+                        : b
+                    )
+                  }
+                  className="p-1 text-zinc-500 hover:text-red-400"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+              <LinkDestinationField
+                url={item.url}
+                visibleLabel={item.label}
+                onChangeUrl={(url) =>
+                  onChange((b) =>
+                    b.type === "social_links"
+                      ? {
+                          ...b,
+                          links: b.links.map((l) => (l.id === item.id ? { ...l, url } : l)),
+                        }
+                      : b
+                  )
+                }
+                allowEmpty={Boolean(item.hidden)}
+                resolvedVariables={effectiveVars}
+                color={item.color}
+                onChangeColor={(color) =>
+                  onChange((b) =>
+                    b.type === "social_links"
+                      ? {
+                          ...b,
+                          links: b.links.map((l) => (l.id === item.id ? { ...l, color } : l)),
+                        }
+                      : b
+                  )
+                }
+                underline={item.underline}
+                onChangeUnderline={(underline) =>
+                  onChange((b) =>
+                    b.type === "social_links"
+                      ? {
+                          ...b,
+                          links: b.links.map((l) => (l.id === item.id ? { ...l, underline } : l)),
+                        }
+                      : b
+                  )
+                }
+                openInNewTab={item.openInNewTab}
+                onChangeOpenInNewTab={(openInNewTab) =>
                   onChange((b) =>
                     b.type === "social_links"
                       ? {
                           ...b,
                           links: b.links.map((l) =>
-                            l.id === item.id ? { ...l, label: e.target.value } : l
+                            l.id === item.id ? { ...l, openInNewTab } : l
                           ),
                         }
                       : b
                   )
                 }
-                className={`${inputClass} w-1/3`}
+                compact
               />
-              <input
-                type="text"
-                value={item.url}
-                onChange={(e) =>
-                  onChange((b) =>
-                    b.type === "social_links"
-                      ? {
-                          ...b,
-                          links: b.links.map((l) =>
-                            l.id === item.id ? { ...l, url: e.target.value } : l
-                          ),
-                        }
-                      : b
-                  )
-                }
-                className={`${inputClass} flex-1 font-mono`}
-              />
-              <button
-                type="button"
-                onClick={() =>
-                  onChange((b) =>
-                    b.type === "social_links"
-                      ? { ...b, links: b.links.filter((l) => l.id !== item.id) }
-                      : b
-                  )
-                }
-                className="p-1 text-zinc-500 hover:text-red-400"
-              >
-                <Trash2 size={12} />
-              </button>
             </div>
           ))}
           <button
@@ -865,7 +1261,7 @@ export function BlockInspector({
                       ...b,
                       links: [
                         ...b.links,
-                        { id: makeId("soc"), label: "Instagram", url: "https://instagram.com" },
+                        { id: makeId("soc"), label: "Instagram", url: "{{social_instagram}}" },
                       ],
                     }
                   : b
@@ -873,14 +1269,14 @@ export function BlockInspector({
             }
             className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 font-medium"
           >
-            <Plus size={12} /> Add Link
+            <Plus size={12} /> Add Social Link
           </button>
         </div>
       );
 
     case "footer":
       return (
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
             <input
               type="checkbox"
@@ -905,64 +1301,152 @@ export function BlockInspector({
                 }
                 className={inputClass}
               />
-              {block.fields.map((f: FooterContactField) => (
-                <div key={f.id} className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onChange((b) =>
-                        b.type === "footer"
-                          ? {
-                              ...b,
-                              fields: b.fields.map((x) =>
-                                x.id === f.id ? { ...x, visible: !x.visible } : x
-                              ),
-                            }
-                          : b
-                      )
-                    }
-                    className={`p-1.5 rounded border ${
-                      f.visible ? "border-zinc-700 text-emerald-400" : "border-zinc-800 text-zinc-600"
-                    }`}
+              {block.fields.map((f: FooterContactField) => {
+                const supportsLink =
+                  f.key === "email" || f.key === "phone" || f.key === "website";
+                return (
+                  <div
+                    key={f.id}
+                    className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2 space-y-1.5"
                   >
-                    {f.visible ? <Eye size={12} /> : <EyeOff size={12} />}
-                  </button>
-                  <input
-                    type="text"
-                    value={f.label}
-                    onChange={(e) =>
-                      onChange((b) =>
-                        b.type === "footer"
-                          ? {
-                              ...b,
-                              fields: b.fields.map((x) =>
-                                x.id === f.id ? { ...x, label: e.target.value } : x
-                              ),
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onChange((b) =>
+                            b.type === "footer"
+                              ? {
+                                  ...b,
+                                  fields: b.fields.map((x) =>
+                                    x.id === f.id ? { ...x, visible: !x.visible } : x
+                                  ),
+                                }
+                              : b
+                          )
+                        }
+                        className={`p-1.5 rounded border ${
+                          f.visible
+                            ? "border-zinc-700 text-emerald-400"
+                            : "border-zinc-800 text-zinc-600"
+                        }`}
+                      >
+                        {f.visible ? <Eye size={12} /> : <EyeOff size={12} />}
+                      </button>
+                      <input
+                        type="text"
+                        value={f.label}
+                        onChange={(e) =>
+                          onChange((b) =>
+                            b.type === "footer"
+                              ? {
+                                  ...b,
+                                  fields: b.fields.map((x) =>
+                                    x.id === f.id ? { ...x, label: e.target.value } : x
+                                  ),
+                                }
+                              : b
+                          )
+                        }
+                        className={`${inputClass} w-1/3`}
+                      />
+                      <input
+                        type="text"
+                        value={f.valueTemplate}
+                        onChange={(e) =>
+                          onChange((b) =>
+                            b.type === "footer"
+                              ? {
+                                  ...b,
+                                  fields: b.fields.map((x) =>
+                                    x.id === f.id ? { ...x, valueTemplate: e.target.value } : x
+                                  ),
+                                }
+                              : b
+                          )
+                        }
+                        className={`${inputClass} flex-1 font-mono`}
+                      />
+                    </div>
+                    {supportsLink && (
+                      <div className="flex flex-wrap items-center gap-3 pl-8 text-[11px] text-zinc-400">
+                        <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={f.linkEnabled !== false}
+                            onChange={(e) =>
+                              onChange((b) =>
+                                b.type === "footer"
+                                  ? {
+                                      ...b,
+                                      fields: b.fields.map((x) =>
+                                        x.id === f.id
+                                          ? { ...x, linkEnabled: e.target.checked }
+                                          : x
+                                      ),
+                                    }
+                                  : b
+                              )
                             }
-                          : b
-                      )
-                    }
-                    className={`${inputClass} w-1/3`}
-                  />
-                  <input
-                    type="text"
-                    value={f.valueTemplate}
-                    onChange={(e) =>
-                      onChange((b) =>
-                        b.type === "footer"
-                          ? {
-                              ...b,
-                              fields: b.fields.map((x) =>
-                                x.id === f.id ? { ...x, valueTemplate: e.target.value } : x
-                              ),
-                            }
-                          : b
-                      )
-                    }
-                    className={`${inputClass} flex-1 font-mono`}
-                  />
-                </div>
-              ))}
+                          />
+                          Clickable{" "}
+                          {f.key === "email"
+                            ? "mailto: link"
+                            : f.key === "phone"
+                            ? "tel: link"
+                            : "HTTPS link"}
+                        </label>
+                        {f.linkEnabled !== false && (
+                          <>
+                            <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={f.underline !== false}
+                                onChange={(e) =>
+                                  onChange((b) =>
+                                    b.type === "footer"
+                                      ? {
+                                          ...b,
+                                          fields: b.fields.map((x) =>
+                                            x.id === f.id
+                                              ? { ...x, underline: e.target.checked }
+                                              : x
+                                          ),
+                                        }
+                                      : b
+                                  )
+                                }
+                              />
+                              Underline
+                            </label>
+                            <label className="inline-flex items-center gap-1.5">
+                              <span>Color</span>
+                              <input
+                                type="color"
+                                value={f.linkColor || "#059669"}
+                                onChange={(e) =>
+                                  onChange((b) =>
+                                    b.type === "footer"
+                                      ? {
+                                          ...b,
+                                          fields: b.fields.map((x) =>
+                                            x.id === f.id
+                                              ? { ...x, linkColor: e.target.value }
+                                              : x
+                                          ),
+                                        }
+                                      : b
+                                  )
+                                }
+                                className="h-5 w-7 rounded bg-zinc-950 border border-zinc-800 cursor-pointer"
+                              />
+                            </label>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </>
           )}
           <textarea
@@ -999,6 +1483,23 @@ export function BlockInspector({
             }
             imageActions={imageActions}
           />
+          <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5">
+            <LinkDestinationField
+              label="Optional Header Logo Click Link"
+              url={block.logoLinkUrl || ""}
+              visibleLabel={block.logoAlt || "{{hotel_name}}"}
+              onChangeUrl={(logoLinkUrl) =>
+                onChange((b) => (b.type === "brand_header" ? { ...b, logoLinkUrl } : b))
+              }
+              allowEmpty
+              resolvedVariables={effectiveVars}
+              openInNewTab={block.logoLinkOpenInNewTab}
+              onChangeOpenInNewTab={(logoLinkOpenInNewTab) =>
+                onChange((b) => (b.type === "brand_header" ? { ...b, logoLinkOpenInNewTab } : b))
+              }
+              compact
+            />
+          </div>
           <div className="flex flex-wrap gap-4 text-xs text-zinc-300">
             <label className="inline-flex items-center gap-1.5">
               <input
@@ -1036,7 +1537,88 @@ export function BlockInspector({
               />
               Show Phone
             </label>
+            <label className="inline-flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={Boolean(block.showEmail)}
+                onChange={(e) =>
+                  onChange((b) =>
+                    b.type === "brand_header" ? { ...b, showEmail: e.target.checked } : b
+                  )
+                }
+              />
+              Show Email
+            </label>
           </div>
+          {(block.showPhone || block.showEmail) && (
+            <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5 space-y-2">
+              <div className="text-[11px] font-semibold text-zinc-300">
+                Header Contact Links (tel: / mailto:)
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {block.showPhone && (
+                  <div className="space-y-1.5">
+                    <label className={labelClass}>Phone Override (optional)</label>
+                    <input
+                      type="text"
+                      value={block.phoneOverride || ""}
+                      onChange={(e) =>
+                        onChange((b) =>
+                          b.type === "brand_header" ? { ...b, phoneOverride: e.target.value } : b
+                        )
+                      }
+                      placeholder="Leave blank for {{hotel_phone}}"
+                      className={`${inputClass} font-mono`}
+                    />
+                    <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={block.phoneLinkEnabled !== false}
+                        onChange={(e) =>
+                          onChange((b) =>
+                            b.type === "brand_header"
+                              ? { ...b, phoneLinkEnabled: e.target.checked }
+                              : b
+                          )
+                        }
+                      />
+                      Clickable tel: link (uncheck for plain text)
+                    </label>
+                  </div>
+                )}
+                {block.showEmail && (
+                  <div className="space-y-1.5">
+                    <label className={labelClass}>Email Override (optional)</label>
+                    <input
+                      type="email"
+                      value={block.emailOverride || ""}
+                      onChange={(e) =>
+                        onChange((b) =>
+                          b.type === "brand_header" ? { ...b, emailOverride: e.target.value } : b
+                        )
+                      }
+                      placeholder="Leave blank for {{hotel_email}}"
+                      className={`${inputClass} font-mono`}
+                    />
+                    <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={block.emailLinkEnabled !== false}
+                        onChange={(e) =>
+                          onChange((b) =>
+                            b.type === "brand_header"
+                              ? { ...b, emailLinkEnabled: e.target.checked }
+                              : b
+                          )
+                        }
+                      />
+                      Clickable mailto: link (uncheck for plain text)
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           <EmailIconPicker
             tone={block.iconTone}
             appUrl={appUrl}
@@ -1074,6 +1656,21 @@ export function BlockInspector({
             }
             imageActions={imageActions}
           />
+          {block.imageUrl && (
+            <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5">
+              <LinkDestinationField
+                label="Optional Thumbnail Click Link"
+                url={block.imageLinkUrl || ""}
+                visibleLabel={block.imageAlt}
+                onChangeUrl={(imageLinkUrl) =>
+                  onChange((b) => (b.type === "promo_banner" ? { ...b, imageLinkUrl } : b))
+                }
+                allowEmpty
+                resolvedVariables={effectiveVars}
+                compact
+              />
+            </div>
+          )}
           <div>
             <label className={labelClass}>Banner Copy</label>
             <textarea
@@ -1092,7 +1689,10 @@ export function BlockInspector({
             buttonCorner={block.buttonCorner}
             buttonBgColor={block.buttonBgColor}
             buttonTextColor={block.buttonTextColor}
-            resolvedPortalUrl={resolvedPortalUrl}
+            buttonBorderColor={block.buttonBorderColor}
+            buttonOpenInNewTab={block.buttonOpenInNewTab}
+            buttonHidden={block.buttonHidden}
+            resolvedVariables={effectiveVars}
             onPatch={(patch) =>
               onChange((b) => (b.type === "promo_banner" ? { ...b, ...patch } : b))
             }
@@ -1139,22 +1739,26 @@ export function BlockInspector({
               />
             </div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 items-center">
-            <div>
-              <label className={labelClass}>Optional Link URL</label>
-              <input
-                type="text"
-                value={block.linkUrl || ""}
-                onChange={(e) =>
-                  onChange((b) =>
-                    b.type === "membership_strip" ? { ...b, linkUrl: e.target.value } : b
-                  )
-                }
-                placeholder="{{portal_link}}"
-                className={`${inputClass} font-mono`}
-              />
-            </div>
-            <label className="inline-flex items-center gap-2 text-xs text-zinc-300 mt-4">
+          <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5 space-y-2">
+            <LinkDestinationField
+              label="Optional Strip Link"
+              url={block.linkUrl || ""}
+              onChangeUrl={(linkUrl) =>
+                onChange((b) => (b.type === "membership_strip" ? { ...b, linkUrl } : b))
+              }
+              allowEmpty
+              resolvedVariables={effectiveVars}
+              openInNewTab={block.linkOpenInNewTab}
+              onChangeOpenInNewTab={(linkOpenInNewTab) =>
+                onChange((b) => (b.type === "membership_strip" ? { ...b, linkOpenInNewTab } : b))
+              }
+              hidden={block.linkHidden}
+              onChangeHidden={(linkHidden) =>
+                onChange((b) => (b.type === "membership_strip" ? { ...b, linkHidden } : b))
+              }
+              compact
+            />
+            <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
               <input
                 type="checkbox"
                 checked={block.showArrow !== false}
@@ -1236,6 +1840,27 @@ export function BlockInspector({
               className={inputClass}
             />
           </div>
+          <InlineLinksEditor
+            inlineLinks={block.inlineLinks}
+            resolvedVariables={effectiveVars}
+            onChangeLinks={(inlineLinks) =>
+              onChange((b) => (b.type === "hero_text" ? { ...b, inlineLinks } : b))
+            }
+            onInsertToken={(token) =>
+              onChange((b) =>
+                b.type === "hero_text"
+                  ? { ...b, body: b.body ? `${b.body} ${token}` : token }
+                  : b
+              )
+            }
+            onRemoveToken={(token) =>
+              onChange((b) =>
+                b.type === "hero_text"
+                  ? { ...b, body: b.body.split(token).join("").replace(/\s{2,}/g, " ").trim() }
+                  : b
+              )
+            }
+          />
           <ModernButtonEditor
             label={block.buttonLabel}
             url={block.buttonUrl}
@@ -1243,7 +1868,10 @@ export function BlockInspector({
             buttonCorner={block.buttonCorner}
             buttonBgColor={block.buttonBgColor}
             buttonTextColor={block.buttonTextColor}
-            resolvedPortalUrl={resolvedPortalUrl}
+            buttonBorderColor={block.buttonBorderColor}
+            buttonOpenInNewTab={block.buttonOpenInNewTab}
+            buttonHidden={block.buttonHidden}
+            resolvedVariables={effectiveVars}
             onPatch={(patch) =>
               onChange((b) => (b.type === "hero_text" ? { ...b, ...patch } : b))
             }
@@ -1385,7 +2013,10 @@ export function BlockInspector({
             buttonCorner={block.buttonCorner}
             buttonBgColor={block.buttonBgColor}
             buttonTextColor={block.buttonTextColor}
-            resolvedPortalUrl={resolvedPortalUrl}
+            buttonBorderColor={block.buttonBorderColor}
+            buttonOpenInNewTab={block.buttonOpenInNewTab}
+            buttonHidden={block.buttonHidden}
+            resolvedVariables={effectiveVars}
             onPatch={(patch) =>
               onChange((b) => (b.type === "stay_dates" ? { ...b, ...patch } : b))
             }
@@ -1438,6 +2069,19 @@ export function BlockInspector({
             }
             imageActions={imageActions}
           />
+          <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5">
+            <LinkDestinationField
+              label="Optional Card Image Click Link"
+              url={block.imageLinkUrl || ""}
+              visibleLabel={block.imageAlt || block.title}
+              onChangeUrl={(imageLinkUrl) =>
+                onChange((b) => (b.type === "feature_card" ? { ...b, imageLinkUrl } : b))
+              }
+              allowEmpty
+              resolvedVariables={effectiveVars}
+              compact
+            />
+          </div>
           <div>
             <label className={labelClass}>Card Title</label>
             <input
@@ -1460,6 +2104,27 @@ export function BlockInspector({
               className={inputClass}
             />
           </div>
+          <InlineLinksEditor
+            inlineLinks={block.inlineLinks}
+            resolvedVariables={effectiveVars}
+            onChangeLinks={(inlineLinks) =>
+              onChange((b) => (b.type === "feature_card" ? { ...b, inlineLinks } : b))
+            }
+            onInsertToken={(token) =>
+              onChange((b) =>
+                b.type === "feature_card"
+                  ? { ...b, body: b.body ? `${b.body} ${token}` : token }
+                  : b
+              )
+            }
+            onRemoveToken={(token) =>
+              onChange((b) =>
+                b.type === "feature_card"
+                  ? { ...b, body: b.body.split(token).join("").replace(/\s{2,}/g, " ").trim() }
+                  : b
+              )
+            }
+          />
           <ModernButtonEditor
             label={block.buttonLabel}
             url={block.buttonUrl}
@@ -1467,7 +2132,10 @@ export function BlockInspector({
             buttonCorner={block.buttonCorner}
             buttonBgColor={block.buttonBgColor}
             buttonTextColor={block.buttonTextColor}
-            resolvedPortalUrl={resolvedPortalUrl}
+            buttonBorderColor={block.buttonBorderColor}
+            buttonOpenInNewTab={block.buttonOpenInNewTab}
+            buttonHidden={block.buttonHidden}
+            resolvedVariables={effectiveVars}
             onPatch={(patch) =>
               onChange((b) => (b.type === "feature_card" ? { ...b, ...patch } : b))
             }
@@ -1612,6 +2280,41 @@ export function BlockInspector({
             />
           </div>
 
+          <InlineLinksEditor
+            inlineLinks={block.inlineLinks}
+            resolvedVariables={effectiveVars}
+            helperHint="Place [[link:id]] in any benefit row or the footnote."
+            onChangeLinks={(inlineLinks) =>
+              onChange((b) => (b.type === "benefits_list" ? { ...b, inlineLinks } : b))
+            }
+            onInsertToken={(token) =>
+              onChange((b) =>
+                b.type === "benefits_list"
+                  ? {
+                      ...b,
+                      footnote: b.footnote ? `${b.footnote} ${token}` : token,
+                    }
+                  : b
+              )
+            }
+            onRemoveToken={(token) =>
+              onChange((b) =>
+                b.type === "benefits_list"
+                  ? {
+                      ...b,
+                      items: b.items.map((it) => ({
+                        ...it,
+                        text: it.text.split(token).join("").replace(/\s{2,}/g, " ").trim(),
+                      })),
+                      footnote: b.footnote
+                        ? b.footnote.split(token).join("").replace(/\s{2,}/g, " ").trim()
+                        : b.footnote,
+                    }
+                  : b
+              )
+            }
+          />
+
           <ModernButtonEditor
             label={block.buttonLabel}
             url={block.buttonUrl}
@@ -1619,7 +2322,10 @@ export function BlockInspector({
             buttonCorner={block.buttonCorner}
             buttonBgColor={block.buttonBgColor}
             buttonTextColor={block.buttonTextColor}
-            resolvedPortalUrl={resolvedPortalUrl}
+            buttonBorderColor={block.buttonBorderColor}
+            buttonOpenInNewTab={block.buttonOpenInNewTab}
+            buttonHidden={block.buttonHidden}
+            resolvedVariables={effectiveVars}
             onPatch={(patch) =>
               onChange((b) => (b.type === "benefits_list" ? { ...b, ...patch } : b))
             }
@@ -1706,101 +2412,169 @@ export function BlockInspector({
                 </button>
               )}
             </div>
-            {block.items.map((item) => (
+            {block.items.map((item, iIdx) => (
               <div
                 key={item.id}
-                className="grid grid-cols-1 sm:grid-cols-12 gap-1.5 items-center bg-zinc-950/60 border border-zinc-800/80 rounded-lg p-2"
+                className={`bg-zinc-950/60 border border-zinc-800/80 rounded-lg p-2.5 space-y-2 ${
+                  item.hidden ? "opacity-60" : ""
+                }`}
               >
-                <select
-                  value={item.icon}
-                  onChange={(e) =>
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={item.icon}
+                    onChange={(e) =>
+                      onChange((b) =>
+                        b.type === "icon_link_grid"
+                          ? {
+                              ...b,
+                              items: b.items.map((x) =>
+                                x.id === item.id
+                                  ? { ...x, icon: e.target.value as EmailIconName }
+                                  : x
+                              ),
+                            }
+                          : b
+                      )
+                    }
+                    className={`${inputClass} w-28`}
+                  >
+                    {[
+                      "dining",
+                      "activities",
+                      "spa",
+                      "wifi",
+                      "parking",
+                      "map",
+                      "calendar",
+                      "key",
+                      "chat",
+                      "star",
+                      "gift",
+                      "location_pin",
+                      "phone",
+                      "check",
+                      "arrow",
+                    ].map((ic) => (
+                      <option key={ic} value={ic}>
+                        {ic.replace("_", " ")}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={item.label}
+                    onChange={(e) =>
+                      onChange((b) =>
+                        b.type === "icon_link_grid"
+                          ? {
+                              ...b,
+                              items: b.items.map((x) =>
+                                x.id === item.id ? { ...x, label: e.target.value } : x
+                              ),
+                            }
+                          : b
+                      )
+                    }
+                    placeholder="Label"
+                    className={`${inputClass} flex-1`}
+                  />
+                  <button
+                    type="button"
+                    title={item.hidden ? "Show item" : "Hide item"}
+                    onClick={() =>
+                      onChange((b) =>
+                        b.type === "icon_link_grid"
+                          ? {
+                              ...b,
+                              items: b.items.map((x) =>
+                                x.id === item.id ? { ...x, hidden: !x.hidden } : x
+                              ),
+                            }
+                          : b
+                      )
+                    }
+                    className="p-1 text-zinc-400 hover:text-zinc-100"
+                  >
+                    {item.hidden ? <EyeOff size={12} /> : <Eye size={12} />}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={iIdx === 0}
+                    onClick={() =>
+                      onChange((b) => {
+                        if (b.type !== "icon_link_grid" || iIdx === 0) return b;
+                        const copy = [...b.items];
+                        const [m] = copy.splice(iIdx, 1);
+                        copy.splice(iIdx - 1, 0, m);
+                        return { ...b, items: copy };
+                      })
+                    }
+                    className="p-1 text-zinc-500 hover:text-zinc-200 disabled:opacity-30"
+                  >
+                    <ArrowUp size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={iIdx === block.items.length - 1}
+                    onClick={() =>
+                      onChange((b) => {
+                        if (b.type !== "icon_link_grid" || iIdx >= b.items.length - 1) return b;
+                        const copy = [...b.items];
+                        const [m] = copy.splice(iIdx, 1);
+                        copy.splice(iIdx + 1, 0, m);
+                        return { ...b, items: copy };
+                      })
+                    }
+                    className="p-1 text-zinc-500 hover:text-zinc-200 disabled:opacity-30"
+                  >
+                    <ArrowDown size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={block.items.length <= 2}
+                    onClick={() =>
+                      onChange((b) =>
+                        b.type === "icon_link_grid"
+                          ? { ...b, items: b.items.filter((x) => x.id !== item.id) }
+                          : b
+                      )
+                    }
+                    className="p-1 text-zinc-500 hover:text-red-400 disabled:opacity-30"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+                <LinkDestinationField
+                  url={item.url}
+                  visibleLabel={item.label}
+                  onChangeUrl={(url) =>
+                    onChange((b) =>
+                      b.type === "icon_link_grid"
+                        ? {
+                            ...b,
+                            items: b.items.map((x) => (x.id === item.id ? { ...x, url } : x)),
+                          }
+                        : b
+                    )
+                  }
+                  allowContactSchemes
+                  allowEmpty={Boolean(item.hidden)}
+                  resolvedVariables={effectiveVars}
+                  openInNewTab={item.openInNewTab}
+                  onChangeOpenInNewTab={(openInNewTab) =>
                     onChange((b) =>
                       b.type === "icon_link_grid"
                         ? {
                             ...b,
                             items: b.items.map((x) =>
-                              x.id === item.id
-                                ? { ...x, icon: e.target.value as EmailIconName }
-                                : x
+                              x.id === item.id ? { ...x, openInNewTab } : x
                             ),
                           }
                         : b
                     )
                   }
-                  className={`${inputClass} sm:col-span-3`}
-                >
-                  {[
-                    "dining",
-                    "activities",
-                    "spa",
-                    "wifi",
-                    "parking",
-                    "map",
-                    "calendar",
-                    "key",
-                    "chat",
-                    "star",
-                    "gift",
-                    "location_pin",
-                    "phone",
-                    "check",
-                    "arrow",
-                  ].map((ic) => (
-                    <option key={ic} value={ic}>
-                      {ic.replace("_", " ")}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="text"
-                  value={item.label}
-                  onChange={(e) =>
-                    onChange((b) =>
-                      b.type === "icon_link_grid"
-                        ? {
-                            ...b,
-                            items: b.items.map((x) =>
-                              x.id === item.id ? { ...x, label: e.target.value } : x
-                            ),
-                          }
-                        : b
-                    )
-                  }
-                  placeholder="Label"
-                  className={`${inputClass} sm:col-span-4`}
+                  compact
                 />
-                <input
-                  type="text"
-                  value={item.url}
-                  onChange={(e) =>
-                    onChange((b) =>
-                      b.type === "icon_link_grid"
-                        ? {
-                            ...b,
-                            items: b.items.map((x) =>
-                              x.id === item.id ? { ...x, url: e.target.value } : x
-                            ),
-                          }
-                        : b
-                    )
-                  }
-                  placeholder="https://..."
-                  className={`${inputClass} font-mono sm:col-span-4`}
-                />
-                <button
-                  type="button"
-                  disabled={block.items.length <= 2}
-                  onClick={() =>
-                    onChange((b) =>
-                      b.type === "icon_link_grid"
-                        ? { ...b, items: b.items.filter((x) => x.id !== item.id) }
-                        : b
-                    )
-                  }
-                  className="p-1 text-zinc-500 hover:text-red-400 disabled:opacity-30 sm:col-span-1 justify-self-end"
-                >
-                  <Trash2 size={12} />
-                </button>
               </div>
             ))}
           </div>
@@ -1832,6 +2606,19 @@ export function BlockInspector({
             }
             imageActions={imageActions}
           />
+          <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5">
+            <LinkDestinationField
+              label="Optional Visual Click Link"
+              url={block.imageLinkUrl || ""}
+              visibleLabel={block.imageAlt || block.heading}
+              onChangeUrl={(imageLinkUrl) =>
+                onChange((b) => (b.type === "image_with_list" ? { ...b, imageLinkUrl } : b))
+              }
+              allowEmpty
+              resolvedVariables={effectiveVars}
+              compact
+            />
+          </div>
           <div>
             <label className={labelClass}>Heading</label>
             <input
@@ -1945,6 +2732,39 @@ export function BlockInspector({
               <Plus size={12} /> Add Feature Row
             </button>
           </div>
+          <InlineLinksEditor
+            inlineLinks={block.inlineLinks}
+            resolvedVariables={effectiveVars}
+            helperHint="Place [[link:id]] inside any feature row text."
+            onChangeLinks={(inlineLinks) =>
+              onChange((b) => (b.type === "image_with_list" ? { ...b, inlineLinks } : b))
+            }
+            onInsertToken={(token) =>
+              onChange((b) => {
+                if (b.type !== "image_with_list" || b.items.length === 0) return b;
+                const lastIdx = b.items.length - 1;
+                return {
+                  ...b,
+                  items: b.items.map((it, idx) =>
+                    idx === lastIdx ? { ...it, text: it.text ? `${it.text} ${token}` : token } : it
+                  ),
+                };
+              })
+            }
+            onRemoveToken={(token) =>
+              onChange((b) =>
+                b.type === "image_with_list"
+                  ? {
+                      ...b,
+                      items: b.items.map((it) => ({
+                        ...it,
+                        text: it.text.split(token).join("").replace(/\s{2,}/g, " ").trim(),
+                      })),
+                    }
+                  : b
+              )
+            }
+          />
           <ModernButtonEditor
             label={block.buttonLabel}
             url={block.buttonUrl}
@@ -1952,7 +2772,10 @@ export function BlockInspector({
             buttonCorner={block.buttonCorner}
             buttonBgColor={block.buttonBgColor}
             buttonTextColor={block.buttonTextColor}
-            resolvedPortalUrl={resolvedPortalUrl}
+            buttonBorderColor={block.buttonBorderColor}
+            buttonOpenInNewTab={block.buttonOpenInNewTab}
+            buttonHidden={block.buttonHidden}
+            resolvedVariables={effectiveVars}
             onPatch={(patch) =>
               onChange((b) => (b.type === "image_with_list" ? { ...b, ...patch } : b))
             }
@@ -1970,60 +2793,153 @@ export function BlockInspector({
     case "footer_nav":
       return (
         <div className="space-y-3">
-          <div className="space-y-1.5">
-            <label className={labelClass}>Footer Navigation Links</label>
-            {block.links.map((l) => (
-              <div key={l.id} className="flex items-center gap-1.5">
-                <input
-                  type="text"
-                  value={l.label}
-                  onChange={(e) =>
+          <div className="space-y-2">
+            <label className={labelClass}>Footer Navigation Links (add, rename, reorder, hide)</label>
+            {block.links.map((l, lIdx) => (
+              <div
+                key={l.id}
+                className={`rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5 space-y-2 ${
+                  l.hidden ? "opacity-60" : ""
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={l.label}
+                    onChange={(e) =>
+                      onChange((b) =>
+                        b.type === "footer_nav"
+                          ? {
+                              ...b,
+                              links: b.links.map((x) =>
+                                x.id === l.id ? { ...x, label: e.target.value } : x
+                              ),
+                            }
+                          : b
+                      )
+                    }
+                    placeholder="Link text (e.g. Terms, Privacy, FAQ)"
+                    className={`${inputClass} flex-1`}
+                  />
+                  <button
+                    type="button"
+                    title={l.hidden ? "Show link" : "Hide link"}
+                    onClick={() =>
+                      onChange((b) =>
+                        b.type === "footer_nav"
+                          ? {
+                              ...b,
+                              links: b.links.map((x) =>
+                                x.id === l.id ? { ...x, hidden: !x.hidden } : x
+                              ),
+                            }
+                          : b
+                      )
+                    }
+                    className="p-1 text-zinc-400 hover:text-zinc-100"
+                  >
+                    {l.hidden ? <EyeOff size={12} /> : <Eye size={12} />}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={lIdx === 0}
+                    onClick={() =>
+                      onChange((b) => {
+                        if (b.type !== "footer_nav" || lIdx === 0) return b;
+                        const copy = [...b.links];
+                        const [m] = copy.splice(lIdx, 1);
+                        copy.splice(lIdx - 1, 0, m);
+                        return { ...b, links: copy };
+                      })
+                    }
+                    className="p-1 text-zinc-500 hover:text-zinc-200 disabled:opacity-30"
+                  >
+                    <ArrowUp size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={lIdx === block.links.length - 1}
+                    onClick={() =>
+                      onChange((b) => {
+                        if (b.type !== "footer_nav" || lIdx >= b.links.length - 1) return b;
+                        const copy = [...b.links];
+                        const [m] = copy.splice(lIdx, 1);
+                        copy.splice(lIdx + 1, 0, m);
+                        return { ...b, links: copy };
+                      })
+                    }
+                    className="p-1 text-zinc-500 hover:text-zinc-200 disabled:opacity-30"
+                  >
+                    <ArrowDown size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={block.links.length <= 1}
+                    onClick={() =>
+                      onChange((b) =>
+                        b.type === "footer_nav"
+                          ? { ...b, links: b.links.filter((x) => x.id !== l.id) }
+                          : b
+                      )
+                    }
+                    className="p-1 text-zinc-500 hover:text-red-400 disabled:opacity-30"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+                <LinkDestinationField
+                  url={l.url}
+                  visibleLabel={l.label}
+                  onChangeUrl={(url) =>
+                    onChange((b) =>
+                      b.type === "footer_nav"
+                        ? {
+                            ...b,
+                            links: b.links.map((x) => (x.id === l.id ? { ...x, url } : x)),
+                          }
+                        : b
+                    )
+                  }
+                  allowContactSchemes
+                  allowEmpty={Boolean(l.hidden)}
+                  resolvedVariables={effectiveVars}
+                  color={l.color}
+                  onChangeColor={(color) =>
+                    onChange((b) =>
+                      b.type === "footer_nav"
+                        ? {
+                            ...b,
+                            links: b.links.map((x) => (x.id === l.id ? { ...x, color } : x)),
+                          }
+                        : b
+                    )
+                  }
+                  underline={l.underline}
+                  onChangeUnderline={(underline) =>
+                    onChange((b) =>
+                      b.type === "footer_nav"
+                        ? {
+                            ...b,
+                            links: b.links.map((x) => (x.id === l.id ? { ...x, underline } : x)),
+                          }
+                        : b
+                    )
+                  }
+                  openInNewTab={l.openInNewTab}
+                  onChangeOpenInNewTab={(openInNewTab) =>
                     onChange((b) =>
                       b.type === "footer_nav"
                         ? {
                             ...b,
                             links: b.links.map((x) =>
-                              x.id === l.id ? { ...x, label: e.target.value } : x
+                              x.id === l.id ? { ...x, openInNewTab } : x
                             ),
                           }
                         : b
                     )
                   }
-                  placeholder="Label"
-                  className={`${inputClass} w-1/3`}
+                  compact
                 />
-                <input
-                  type="text"
-                  value={l.url}
-                  onChange={(e) =>
-                    onChange((b) =>
-                      b.type === "footer_nav"
-                        ? {
-                            ...b,
-                            links: b.links.map((x) =>
-                              x.id === l.id ? { ...x, url: e.target.value } : x
-                            ),
-                          }
-                        : b
-                    )
-                  }
-                  placeholder="https://... or {{hotel_website}}"
-                  className={`${inputClass} flex-1 font-mono`}
-                />
-                <button
-                  type="button"
-                  disabled={block.links.length <= 1}
-                  onClick={() =>
-                    onChange((b) =>
-                      b.type === "footer_nav"
-                        ? { ...b, links: b.links.filter((x) => x.id !== l.id) }
-                        : b
-                    )
-                  }
-                  className="p-1 text-zinc-500 hover:text-red-400 disabled:opacity-30"
-                >
-                  <Trash2 size={12} />
-                </button>
               </div>
             ))}
             <button
@@ -2035,7 +2951,7 @@ export function BlockInspector({
                         ...b,
                         links: [
                           ...b.links,
-                          { id: makeId("fn"), label: "Contact", url: "{{hotel_website}}" },
+                          { id: makeId("fn"), label: "Contact", url: "mailto:{{hotel_email}}" },
                         ],
                       }
                     : b
@@ -2043,12 +2959,12 @@ export function BlockInspector({
               }
               className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 font-medium"
             >
-              <Plus size={12} /> Add Link
+              <Plus size={12} /> Add Navigation Link
             </button>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5 space-y-2">
             <div>
-              <label className={labelClass}>Secondary Line (Optional)</label>
+              <label className={labelClass}>Secondary Line Text (Optional)</label>
               <input
                 type="text"
                 value={block.secondaryText || ""}
@@ -2057,22 +2973,36 @@ export function BlockInspector({
                     b.type === "footer_nav" ? { ...b, secondaryText: e.target.value } : b
                   )
                 }
+                placeholder="e.g. Manage your reservation online"
                 className={inputClass}
               />
             </div>
-            <div>
-              <label className={labelClass}>Secondary Link URL</label>
-              <input
-                type="text"
-                value={block.secondaryLinkUrl || ""}
-                onChange={(e) =>
-                  onChange((b) =>
-                    b.type === "footer_nav" ? { ...b, secondaryLinkUrl: e.target.value } : b
-                  )
-                }
-                className={`${inputClass} font-mono`}
-              />
-            </div>
+            <LinkDestinationField
+              label="Secondary Link Destination (Optional)"
+              url={block.secondaryLinkUrl || ""}
+              visibleLabel={block.secondaryText}
+              onChangeUrl={(secondaryLinkUrl) =>
+                onChange((b) =>
+                  b.type === "footer_nav" ? { ...b, secondaryLinkUrl } : b
+                )
+              }
+              allowContactSchemes
+              allowEmpty
+              resolvedVariables={effectiveVars}
+              openInNewTab={block.secondaryLinkOpenInNewTab}
+              onChangeOpenInNewTab={(secondaryLinkOpenInNewTab) =>
+                onChange((b) =>
+                  b.type === "footer_nav" ? { ...b, secondaryLinkOpenInNewTab } : b
+                )
+              }
+              hidden={block.secondaryLinkHidden}
+              onChangeHidden={(secondaryLinkHidden) =>
+                onChange((b) =>
+                  b.type === "footer_nav" ? { ...b, secondaryLinkHidden } : b
+                )
+              }
+              compact
+            />
           </div>
           <BlockStyleControls
             style={block.style}
@@ -2166,6 +3096,48 @@ export function BlockInspector({
               <Plus size={12} /> Add Legal Section
             </button>
           </div>
+          <InlineLinksEditor
+            inlineLinks={block.inlineLinks}
+            resolvedVariables={effectiveVars}
+            helperHint="Place [[link:id]] in any section body or copyright line."
+            onChangeLinks={(inlineLinks) =>
+              onChange((b) => (b.type === "legal_section" ? { ...b, inlineLinks } : b))
+            }
+            onInsertToken={(token) =>
+              onChange((b) => {
+                if (b.type !== "legal_section") return b;
+                if (b.sections.length > 0) {
+                  const lastIdx = b.sections.length - 1;
+                  return {
+                    ...b,
+                    sections: b.sections.map((s, idx) =>
+                      idx === lastIdx ? { ...s, body: s.body ? `${s.body} ${token}` : token } : s
+                    ),
+                  };
+                }
+                return {
+                  ...b,
+                  copyrightText: b.copyrightText ? `${b.copyrightText} ${token}` : token,
+                };
+              })
+            }
+            onRemoveToken={(token) =>
+              onChange((b) =>
+                b.type === "legal_section"
+                  ? {
+                      ...b,
+                      sections: b.sections.map((s) => ({
+                        ...s,
+                        body: s.body.split(token).join("").replace(/\s{2,}/g, " ").trim(),
+                      })),
+                      copyrightText: b.copyrightText
+                        ? b.copyrightText.split(token).join("").replace(/\s{2,}/g, " ").trim()
+                        : b.copyrightText,
+                    }
+                  : b
+              )
+            }
+          />
           <div>
             <label className={labelClass}>Copyright Line</label>
             <input
@@ -2192,29 +3164,415 @@ export function BlockInspector({
             Show centered bottom hotel logo
           </label>
           {block.showFooterLogo && (
-            <ImageFieldControl
-              blockId={block.id}
-              fieldKey="footerLogoUrl"
-              label="Bottom Logo Image"
-              url={block.footerLogoUrl || ""}
-              alt={block.footerLogoAlt || "{{hotel_name}}"}
-              onUrlChange={(footerLogoUrl) =>
-                onChange((b) =>
-                  b.type === "legal_section"
-                    ? { ...b, footerLogoUrl, footerLogoImageId: undefined }
-                    : b
-                )
-              }
-              onAltChange={(footerLogoAlt) =>
-                onChange((b) => (b.type === "legal_section" ? { ...b, footerLogoAlt } : b))
-              }
-              imageActions={imageActions}
-            />
+            <div className="space-y-2">
+              <ImageFieldControl
+                blockId={block.id}
+                fieldKey="footerLogoUrl"
+                label="Bottom Logo Image"
+                url={block.footerLogoUrl || ""}
+                alt={block.footerLogoAlt || "{{hotel_name}}"}
+                onUrlChange={(footerLogoUrl) =>
+                  onChange((b) =>
+                    b.type === "legal_section"
+                      ? { ...b, footerLogoUrl, footerLogoImageId: undefined }
+                      : b
+                  )
+                }
+                onAltChange={(footerLogoAlt) =>
+                  onChange((b) => (b.type === "legal_section" ? { ...b, footerLogoAlt } : b))
+                }
+                imageActions={imageActions}
+              />
+              <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5">
+                <LinkDestinationField
+                  label="Optional Bottom Logo Link"
+                  url={block.footerLogoLinkUrl || ""}
+                  visibleLabel={block.footerLogoAlt || "{{hotel_name}}"}
+                  onChangeUrl={(footerLogoLinkUrl) =>
+                    onChange((b) =>
+                      b.type === "legal_section" ? { ...b, footerLogoLinkUrl } : b
+                    )
+                  }
+                  allowEmpty
+                  resolvedVariables={effectiveVars}
+                  compact
+                />
+              </div>
+            </div>
           )}
           <BlockStyleControls
             style={block.style}
             onChange={(style) =>
               onChange((b) => (b.type === "legal_section" ? { ...b, style } : b))
+            }
+          />
+        </div>
+      );
+
+    // --- 5 STANDALONE EDITABLE FOOTER BLOCKS ---
+    case "footer_contact":
+    case "footer_authenticity":
+    case "footer_legal":
+      return (
+        <div className="space-y-3">
+          <div>
+            <label className={labelClass}>Section Heading</label>
+            <input
+              type="text"
+              value={block.heading}
+              onChange={(e) =>
+                onChange((b) =>
+                  b.type === block.type ? { ...b, heading: e.target.value } : b
+                )
+              }
+              placeholder={
+                block.type === "footer_contact"
+                  ? "Contact Us"
+                  : block.type === "footer_authenticity"
+                    ? "Confirmation Authenticity"
+                    : "Legal / Impressum"
+              }
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className={labelClass}>Footer Text (Supports allow-listed merge variables)</label>
+            <textarea
+              rows={3}
+              value={block.text}
+              onChange={(e) =>
+                onChange((b) =>
+                  b.type === block.type ? { ...b, text: e.target.value } : b
+                )
+              }
+              placeholder={
+                block.type === "footer_legal"
+                  ? "{{legal_imprint}} or type custom Impressum / privacy / cancellation text"
+                  : "Enter footer message..."
+              }
+              className={inputClass}
+            />
+            <FooterVariableInsertBar
+              onInsert={(token) =>
+                onChange((b) =>
+                  b.type === block.type
+                    ? { ...b, text: b.text ? `${b.text} ${token}` : token }
+                    : b
+                )
+              }
+            />
+          </div>
+          <InlineLinksEditor
+            inlineLinks={block.inlineLinks}
+            resolvedVariables={effectiveVars}
+            onChangeLinks={(inlineLinks) =>
+              onChange((b) => (b.type === block.type ? { ...b, inlineLinks } : b))
+            }
+            onInsertToken={(token) =>
+              onChange((b) =>
+                b.type === block.type
+                  ? { ...b, text: b.text ? `${b.text} ${token}` : token }
+                  : b
+              )
+            }
+            onRemoveToken={(token) =>
+              onChange((b) =>
+                b.type === block.type
+                  ? { ...b, text: b.text.split(token).join("").replace(/\s{2,}/g, " ").trim() }
+                  : b
+              )
+            }
+          />
+          {block.type === "footer_contact" && (
+            <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5 space-y-2.5">
+              <div className="text-[11px] font-semibold text-zinc-300">
+                Contact Email &amp; Phone Links (mailto: / tel:)
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="space-y-1.5">
+                  <label className={labelClass}>Email Address Override (Optional)</label>
+                  <input
+                    type="email"
+                    value={block.emailOverride || ""}
+                    onChange={(e) =>
+                      onChange((b) =>
+                        b.type === "footer_contact" ? { ...b, emailOverride: e.target.value } : b
+                      )
+                    }
+                    placeholder="Leave blank for {{hotel_email}}"
+                    className={`${inputClass} font-mono`}
+                  />
+                  <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(block.emailLinkEnabled)}
+                      onChange={(e) =>
+                        onChange((b) =>
+                          b.type === "footer_contact"
+                            ? { ...b, emailLinkEnabled: e.target.checked }
+                            : b
+                        )
+                      }
+                    />
+                    Link email as clickable mailto:
+                  </label>
+                </div>
+                <div className="space-y-1.5">
+                  <label className={labelClass}>Phone Number Override (Optional)</label>
+                  <input
+                    type="text"
+                    value={block.phoneOverride || ""}
+                    onChange={(e) =>
+                      onChange((b) =>
+                        b.type === "footer_contact" ? { ...b, phoneOverride: e.target.value } : b
+                      )
+                    }
+                    placeholder="Leave blank for {{hotel_phone}}"
+                    className={`${inputClass} font-mono`}
+                  />
+                  <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(block.phoneLinkEnabled)}
+                      onChange={(e) =>
+                        onChange((b) =>
+                          b.type === "footer_contact"
+                            ? { ...b, phoneLinkEnabled: e.target.checked }
+                            : b
+                        )
+                      }
+                    />
+                    Link phone as clickable tel:
+                  </label>
+                </div>
+              </div>
+              {(block.emailLinkEnabled || block.phoneLinkEnabled) && (
+                <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px] text-zinc-400">
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={block.underline !== false}
+                      onChange={(e) =>
+                        onChange((b) =>
+                          b.type === "footer_contact" ? { ...b, underline: e.target.checked } : b
+                        )
+                      }
+                    />
+                    Underline contact links
+                  </label>
+                  <label className="inline-flex items-center gap-1.5">
+                    <span>Link color</span>
+                    <input
+                      type="color"
+                      value={block.linkColor || "#059669"}
+                      onChange={(e) =>
+                        onChange((b) =>
+                          b.type === "footer_contact" ? { ...b, linkColor: e.target.value } : b
+                        )
+                      }
+                      className="h-5 w-7 rounded bg-zinc-950 border border-zinc-800 cursor-pointer"
+                    />
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
+          <BlockStyleControls
+            style={block.style}
+            showAlign
+            showBorder
+            showTypography
+            showHeadingColor
+            onChange={(style) =>
+              onChange((b) => (b.type === block.type ? { ...b, style } : b))
+            }
+          />
+        </div>
+      );
+
+    case "footer_copyright":
+      return (
+        <div className="space-y-3">
+          <div>
+            <label className={labelClass}>Copyright / Legal Line</label>
+            <textarea
+              rows={2}
+              value={block.text}
+              onChange={(e) =>
+                onChange((b) =>
+                  b.type === "footer_copyright" ? { ...b, text: e.target.value } : b
+                )
+              }
+              placeholder="© {{hotel_name}} · {{hotel_address}}"
+              className={inputClass}
+            />
+            <FooterVariableInsertBar
+              onInsert={(token) =>
+                onChange((b) =>
+                  b.type === "footer_copyright"
+                    ? { ...b, text: b.text ? `${b.text} ${token}` : token }
+                    : b
+                )
+              }
+            />
+          </div>
+          <InlineLinksEditor
+            inlineLinks={block.inlineLinks}
+            resolvedVariables={effectiveVars}
+            onChangeLinks={(inlineLinks) =>
+              onChange((b) => (b.type === "footer_copyright" ? { ...b, inlineLinks } : b))
+            }
+            onInsertToken={(token) =>
+              onChange((b) =>
+                b.type === "footer_copyright"
+                  ? { ...b, text: b.text ? `${b.text} ${token}` : token }
+                  : b
+              )
+            }
+            onRemoveToken={(token) =>
+              onChange((b) =>
+                b.type === "footer_copyright"
+                  ? { ...b, text: b.text.split(token).join("").replace(/\s{2,}/g, " ").trim() }
+                  : b
+              )
+            }
+          />
+          <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
+            <input
+              type="checkbox"
+              checked={Boolean(block.showFooterLogo)}
+              onChange={(e) =>
+                onChange((b) =>
+                  b.type === "footer_copyright"
+                    ? { ...b, showFooterLogo: e.target.checked }
+                    : b
+                )
+              }
+            />
+            Show bottom hotel logo below copyright line
+          </label>
+          {block.showFooterLogo && (
+            <div className="space-y-2">
+              <ImageFieldControl
+                blockId={block.id}
+                fieldKey="footerLogoUrl"
+                label="Bottom Logo Image"
+                url={block.footerLogoUrl || ""}
+                alt={block.footerLogoAlt || "{{hotel_name}}"}
+                onUrlChange={(footerLogoUrl) =>
+                  onChange((b) =>
+                    b.type === "footer_copyright"
+                      ? { ...b, footerLogoUrl, footerLogoImageId: undefined }
+                      : b
+                  )
+                }
+                onAltChange={(footerLogoAlt) =>
+                  onChange((b) =>
+                    b.type === "footer_copyright" ? { ...b, footerLogoAlt } : b
+                  )
+                }
+                imageActions={imageActions}
+              />
+              <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5">
+                <LinkDestinationField
+                  label="Optional Bottom Logo Link"
+                  url={block.footerLogoLinkUrl || ""}
+                  visibleLabel={block.footerLogoAlt || "{{hotel_name}}"}
+                  onChangeUrl={(footerLogoLinkUrl) =>
+                    onChange((b) =>
+                      b.type === "footer_copyright" ? { ...b, footerLogoLinkUrl } : b
+                    )
+                  }
+                  allowEmpty
+                  resolvedVariables={effectiveVars}
+                  compact
+                />
+              </div>
+            </div>
+          )}
+          <BlockStyleControls
+            style={block.style}
+            showAlign
+            showBorder
+            showTypography
+            onChange={(style) =>
+              onChange((b) => (b.type === "footer_copyright" ? { ...b, style } : b))
+            }
+          />
+        </div>
+      );
+
+    case "footer_powered_by":
+      return (
+        <div className="space-y-3">
+          <p className="text-[11px] text-zinc-500">
+            Optional credit line (off by default on all templates). Edit freely, hide, or delete anytime.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label className={labelClass}>Credit Text</label>
+              <input
+                type="text"
+                value={block.text}
+                onChange={(e) =>
+                  onChange((b) =>
+                    b.type === "footer_powered_by" ? { ...b, text: e.target.value } : b
+                  )
+                }
+                placeholder="Powered by"
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Optional Link Label</label>
+              <input
+                type="text"
+                value={block.linkLabel || ""}
+                onChange={(e) =>
+                  onChange((b) =>
+                    b.type === "footer_powered_by" ? { ...b, linkLabel: e.target.value } : b
+                  )
+                }
+                placeholder="{{hotel_name}}"
+                className={inputClass}
+              />
+            </div>
+          </div>
+          <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5">
+            <LinkDestinationField
+              label="Optional Credit Link URL"
+              url={block.linkUrl || ""}
+              visibleLabel={block.linkLabel || block.text}
+              onChangeUrl={(linkUrl) =>
+                onChange((b) => (b.type === "footer_powered_by" ? { ...b, linkUrl } : b))
+              }
+              allowEmpty
+              resolvedVariables={effectiveVars}
+              color={block.linkColor}
+              onChangeColor={(linkColor) =>
+                onChange((b) => (b.type === "footer_powered_by" ? { ...b, linkColor } : b))
+              }
+              underline={block.underline}
+              onChangeUnderline={(underline) =>
+                onChange((b) => (b.type === "footer_powered_by" ? { ...b, underline } : b))
+              }
+              openInNewTab={block.openInNewTab}
+              onChangeOpenInNewTab={(openInNewTab) =>
+                onChange((b) => (b.type === "footer_powered_by" ? { ...b, openInNewTab } : b))
+              }
+              hidden={block.linkHidden}
+              onChangeHidden={(linkHidden) =>
+                onChange((b) => (b.type === "footer_powered_by" ? { ...b, linkHidden } : b))
+              }
+              compact
+            />
+          </div>
+          <BlockStyleControls
+            style={block.style}
+            showAlign
+            showTypography
+            onChange={(style) =>
+              onChange((b) => (b.type === "footer_powered_by" ? { ...b, style } : b))
             }
           />
         </div>

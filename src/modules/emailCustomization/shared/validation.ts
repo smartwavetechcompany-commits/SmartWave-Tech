@@ -1,4 +1,6 @@
 import {
+  ALLOWED_CONTACT_URL_VARIABLES,
+  ALLOWED_DEFAULT_FOOTER_BLOCK_TYPES,
   ALLOWED_TEMPLATE_VARIABLES,
   ALLOWED_URL_VARIABLES,
   DEFAULT_HOTEL_EMAIL_SETTINGS,
@@ -15,11 +17,18 @@ import {
   type EmailIconTone,
   type EmailRenderContext,
   type EmailTemplateVariant,
+  type FooterNavLinkItem,
+  type HotelDefaultLinks,
   type HotelEmailSettings,
+  type InlineTextLink,
+  type LocalizedLinkValue,
+  type SupportedEmailLanguage,
+  type TemplateLinkOverviewItem,
   type WebSafeFontId,
 } from "./types.ts";
 
 const ALLOWED_VAR_SET = new Set<string>(ALLOWED_TEMPLATE_VARIABLES);
+const ALLOWED_DEFAULT_FOOTER_TYPE_SET = new Set<string>(ALLOWED_DEFAULT_FOOTER_BLOCK_TYPES);
 const WEB_SAFE_FONT_SET = new Set<string>(WEB_SAFE_FONTS.map((f) => f.id));
 const EMAIL_ICON_SET = new Set<string>(EMAIL_ICON_NAMES);
 const EMAIL_ICON_TONE_SET = new Set<string>(EMAIL_ICON_TONES);
@@ -120,11 +129,23 @@ export interface UrlValidationResult {
   error?: string;
 }
 
+function isLocalhostOrIpHost(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase().replace(/\.$/, "");
+  if (!host) return true;
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  // IPv4 literal
+  if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(host)) return true;
+  // Numeric / hex / octal single-label or IPv6 literal
+  if (/^\d+$/.test(host) || host.startsWith("[") || host.includes(":")) return true;
+  return false;
+}
+
 /**
  * Strict URL validation used on BOTH save and render:
  * - Allows https:// URLs only (plus mailto: and tel: when `allowContactSchemes` is true)
- * - Allows exact allow-listed link variables (`{{portal_link}}`, `{{hotel_website}}`, `{{booking_link}}`, `{{app_url}}`) when `allowVariableToken` is true
- * - Rejects http:, javascript:, data:, vbscript:, credentials (user:pass@), and overly long or malformed URLs
+ * - Allows exact allow-listed link variables (`{{portal_link}}`, `{{hotel_website}}`, etc.) when `allowVariableToken` is true
+ * - Allows `mailto:{{hotel_email}}` and `tel:{{hotel_phone}}` when both `allowVariableToken` and `allowContactSchemes` are true
+ * - Rejects http:, javascript:, data:, vbscript:, file:, localhost, IP literals, credentials (user:pass@), mailto query injection (?cc=/?bcc=/?body=), and overly long or malformed URLs
  */
 export function validateEmailUrl(
   rawUrl: unknown,
@@ -149,10 +170,10 @@ export function validateEmailUrl(
     };
   }
 
-  if (/[\x00-\x1f\x7f\s]/.test(trimmed)) {
+  if (/[\x00-\x1f\x7f]/.test(trimmed)) {
     return {
       valid: false,
-      error: `${field} must not contain spaces or control characters.`,
+      error: `${field} must not contain control characters.`,
     };
   }
 
@@ -160,15 +181,24 @@ export function validateEmailUrl(
     return { valid: true, normalized: trimmed };
   }
 
+  if (
+    options.allowVariableToken &&
+    options.allowContactSchemes &&
+    ALLOWED_CONTACT_URL_VARIABLES.has(trimmed)
+  ) {
+    return { valid: true, normalized: trimmed };
+  }
+
   const lower = trimmed.toLowerCase();
   if (
     lower.startsWith("javascript:") ||
     lower.startsWith("data:") ||
-    lower.startsWith("vbscript:")
+    lower.startsWith("vbscript:") ||
+    lower.startsWith("file:")
   ) {
     return {
       valid: false,
-      error: `${field} cannot use javascript:, data:, or scriptable URLs.`,
+      error: `${field} cannot use javascript:, data:, vbscript:, or file: URLs.`,
     };
   }
 
@@ -176,7 +206,16 @@ export function validateEmailUrl(
     if (!options.allowContactSchemes) {
       return { valid: false, error: `${field} must start with https://.` };
     }
-    const addr = trimmed.slice(7).split("?")[0].trim();
+    if (/\s/.test(trimmed)) {
+      return { valid: false, error: `${field} must not contain spaces.` };
+    }
+    if (trimmed.includes("?")) {
+      return {
+        valid: false,
+        error: `${field} must be a plain mailto:email@domain address without ?query parameters.`,
+      };
+    }
+    const addr = trimmed.slice(7).trim();
     if (!isValidEmail(addr)) {
       return { valid: false, error: `${field} contains an invalid mailto: email address.` };
     }
@@ -187,11 +226,25 @@ export function validateEmailUrl(
     if (!options.allowContactSchemes) {
       return { valid: false, error: `${field} must start with https://.` };
     }
+    if (/[?;#]/.test(trimmed)) {
+      return {
+        valid: false,
+        error: `${field} contains unsupported characters in tel: phone number.`,
+      };
+    }
     const phone = trimmed.slice(4).trim();
-    if (!/^\+?[0-9()\-.\s]{5,30}$/.test(phone)) {
+    const digitsCount = (phone.match(/\d/g) || []).length;
+    if (!/^\+?[0-9()\-.\s]{5,30}$/.test(phone) || digitsCount < 5) {
       return { valid: false, error: `${field} contains an invalid tel: phone number.` };
     }
     return { valid: true, normalized: `tel:${phone.replace(/\s+/g, "")}` };
+  }
+
+  if (/\s/.test(trimmed)) {
+    return {
+      valid: false,
+      error: `${field} must not contain spaces or control characters.`,
+    };
   }
 
   let parsed: URL;
@@ -218,10 +271,10 @@ export function validateEmailUrl(
     };
   }
 
-  if (!parsed.hostname || !parsed.hostname.includes(".")) {
+  if (!parsed.hostname || !parsed.hostname.includes(".") || isLocalhostOrIpHost(parsed.hostname)) {
     return {
       valid: false,
-      error: `${field} must include a valid public domain name.`,
+      error: `${field} must include a valid public domain name (localhost and raw IP addresses are not allowed).`,
     };
   }
 
@@ -231,6 +284,87 @@ export function validateEmailUrl(
       : parsed.toString();
 
   return { valid: true, normalized };
+}
+
+function normalizeHostForCompare(host: string): string {
+  return host.trim().toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+}
+
+function extractVisibleHostsFromText(text: string): string[] {
+  const cleaned = String(text || "").replace(/\{\{[^}]*\}\}/g, " ");
+  const hosts = new Set<string>();
+
+  // 1. Explicit http:// or https:// URLs in visible label text
+  const urlRe = /https?:\/\/([^\s/?#]+)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = urlRe.exec(cleaned)) !== null) {
+    const rawHost = m[1].split(":")[0].replace(/[),.;!?]+$/, "");
+    if (rawHost && rawHost.includes(".")) {
+      hosts.add(normalizeHostForCompare(rawHost));
+    }
+  }
+
+  // 2. Explicit www.domain.tld in visible label text
+  const wwwRe = /\bwww\.([a-z0-9-]+(?:\.[a-z0-9-]+)+)/gi;
+  while ((m = wwwRe.exec(cleaned)) !== null) {
+    hosts.add(normalizeHostForCompare(m[1]));
+  }
+
+  // 3. Bare domain-like strings (excluding email addresses preceded by @)
+  const bareDomainRe =
+    /(^|[\s([{"'])([a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|de|eu|io|co|uk|ch|at|fr|es|it|nl|app|dev|hotel|hotels|example|biz|info|gov|edu|bank))(?=\/|\s|$|[)\]}"',;!?])/gi;
+  while ((m = bareDomainRe.exec(cleaned)) !== null) {
+    const matchStart = m.index + (m[1] ? m[1].length : 0);
+    if (matchStart > 0 && cleaned[matchStart - 1] === "@") continue;
+    hosts.add(normalizeHostForCompare(m[2]));
+  }
+
+  return Array.from(hosts).filter(Boolean);
+}
+
+/**
+ * Phishing protection: warns/blocks when visible link text looks like a URL or domain
+ * (e.g. "https://bank.com" or "www.trusted.com") whose domain does not match the real destination URL.
+ */
+export function validateLinkLabelAgainstUrl(
+  label: string | undefined,
+  destinationUrl: string | undefined,
+  fieldName = "Link"
+): { valid: boolean; error?: string } {
+  if (!label || !destinationUrl) return { valid: true };
+  const dest = destinationUrl.trim();
+  if (
+    !dest ||
+    ALLOWED_URL_VARIABLES.has(dest) ||
+    ALLOWED_CONTACT_URL_VARIABLES.has(dest) ||
+    dest.toLowerCase().startsWith("mailto:") ||
+    dest.toLowerCase().startsWith("tel:")
+  ) {
+    return { valid: true };
+  }
+
+  let destHost = "";
+  try {
+    const parsed = new URL(dest);
+    if (parsed.protocol !== "https:") return { valid: true };
+    destHost = normalizeHostForCompare(parsed.hostname);
+  } catch {
+    return { valid: true };
+  }
+
+  if (!destHost) return { valid: true };
+
+  const visibleHosts = extractVisibleHostsFromText(label);
+  for (const visHost of visibleHosts) {
+    if (visHost !== destHost) {
+      return {
+        valid: false,
+        error: `${fieldName} text displays "${visHost}", which does not match destination "${destHost}". Use matching domains or descriptive button text.`,
+      };
+    }
+  }
+
+  return { valid: true };
 }
 
 /**
@@ -334,6 +468,80 @@ function validateBlockStyleConfig(
       message: `Block #${blockNumber} border radius must be between 0 and 16 px.`,
     });
   }
+  if (style.fontFamily !== undefined && !isValidWebSafeFont(style.fontFamily)) {
+    issues.push({
+      path: `${prefix}.style.fontFamily`,
+      message: `Block #${blockNumber} font must be selected from the web-safe font list.`,
+    });
+  }
+  if (
+    style.fontSizePx !== undefined &&
+    (!Number.isFinite(style.fontSizePx) || style.fontSizePx < 10 || style.fontSizePx > 24)
+  ) {
+    issues.push({
+      path: `${prefix}.style.fontSizePx`,
+      message: `Block #${blockNumber} font size must be between 10 and 24 px.`,
+    });
+  }
+}
+
+function validateInlineLinksList(
+  inlineLinks: InlineTextLink[] | undefined,
+  prefix: string,
+  blockNumber: number,
+  issues: ValidationIssue[]
+): void {
+  if (!inlineLinks || inlineLinks.length === 0) return;
+  if (!Array.isArray(inlineLinks)) {
+    issues.push({
+      path: `${prefix}.inlineLinks`,
+      message: `Block #${blockNumber} inline links must be a list.`,
+    });
+    return;
+  }
+  if (inlineLinks.length > 20) {
+    issues.push({
+      path: `${prefix}.inlineLinks`,
+      message: `Block #${blockNumber} cannot have more than 20 inline links.`,
+    });
+  }
+  inlineLinks.forEach((link, idx) => {
+    const lp = `${prefix}.inlineLinks[${idx}]`;
+    const labelName = `Block #${blockNumber} inline link #${idx + 1}`;
+    if (!link || !link.id || typeof link.id !== "string") {
+      issues.push({ path: `${lp}.id`, message: `${labelName} is missing an ID.` });
+      return;
+    }
+    if (!link.label || !link.label.trim()) {
+      issues.push({ path: `${lp}.label`, message: `${labelName} requires visible link text.` });
+    } else {
+      const lv = validateTemplateVariables(link.label, `${labelName} text`);
+      if (!lv.valid && lv.error) issues.push({ path: `${lp}.label`, message: lv.error });
+    }
+    if (!link.hidden) {
+      const uc = validateEmailUrl(link.url, {
+        allowVariableToken: true,
+        allowContactSchemes: true,
+        fieldName: `${labelName} URL`,
+      });
+      if (!uc.valid && uc.error) issues.push({ path: `${lp}.url`, message: uc.error });
+      if (uc.valid && uc.normalized && link.label) {
+        const phish = validateLinkLabelAgainstUrl(link.label, uc.normalized, labelName);
+        if (!phish.valid && phish.error) issues.push({ path: `${lp}.label`, message: phish.error });
+      }
+    } else if (link.url && link.url.trim()) {
+      const uc = validateEmailUrl(link.url, {
+        allowEmpty: true,
+        allowVariableToken: true,
+        allowContactSchemes: true,
+        fieldName: `${labelName} URL`,
+      });
+      if (!uc.valid && uc.error) issues.push({ path: `${lp}.url`, message: uc.error });
+    }
+    if (link.color && !isValidHexColor(link.color)) {
+      issues.push({ path: `${lp}.color`, message: `${labelName} color must be a valid hex color.` });
+    }
+  });
 }
 
 function validateModernButtonProps(
@@ -344,16 +552,19 @@ function validateModernButtonProps(
     buttonCorner?: string;
     buttonBgColor?: string;
     buttonTextColor?: string;
+    buttonBorderColor?: string;
+    buttonHidden?: boolean;
   },
   prefix: string,
   blockNumber: number,
   required: boolean,
   issues: ValidationIssue[]
 ): void {
+  const isHidden = block.buttonHidden === true;
   const hasLabel = Boolean(block.buttonLabel && block.buttonLabel.trim());
   const hasUrl = Boolean(block.buttonUrl && block.buttonUrl.trim());
 
-  if (required && !hasLabel) {
+  if (required && !isHidden && !hasLabel) {
     issues.push({
       path: `${prefix}.buttonLabel`,
       message: `Block #${blockNumber} requires button label text.`,
@@ -363,10 +574,29 @@ function validateModernButtonProps(
     if (!lv.valid && lv.error) issues.push({ path: `${prefix}.buttonLabel`, message: lv.error });
   }
 
-  if (required || hasLabel || hasUrl) {
+  if (!isHidden && (required || hasLabel || hasUrl)) {
     const uc = validateEmailUrl(block.buttonUrl, {
       allowEmpty: !required && !hasLabel,
       allowVariableToken: true,
+      allowContactSchemes: true,
+      fieldName: `Block #${blockNumber} button URL`,
+    });
+    if (!uc.valid && uc.error) issues.push({ path: `${prefix}.buttonUrl`, message: uc.error });
+    if (uc.valid && uc.normalized && hasLabel) {
+      const phish = validateLinkLabelAgainstUrl(
+        block.buttonLabel,
+        uc.normalized,
+        `Block #${blockNumber} button`
+      );
+      if (!phish.valid && phish.error) {
+        issues.push({ path: `${prefix}.buttonLabel`, message: phish.error });
+      }
+    }
+  } else if (hasUrl) {
+    const uc = validateEmailUrl(block.buttonUrl, {
+      allowEmpty: true,
+      allowVariableToken: true,
+      allowContactSchemes: true,
       fieldName: `Block #${blockNumber} button URL`,
     });
     if (!uc.valid && uc.error) issues.push({ path: `${prefix}.buttonUrl`, message: uc.error });
@@ -396,6 +626,12 @@ function validateModernButtonProps(
       message: `Block #${blockNumber} button text color must be a valid hex color.`,
     });
   }
+  if (block.buttonBorderColor && !isValidHexColor(block.buttonBorderColor)) {
+    issues.push({
+      path: `${prefix}.buttonBorderColor`,
+      message: `Block #${blockNumber} button border color must be a valid hex color.`,
+    });
+  }
 }
 
 export function validateTemplateVariant(variant: EmailTemplateVariant): ValidationIssue[] {
@@ -405,7 +641,13 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
     return [{ path: "variant", message: "Template data is missing." }];
   }
 
-  if (variant.schemaVersion !== undefined && variant.schemaVersion !== 1 && variant.schemaVersion !== 2) {
+  if (
+    variant.schemaVersion !== undefined &&
+    variant.schemaVersion !== 1 &&
+    variant.schemaVersion !== 2 &&
+    variant.schemaVersion !== 3 &&
+    variant.schemaVersion !== 4
+  ) {
     issues.push({ path: "schemaVersion", message: "Unsupported template schema version." });
   }
 
@@ -463,6 +705,13 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
       const lv = validateEmailUrl(b.logoUrl, { fieldName: "Logo URL" });
       if (!lv.valid && lv.error) issues.push({ path: "branding.logoUrl", message: lv.error });
     }
+    if (b.logoLinkUrl && b.logoLinkUrl.trim()) {
+      const llv = validateEmailUrl(b.logoLinkUrl, {
+        allowVariableToken: true,
+        fieldName: "Logo Link URL",
+      });
+      if (!llv.valid && llv.error) issues.push({ path: "branding.logoLinkUrl", message: llv.error });
+    }
   }
 
   if (!Array.isArray(variant.blocks) || variant.blocks.length === 0) {
@@ -498,24 +747,48 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
     "image_with_list",
     "footer_nav",
     "legal_section",
+    "footer_contact",
+    "footer_authenticity",
+    "footer_copyright",
+    "footer_legal",
+    "footer_powered_by",
   ]);
 
+  variant.blocks.forEach((block: EmailBlock, idx: number) => {
+    validateEmailBlock(block, idx, `blocks[${idx}]`, allowedBlockTypes, issues);
+  });
+
+  return issues;
+}
+
+export function validateEmailBlock(
+  block: EmailBlock,
+  idx: number,
+  prefix: string,
+  allowedBlockTypes: Set<string>,
+  issues: ValidationIssue[]
+): void {
+  const num = idx + 1;
   const checkVar = (text: string | undefined, path: string, label: string) => {
     if (!text) return;
     const res = validateTemplateVariables(text, label);
     if (!res.valid && res.error) issues.push({ path, message: res.error });
   };
 
-  variant.blocks.forEach((block: EmailBlock, idx: number) => {
-    const prefix = `blocks[${idx}]`;
-    const num = idx + 1;
-    if (!block || !allowedBlockTypes.has(block.type)) {
-      issues.push({
-        path: prefix,
-        message: `Block #${num} uses an unsupported block type.`,
-      });
-      return;
-    }
+  if (!block || !allowedBlockTypes.has(block.type)) {
+    issues.push({
+      path: prefix,
+      message: `Block #${num} uses an unsupported block type.`,
+    });
+    return;
+  }
+
+  if (block.hidden !== undefined && typeof block.hidden !== "boolean") {
+    issues.push({
+      path: `${prefix}.hidden`,
+      message: `Block #${num} visibility flag must be a boolean.`,
+    });
+  }
 
     switch (block.type) {
       case "heading": {
@@ -527,6 +800,7 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
       }
       case "paragraph": {
         checkVar(block.text, `${prefix}.text`, `Paragraph block #${num}`);
+        validateInlineLinksList(block.inlineLinks, prefix, num, issues);
         break;
       }
       case "image": {
@@ -563,9 +837,35 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
         checkVar(block.prefixText, `${prefix}.prefixText`, `Link/Button block #${num} surrounding text`);
         const uc = validateEmailUrl(block.url, {
           allowVariableToken: true,
+          allowContactSchemes: true,
           fieldName: `Link/Button block #${num} URL`,
         });
         if (!uc.valid && uc.error) issues.push({ path: `${prefix}.url`, message: uc.error });
+        if (uc.valid && uc.normalized && block.label) {
+          const phish = validateLinkLabelAgainstUrl(
+            block.label,
+            uc.normalized,
+            `Link/Button block #${num}`
+          );
+          if (!phish.valid && phish.error) {
+            issues.push({ path: `${prefix}.label`, message: phish.error });
+          }
+        }
+        if (block.bgColor && !isValidHexColor(block.bgColor)) {
+          issues.push({ path: `${prefix}.bgColor`, message: `Link/Button block #${num} color must be a valid hex color.` });
+        }
+        if (block.textColor && !isValidHexColor(block.textColor)) {
+          issues.push({ path: `${prefix}.textColor`, message: `Link/Button block #${num} text color must be a valid hex color.` });
+        }
+        if (block.borderColor && !isValidHexColor(block.borderColor)) {
+          issues.push({ path: `${prefix}.borderColor`, message: `Link/Button block #${num} border color must be a valid hex color.` });
+        }
+        if (
+          block.borderRadiusPx !== undefined &&
+          (!Number.isFinite(block.borderRadiusPx) || block.borderRadiusPx < 0 || block.borderRadiusPx > 999)
+        ) {
+          issues.push({ path: `${prefix}.borderRadiusPx`, message: `Link/Button block #${num} corner radius must be between 0 and 999.` });
+        }
         break;
       }
       case "booking_details_table": {
@@ -585,6 +885,7 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
         ] as const) {
           checkVar((block as any)[k], `${prefix}.${k}`, `${label} (block #${num})`);
         }
+        validateInlineLinksList(block.inlineLinks, prefix, num, issues);
         break;
       }
       case "social_links": {
@@ -595,12 +896,22 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
               path: `${prefix}.links[${lIdx}].label`,
               message: `Social link #${lIdx + 1} requires label text.`,
             });
+          } else {
+            checkVar(item.label, `${prefix}.links[${lIdx}].label`, `Social link #${lIdx + 1} label`);
           }
           const lc = validateEmailUrl(item.url, {
+            allowEmpty: item.hidden === true,
             allowVariableToken: true,
             fieldName: `Social link "${item.label || lIdx + 1}" URL`,
           });
           if (!lc.valid && lc.error) issues.push({ path: `${prefix}.links[${lIdx}].url`, message: lc.error });
+          if (lc.valid && lc.normalized && item.label) {
+            const phish = validateLinkLabelAgainstUrl(item.label, lc.normalized, `Social link "${item.label}"`);
+            if (!phish.valid && phish.error) issues.push({ path: `${prefix}.links[${lIdx}].label`, message: phish.error });
+          }
+          if (item.color && !isValidHexColor(item.color)) {
+            issues.push({ path: `${prefix}.links[${lIdx}].color`, message: `Social link #${lIdx + 1} color must be a valid hex color.` });
+          }
         });
         break;
       }
@@ -609,6 +920,9 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
         (block.fields || []).forEach((f, fIdx) => {
           checkVar(f.label, `${prefix}.fields[${fIdx}].label`, `Contact field #${fIdx + 1} label`);
           checkVar(f.valueTemplate, `${prefix}.fields[${fIdx}].valueTemplate`, `Contact field #${fIdx + 1} value`);
+          if (f.linkColor && !isValidHexColor(f.linkColor)) {
+            issues.push({ path: `${prefix}.fields[${fIdx}].linkColor`, message: `Contact field #${fIdx + 1} link color must be a valid hex color.` });
+          }
         });
         checkVar(block.legalImprintText, `${prefix}.legalImprintText`, "Legal/Imprint text");
         checkVar(block.footerNote, `${prefix}.footerNote`, "Footer note");
@@ -633,6 +947,29 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
             checkVar(block.logoAlt, `${prefix}.logoAlt`, `Header block #${num} logo alt text`);
           }
         }
+        if (block.logoLinkUrl && block.logoLinkUrl.trim()) {
+          const llc = validateEmailUrl(block.logoLinkUrl, {
+            allowVariableToken: true,
+            fieldName: `Header block #${num} logo link URL`,
+          });
+          if (!llc.valid && llc.error) issues.push({ path: `${prefix}.logoLinkUrl`, message: llc.error });
+        }
+        if (block.emailOverride && block.emailOverride.trim()) {
+          const eo = block.emailOverride.trim();
+          if (eo !== "{{hotel_email}}" && !isValidEmail(eo)) {
+            issues.push({ path: `${prefix}.emailOverride`, message: `Header block #${num} email override must be a valid email address.` });
+          }
+        }
+        if (block.phoneOverride && block.phoneOverride.trim()) {
+          const po = block.phoneOverride.trim();
+          if (po !== "{{hotel_phone}}") {
+            const tc = validateEmailUrl(`tel:${po}`, {
+              allowContactSchemes: true,
+              fieldName: `Header block #${num} phone override`,
+            });
+            if (!tc.valid && tc.error) issues.push({ path: `${prefix}.phoneOverride`, message: tc.error });
+          }
+        }
         break;
       }
 
@@ -654,6 +991,13 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
           } else {
             checkVar(block.imageAlt, `${prefix}.imageAlt`, `Promo banner #${num} image alt text`);
           }
+        }
+        if (block.imageLinkUrl && block.imageLinkUrl.trim()) {
+          const ilc = validateEmailUrl(block.imageLinkUrl, {
+            allowVariableToken: true,
+            fieldName: `Promo banner #${num} image link URL`,
+          });
+          if (!ilc.valid && ilc.error) issues.push({ path: `${prefix}.imageLinkUrl`, message: ilc.error });
         }
         validateModernButtonProps(block, prefix, num, true, issues);
         break;
@@ -698,6 +1042,7 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
           checkVar(block.headline, `${prefix}.headline`, `Hero text #${num} headline`);
         }
         checkVar(block.body, `${prefix}.body`, `Hero text #${num} body`);
+        validateInlineLinksList(block.inlineLinks, prefix, num, issues);
         validateModernButtonProps(block, prefix, num, false, issues);
         break;
       }
@@ -737,12 +1082,20 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
         } else {
           checkVar(block.imageAlt, `${prefix}.imageAlt`, `Feature card #${num} image alt text`);
         }
+        if (block.imageLinkUrl && block.imageLinkUrl.trim()) {
+          const ilc = validateEmailUrl(block.imageLinkUrl, {
+            allowVariableToken: true,
+            fieldName: `Feature card #${num} image link URL`,
+          });
+          if (!ilc.valid && ilc.error) issues.push({ path: `${prefix}.imageLinkUrl`, message: ilc.error });
+        }
         if (!block.title || !block.title.trim()) {
           issues.push({ path: `${prefix}.title`, message: `Feature card #${num} requires a title.` });
         } else {
           checkVar(block.title, `${prefix}.title`, `Feature card #${num} title`);
         }
         checkVar(block.body, `${prefix}.body`, `Feature card #${num} body`);
+        validateInlineLinksList(block.inlineLinks, prefix, num, issues);
         validateModernButtonProps(block, prefix, num, false, issues);
         break;
       }
@@ -758,6 +1111,13 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
           } else {
             checkVar(block.badgeImageAlt, `${prefix}.badgeImageAlt`, `Benefits list #${num} badge alt`);
           }
+        }
+        if (block.badgeImageLinkUrl && block.badgeImageLinkUrl.trim()) {
+          const blc = validateEmailUrl(block.badgeImageLinkUrl, {
+            allowVariableToken: true,
+            fieldName: `Benefits list #${num} badge image link URL`,
+          });
+          if (!blc.valid && blc.error) issues.push({ path: `${prefix}.badgeImageLinkUrl`, message: blc.error });
         }
         if (!block.heading || !block.heading.trim()) {
           issues.push({ path: `${prefix}.heading`, message: `Benefits list #${num} requires a heading.` });
@@ -781,6 +1141,7 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
           });
         }
         checkVar(block.footnote, `${prefix}.footnote`, `Benefits list #${num} footnote`);
+        validateInlineLinksList(block.inlineLinks, prefix, num, issues);
         validateModernButtonProps(block, prefix, num, false, issues);
         break;
       }
@@ -808,10 +1169,16 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
               checkVar(it.label, `${prefix}.items[${iIdx}].label`, `Icon link #${iIdx + 1} label`);
             }
             const uc = validateEmailUrl(it.url, {
+              allowEmpty: it.hidden === true,
               allowVariableToken: true,
+              allowContactSchemes: true,
               fieldName: `Icon link "${it.label || iIdx + 1}" URL`,
             });
             if (!uc.valid && uc.error) issues.push({ path: `${prefix}.items[${iIdx}].url`, message: uc.error });
+            if (uc.valid && uc.normalized && it.label) {
+              const phish = validateLinkLabelAgainstUrl(it.label, uc.normalized, `Icon link "${it.label}"`);
+              if (!phish.valid && phish.error) issues.push({ path: `${prefix}.items[${iIdx}].label`, message: phish.error });
+            }
           });
         }
         break;
@@ -825,6 +1192,13 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
           issues.push({ path: `${prefix}.imageAlt`, message: `Image + List #${num} requires image alt text.` });
         } else {
           checkVar(block.imageAlt, `${prefix}.imageAlt`, `Image + List #${num} image alt text`);
+        }
+        if (block.imageLinkUrl && block.imageLinkUrl.trim()) {
+          const ilc = validateEmailUrl(block.imageLinkUrl, {
+            allowVariableToken: true,
+            fieldName: `Image + List #${num} image link URL`,
+          });
+          if (!ilc.valid && ilc.error) issues.push({ path: `${prefix}.imageLinkUrl`, message: ilc.error });
         }
         if (!block.heading || !block.heading.trim()) {
           issues.push({ path: `${prefix}.heading`, message: `Image + List #${num} requires a heading.` });
@@ -840,6 +1214,7 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
           }
           checkVar(it.text, `${prefix}.items[${iIdx}].text`, `Feature item #${iIdx + 1} text`);
         });
+        validateInlineLinksList(block.inlineLinks, prefix, num, issues);
         validateModernButtonProps(block, prefix, num, false, issues);
         break;
       }
@@ -856,19 +1231,39 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
               checkVar(l.label, `${prefix}.links[${lIdx}].label`, `Footer link #${lIdx + 1} label`);
             }
             const uc = validateEmailUrl(l.url, {
+              allowEmpty: l.hidden === true,
               allowVariableToken: true,
+              allowContactSchemes: true,
               fieldName: `Footer link "${l.label || lIdx + 1}" URL`,
             });
             if (!uc.valid && uc.error) issues.push({ path: `${prefix}.links[${lIdx}].url`, message: uc.error });
+            if (uc.valid && uc.normalized && l.label) {
+              const phish = validateLinkLabelAgainstUrl(l.label, uc.normalized, `Footer link "${l.label}"`);
+              if (!phish.valid && phish.error) issues.push({ path: `${prefix}.links[${lIdx}].label`, message: phish.error });
+            }
+            if (l.color && !isValidHexColor(l.color)) {
+              issues.push({ path: `${prefix}.links[${lIdx}].color`, message: `Footer link #${lIdx + 1} color must be a valid hex color.` });
+            }
           });
         }
         checkVar(block.secondaryText, `${prefix}.secondaryText`, `Footer navigation #${num} secondary text`);
         if (block.secondaryLinkUrl && block.secondaryLinkUrl.trim()) {
           const sc = validateEmailUrl(block.secondaryLinkUrl, {
             allowVariableToken: true,
+            allowContactSchemes: true,
             fieldName: `Footer navigation #${num} secondary URL`,
           });
           if (!sc.valid && sc.error) issues.push({ path: `${prefix}.secondaryLinkUrl`, message: sc.error });
+          if (sc.valid && sc.normalized && block.secondaryText) {
+            const phish = validateLinkLabelAgainstUrl(
+              block.secondaryText,
+              sc.normalized,
+              `Footer navigation #${num} secondary link`
+            );
+            if (!phish.valid && phish.error) {
+              issues.push({ path: `${prefix}.secondaryText`, message: phish.error });
+            }
+          }
         }
         break;
       }
@@ -879,6 +1274,7 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
           checkVar(sec.heading, `${prefix}.sections[${sIdx}].heading`, `Legal section #${sIdx + 1} heading`);
           checkVar(sec.body, `${prefix}.sections[${sIdx}].body`, `Legal section #${sIdx + 1} body`);
         });
+        validateInlineLinksList(block.inlineLinks, prefix, num, issues);
         checkVar(block.copyrightText, `${prefix}.copyrightText`, `Legal section #${num} copyright`);
         if (block.showFooterLogo && block.footerLogoUrl && block.footerLogoUrl.trim()) {
           const fl = validateEmailUrl(block.footerLogoUrl, { fieldName: `Legal section #${num} footer logo URL` });
@@ -889,15 +1285,113 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
             checkVar(block.footerLogoAlt, `${prefix}.footerLogoAlt`, `Legal section #${num} footer logo alt`);
           }
         }
+        if (block.footerLogoLinkUrl && block.footerLogoLinkUrl.trim()) {
+          const fll = validateEmailUrl(block.footerLogoLinkUrl, {
+            allowVariableToken: true,
+            fieldName: `Legal section #${num} footer logo link URL`,
+          });
+          if (!fll.valid && fll.error) issues.push({ path: `${prefix}.footerLogoLinkUrl`, message: fll.error });
+        }
+        break;
+      }
+
+      case "footer_contact":
+      case "footer_authenticity":
+      case "footer_legal": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        const label =
+          block.type === "footer_contact"
+            ? `Contact Us block #${num}`
+            : block.type === "footer_authenticity"
+              ? `Confirmation Authenticity block #${num}`
+              : `Legal / Imprint block #${num}`;
+        checkVar(block.heading, `${prefix}.heading`, `${label} heading`);
+        checkVar(block.text, `${prefix}.text`, `${label} text`);
+        validateInlineLinksList(block.inlineLinks, prefix, num, issues);
+        if (block.type === "footer_contact") {
+          if (block.emailOverride && block.emailOverride.trim()) {
+            const eo = block.emailOverride.trim();
+            if (eo !== "{{hotel_email}}" && !isValidEmail(eo)) {
+              issues.push({ path: `${prefix}.emailOverride`, message: `${label} email override must be a valid email address.` });
+            }
+          }
+          if (block.phoneOverride && block.phoneOverride.trim()) {
+            const po = block.phoneOverride.trim();
+            if (po !== "{{hotel_phone}}") {
+              const tc = validateEmailUrl(`tel:${po}`, {
+                allowContactSchemes: true,
+                fieldName: `${label} phone override`,
+              });
+              if (!tc.valid && tc.error) issues.push({ path: `${prefix}.phoneOverride`, message: tc.error });
+            }
+          }
+          if (block.linkColor && !isValidHexColor(block.linkColor)) {
+            issues.push({ path: `${prefix}.linkColor`, message: `${label} link color must be a valid hex color.` });
+          }
+        }
+        break;
+      }
+
+      case "footer_copyright": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        checkVar(block.text, `${prefix}.text`, `Copyright block #${num} text`);
+        validateInlineLinksList(block.inlineLinks, prefix, num, issues);
+        if (block.footerLogoUrl && block.footerLogoUrl.trim()) {
+          const fl = validateEmailUrl(block.footerLogoUrl, {
+            fieldName: `Copyright block #${num} footer logo URL`,
+          });
+          if (!fl.valid && fl.error) issues.push({ path: `${prefix}.footerLogoUrl`, message: fl.error });
+        }
+        if (block.showFooterLogo && block.footerLogoUrl && block.footerLogoUrl.trim()) {
+          if (!block.footerLogoAlt || !block.footerLogoAlt.trim()) {
+            issues.push({
+              path: `${prefix}.footerLogoAlt`,
+              message: `Copyright block #${num} requires alt text for its footer logo.`,
+            });
+          } else {
+            checkVar(block.footerLogoAlt, `${prefix}.footerLogoAlt`, `Copyright block #${num} footer logo alt`);
+          }
+        }
+        if (block.footerLogoLinkUrl && block.footerLogoLinkUrl.trim()) {
+          const fll = validateEmailUrl(block.footerLogoLinkUrl, {
+            allowVariableToken: true,
+            fieldName: `Copyright block #${num} footer logo link URL`,
+          });
+          if (!fll.valid && fll.error) issues.push({ path: `${prefix}.footerLogoLinkUrl`, message: fll.error });
+        }
+        break;
+      }
+
+      case "footer_powered_by": {
+        validateBlockStyleConfig(block.style, prefix, num, issues);
+        checkVar(block.text, `${prefix}.text`, `Powered by block #${num} text`);
+        checkVar(block.linkLabel, `${prefix}.linkLabel`, `Powered by block #${num} link label`);
+        if (block.linkUrl && block.linkUrl.trim()) {
+          const lc = validateEmailUrl(block.linkUrl, {
+            allowVariableToken: true,
+            fieldName: `Powered by block #${num} link URL`,
+          });
+          if (!lc.valid && lc.error) issues.push({ path: `${prefix}.linkUrl`, message: lc.error });
+          if (lc.valid && lc.normalized && block.linkLabel) {
+            const phish = validateLinkLabelAgainstUrl(
+              block.linkLabel,
+              lc.normalized,
+              `Powered by block #${num} link`
+            );
+            if (!phish.valid && phish.error) {
+              issues.push({ path: `${prefix}.linkLabel`, message: phish.error });
+            }
+          }
+        }
+        if (block.linkColor && !isValidHexColor(block.linkColor)) {
+          issues.push({ path: `${prefix}.linkColor`, message: `Powered by block #${num} link color must be a valid hex color.` });
+        }
         break;
       }
 
       default:
         break;
     }
-  });
-
-  return issues;
 }
 
 export function validateHotelEmailSettings(settings: Partial<HotelEmailSettings>): ValidationIssue[] {
@@ -978,6 +1472,118 @@ export function validateHotelEmailSettings(settings: Partial<HotelEmailSettings>
       path: "postStayDaysAfter",
       message: "Post-stay feedback offset must be between 1 and 14 days.",
     });
+  }
+
+  if (settings.defaultFooterBlocks && typeof settings.defaultFooterBlocks === "object") {
+    for (const lang of ["en", "de"] as const) {
+      const blocks = settings.defaultFooterBlocks[lang];
+      if (blocks === undefined) continue;
+      if (!Array.isArray(blocks)) {
+        issues.push({
+          path: `defaultFooterBlocks.${lang}`,
+          message: `Default footer (${lang.toUpperCase()}) must be a list of blocks.`,
+        });
+        continue;
+      }
+      if (blocks.length > 12) {
+        issues.push({
+          path: `defaultFooterBlocks.${lang}`,
+          message: `Default footer (${lang.toUpperCase()}) cannot exceed 12 blocks.`,
+        });
+      }
+      blocks.forEach((blk, idx) => {
+        validateEmailBlock(
+          blk,
+          idx,
+          `defaultFooterBlocks.${lang}[${idx}]`,
+          ALLOWED_DEFAULT_FOOTER_TYPE_SET,
+          issues
+        );
+      });
+    }
+  }
+
+  if (settings.defaultLinks && typeof settings.defaultLinks === "object") {
+    const linkLabels: Record<keyof HotelDefaultLinks, string> = {
+      website: "Hotel Website URL",
+      booking: "Booking Page URL",
+      portal: "Hotel Portal URL",
+      review: "Guest Review Page URL",
+      directions: "Directions URL",
+      wifiGuide: "Wi-Fi / Guest Guide URL",
+      socialInstagram: "Instagram URL",
+      socialFacebook: "Facebook URL",
+      socialX: "X (Twitter) URL",
+      socialLinkedin: "LinkedIn URL",
+    };
+    for (const [key, label] of Object.entries(linkLabels) as Array<[keyof HotelDefaultLinks, string]>) {
+      const entry = settings.defaultLinks[key];
+      if (!entry || typeof entry !== "object") continue;
+      if (entry.defaultUrl && entry.defaultUrl.trim()) {
+        const res = validateEmailUrl(entry.defaultUrl, { allowEmpty: true, fieldName: label });
+        if (!res.valid && res.error) {
+          issues.push({ path: `defaultLinks.${key}.defaultUrl`, message: res.error });
+        }
+      }
+      if (entry.byLanguage && typeof entry.byLanguage === "object") {
+        for (const lang of ["en", "de"] as const) {
+          const langUrl = entry.byLanguage[lang];
+          if (langUrl && langUrl.trim()) {
+            const res = validateEmailUrl(langUrl, {
+              allowEmpty: true,
+              fieldName: `${label} (${lang.toUpperCase()})`,
+            });
+            if (!res.valid && res.error) {
+              issues.push({ path: `defaultLinks.${key}.byLanguage.${lang}`, message: res.error });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (settings.defaultFooterNavLinks && typeof settings.defaultFooterNavLinks === "object") {
+    for (const lang of ["en", "de"] as const) {
+      const links = settings.defaultFooterNavLinks[lang];
+      if (links === undefined) continue;
+      if (!Array.isArray(links)) {
+        issues.push({
+          path: `defaultFooterNavLinks.${lang}`,
+          message: `Default footer links (${lang.toUpperCase()}) must be a list.`,
+        });
+        continue;
+      }
+      if (links.length > 12) {
+        issues.push({
+          path: `defaultFooterNavLinks.${lang}`,
+          message: `Default footer links (${lang.toUpperCase()}) cannot exceed 12 items.`,
+        });
+      }
+      links.forEach((item: FooterNavLinkItem, idx: number) => {
+        const lp = `defaultFooterNavLinks.${lang}[${idx}]`;
+        if (!item?.label || !item.label.trim()) {
+          issues.push({ path: `${lp}.label`, message: `Default footer link #${idx + 1} requires a label.` });
+        } else {
+          const lv = validateTemplateVariables(item.label, `Default footer link #${idx + 1} label`);
+          if (!lv.valid && lv.error) issues.push({ path: `${lp}.label`, message: lv.error });
+        }
+        const uc = validateEmailUrl(item?.url, {
+          allowEmpty: item?.hidden === true,
+          allowVariableToken: true,
+          allowContactSchemes: true,
+          fieldName: `Default footer link "${item?.label || idx + 1}" URL`,
+        });
+        if (!uc.valid && uc.error) issues.push({ path: `${lp}.url`, message: uc.error });
+        if (uc.valid && uc.normalized && item?.label) {
+          const phish = validateLinkLabelAgainstUrl(
+            item.label,
+            uc.normalized,
+            `Default footer link "${item.label}"`
+          );
+          if (!phish.valid && phish.error) issues.push({ path: `${lp}.label`, message: phish.error });
+        }
+      });
+    }
   }
 
   return issues;
@@ -1111,6 +1717,26 @@ export function formatEmailCurrency(
   return `${sign}${code} ${formattedNum}`;
 }
 
+export function resolveLocalizedLink(
+  linkVal: LocalizedLinkValue | undefined,
+  guestLang: SupportedEmailLanguage = "en",
+  hotelDefaultLang: SupportedEmailLanguage = "en"
+): string {
+  if (!linkVal || typeof linkVal !== "object") return "";
+  const candidates = [
+    linkVal.byLanguage?.[guestLang],
+    linkVal.byLanguage?.[hotelDefaultLang],
+    linkVal.defaultUrl,
+  ];
+  for (const cand of candidates) {
+    if (cand && cand.trim()) {
+      const res = validateEmailUrl(cand.trim());
+      if (res.valid && res.normalized) return res.normalized;
+    }
+  }
+  return "";
+}
+
 /**
  * Builds the complete allow-listed variable map + boolean condition flags from context and settings.
  * Missing values become "" (never "undefined").
@@ -1119,7 +1745,7 @@ export function buildTemplateVariablesMap(
   ctx: EmailRenderContext,
   settings: HotelEmailSettings = DEFAULT_HOTEL_EMAIL_SETTINGS,
   portalUrlOverride?: string,
-  language: "en" | "de" = "en"
+  language: SupportedEmailLanguage = "en"
 ): {
   variables: Record<AllowedTemplateVariable, string>;
   conditions: {
@@ -1129,6 +1755,7 @@ export function buildTemplateVariablesMap(
   };
 } {
   const cleanAppUrl = String(ctx.appUrl || "").trim().replace(/\/+$/, "");
+  const hotelDefaultLang: SupportedEmailLanguage = settings.defaultLanguage || "en";
 
   const resolveSafeLink = (candidate?: string): string => {
     if (!candidate || !candidate.trim()) return "";
@@ -1136,19 +1763,33 @@ export function buildTemplateVariablesMap(
     return res.valid && res.normalized ? res.normalized : "";
   };
 
+  const dl = settings.defaultLinks;
+
   const portalLink =
     resolveSafeLink(portalUrlOverride) ||
+    resolveLocalizedLink(dl?.portal, language, hotelDefaultLang) ||
     resolveSafeLink(settings.portalUrl) ||
     cleanAppUrl;
 
   const hotelWebsite =
+    resolveLocalizedLink(dl?.website, language, hotelDefaultLang) ||
     resolveSafeLink(settings.contactOverrides?.website) ||
     resolveSafeLink(ctx.hotelWebsite) ||
     portalLink;
 
   const bookingLink =
+    resolveLocalizedLink(dl?.booking, language, hotelDefaultLang) ||
     resolveSafeLink(settings.bookingUrl) ||
     portalLink;
+
+  // Optional hotel links: resolve to "" when not configured (never fall back to portal_link or "undefined")
+  const reviewLink = resolveLocalizedLink(dl?.review, language, hotelDefaultLang);
+  const directionsLink = resolveLocalizedLink(dl?.directions, language, hotelDefaultLang);
+  const wifiGuideLink = resolveLocalizedLink(dl?.wifiGuide, language, hotelDefaultLang);
+  const socialInstagram = resolveLocalizedLink(dl?.socialInstagram, language, hotelDefaultLang);
+  const socialFacebook = resolveLocalizedLink(dl?.socialFacebook, language, hotelDefaultLang);
+  const socialX = resolveLocalizedLink(dl?.socialX, language, hotelDefaultLang);
+  const socialLinkedin = resolveLocalizedLink(dl?.socialLinkedin, language, hotelDefaultLang);
 
   const guestName = String(ctx.guestName || "").trim();
   const guestFirstName = guestName ? guestName.split(/\s+/)[0] : "";
@@ -1188,6 +1829,8 @@ export function buildTemplateVariablesMap(
     typeof ctx.loyaltyTier === "string" && ctx.loyaltyTier.trim().length > 0;
   const hasLoyalty = hasEarned || hasBalance || hasTier;
 
+  const legalImprint = stripDangerousMarkup(settings.legalImprint || "").trim();
+
   const variables: Record<AllowedTemplateVariable, string> = {
     guest_name: guestName,
     guest_first_name: guestFirstName,
@@ -1196,6 +1839,7 @@ export function buildTemplateVariablesMap(
     hotel_address: hotelAddress,
     hotel_email: hotelEmail,
     hotel_website: hotelWebsite,
+    legal_imprint: legalImprint,
     room_name: String(ctx.roomName || "").trim(),
     room_type: String(ctx.roomType || "").trim(),
     check_in_date: checkInDate,
@@ -1213,6 +1857,13 @@ export function buildTemplateVariablesMap(
     booking_link: bookingLink,
     portal_link: portalLink,
     app_url: cleanAppUrl,
+    review_link: reviewLink,
+    directions_link: directionsLink,
+    wifi_guide_link: wifiGuideLink,
+    social_instagram: socialInstagram,
+    social_facebook: socialFacebook,
+    social_x: socialX,
+    social_linkedin: socialLinkedin,
   };
 
   return {
@@ -1223,4 +1874,541 @@ export function buildTemplateVariablesMap(
       has_deposit: Number(ctx.depositAmount || 0) > 0,
     },
   };
+}
+
+/**
+ * Pure helper that extracts EVERY link from a template variant (branding + all blocks)
+ * with its resolved final URL and validation status for the editor's Links Overview panel.
+ */
+export function extractTemplateLinksOverview(
+  variant: EmailTemplateVariant,
+  context: EmailRenderContext,
+  settings: HotelEmailSettings = DEFAULT_HOTEL_EMAIL_SETTINGS,
+  language: SupportedEmailLanguage = "en"
+): TemplateLinkOverviewItem[] {
+  const { variables } = buildTemplateVariablesMap(
+    context,
+    settings,
+    variant.portalUrlOverride,
+    language
+  );
+
+  const sub = (t?: string) =>
+    String(t || "").replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/g, (_m, key: string) => {
+      const v = (variables as Record<string, string | undefined>)[key];
+      return typeof v === "string" ? v : "";
+    });
+
+  const items: TemplateLinkOverviewItem[] = [];
+  let seq = 0;
+
+  const pushLink = (params: {
+    blockId: string;
+    blockIndex: number;
+    blockLabel: string;
+    location: string;
+    text: string;
+    rawUrl: string;
+    hidden: boolean;
+    allowContactSchemes: boolean;
+  }) => {
+    seq += 1;
+    const raw = (params.rawUrl || "").trim();
+    const text = sub(params.text).trim() || params.location;
+    const isVarToken =
+      ALLOWED_URL_VARIABLES.has(raw) ||
+      (params.allowContactSchemes && ALLOWED_CONTACT_URL_VARIABLES.has(raw));
+    const resolvedRaw = sub(raw).trim();
+
+    let status: "valid" | "empty_variable" | "invalid" = "valid";
+    let resolvedUrl = "";
+    let error: string | undefined;
+
+    if (!raw) {
+      status = "invalid";
+      error = "No destination URL set.";
+    } else if (isVarToken && (!resolvedRaw || resolvedRaw === "mailto:" || resolvedRaw === "tel:")) {
+      status = "empty_variable";
+      error = "Variable has no value in Email Settings (link will be hidden).";
+    } else {
+      const urlCheck = validateEmailUrl(resolvedRaw, {
+        allowContactSchemes: params.allowContactSchemes,
+      });
+      if (!urlCheck.valid || !urlCheck.normalized) {
+        status = "invalid";
+        error = urlCheck.error || "Invalid link URL.";
+      } else {
+        resolvedUrl = urlCheck.normalized;
+        const phish = validateLinkLabelAgainstUrl(text, resolvedUrl, params.location);
+        if (!phish.valid) {
+          status = "invalid";
+          error = phish.error;
+        }
+      }
+    }
+
+    items.push({
+      id: `lnk_${seq}`,
+      blockId: params.blockId,
+      blockIndex: params.blockIndex,
+      blockLabel: params.blockLabel,
+      location: params.location,
+      text,
+      rawUrl: raw,
+      resolvedUrl,
+      hidden: params.hidden,
+      status,
+      error,
+    });
+  };
+
+  if (variant.branding?.showLogo && variant.branding?.logoLinkUrl?.trim()) {
+    pushLink({
+      blockId: "__branding__",
+      blockIndex: -1,
+      blockLabel: "Header Branding",
+      location: "Header Logo Link",
+      text: variant.branding.logoAlt || "Header Logo",
+      rawUrl: variant.branding.logoLinkUrl,
+      hidden: false,
+      allowContactSchemes: false,
+    });
+  }
+
+  const pushInline = (
+    block: EmailBlock,
+    idx: number,
+    blockLabel: string,
+    inlineLinks?: InlineTextLink[]
+  ) => {
+    (inlineLinks || []).forEach((il, i) => {
+      pushLink({
+        blockId: block.id,
+        blockIndex: idx,
+        blockLabel,
+        location: `Inline link #${i + 1}`,
+        text: il.label,
+        rawUrl: il.url,
+        hidden: Boolean(block.hidden || il.hidden),
+        allowContactSchemes: true,
+      });
+    });
+  };
+
+  (variant.blocks || []).forEach((block, idx) => {
+    if (!block) return;
+    const bHidden = block.hidden === true;
+    switch (block.type) {
+      case "paragraph":
+        pushInline(block, idx, "Paragraph", block.inlineLinks);
+        break;
+      case "two_column_text":
+        pushInline(block, idx, "Two-Column Text", block.inlineLinks);
+        break;
+      case "image":
+        if (block.linkUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Image",
+            location: "Image Click Link",
+            text: block.alt || "Image",
+            rawUrl: block.linkUrl,
+            hidden: Boolean(bHidden || block.linkHidden),
+            allowContactSchemes: false,
+          });
+        }
+        break;
+      case "button":
+        pushLink({
+          blockId: block.id,
+          blockIndex: idx,
+          blockLabel: block.displayStyle === "text_link" ? "Text Link" : "Button",
+          location: block.displayStyle === "text_link" ? "Portal / Text Link" : "CTA Button",
+          text: block.label,
+          rawUrl: block.url,
+          hidden: bHidden,
+          allowContactSchemes: true,
+        });
+        break;
+      case "social_links":
+        (block.links || []).forEach((l, i) => {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Social Links",
+            location: `Social #${i + 1}`,
+            text: l.label,
+            rawUrl: l.url,
+            hidden: Boolean(bHidden || l.hidden),
+            allowContactSchemes: false,
+          });
+        });
+        break;
+      case "footer":
+        if (block.showContactBlock) {
+          (block.fields || []).forEach((f) => {
+            if (!f.visible || f.linkEnabled === false) return;
+            const val = sub(f.valueTemplate).trim();
+            if (f.key === "email" && val) {
+              pushLink({
+                blockId: block.id,
+                blockIndex: idx,
+                blockLabel: "Classic Footer",
+                location: `Contact: ${f.label}`,
+                text: val,
+                rawUrl: `mailto:${val}`,
+                hidden: bHidden,
+                allowContactSchemes: true,
+              });
+            } else if (f.key === "phone" && val) {
+              pushLink({
+                blockId: block.id,
+                blockIndex: idx,
+                blockLabel: "Classic Footer",
+                location: `Contact: ${f.label}`,
+                text: val,
+                rawUrl: `tel:${val}`,
+                hidden: bHidden,
+                allowContactSchemes: true,
+              });
+            } else if (f.key === "website" && f.valueTemplate.trim()) {
+              pushLink({
+                blockId: block.id,
+                blockIndex: idx,
+                blockLabel: "Classic Footer",
+                location: `Contact: ${f.label}`,
+                text: val || f.label,
+                rawUrl: f.valueTemplate,
+                hidden: bHidden,
+                allowContactSchemes: false,
+              });
+            }
+          });
+        }
+        break;
+      case "brand_header":
+        if (block.logoLinkUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Brand Header",
+            location: "Header Logo Link",
+            text: block.logoAlt || "{{hotel_name}}",
+            rawUrl: block.logoLinkUrl,
+            hidden: bHidden,
+            allowContactSchemes: false,
+          });
+        }
+        if (block.showPhone && block.phoneLinkEnabled !== false) {
+          const phoneVal = sub(block.phoneOverride || "{{hotel_phone}}").trim();
+          if (phoneVal) {
+            pushLink({
+              blockId: block.id,
+              blockIndex: idx,
+              blockLabel: "Brand Header",
+              location: "Header Phone (tel:)",
+              text: phoneVal,
+              rawUrl: `tel:${phoneVal}`,
+              hidden: bHidden,
+              allowContactSchemes: true,
+            });
+          }
+        }
+        if (block.showEmail && block.emailLinkEnabled !== false) {
+          const emailVal = sub(block.emailOverride || "{{hotel_email}}").trim();
+          if (emailVal) {
+            pushLink({
+              blockId: block.id,
+              blockIndex: idx,
+              blockLabel: "Brand Header",
+              location: "Header Email (mailto:)",
+              text: emailVal,
+              rawUrl: `mailto:${emailVal}`,
+              hidden: bHidden,
+              allowContactSchemes: true,
+            });
+          }
+        }
+        break;
+      case "promo_banner":
+        if (block.imageLinkUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Promo Banner",
+            location: "Banner Image Link",
+            text: block.imageAlt || "Banner Image",
+            rawUrl: block.imageLinkUrl,
+            hidden: bHidden,
+            allowContactSchemes: false,
+          });
+        }
+        if (block.buttonLabel?.trim() || block.buttonUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Promo Banner",
+            location: "Banner Button",
+            text: block.buttonLabel || "Button",
+            rawUrl: block.buttonUrl || "",
+            hidden: Boolean(bHidden || block.buttonHidden),
+            allowContactSchemes: true,
+          });
+        }
+        break;
+      case "membership_strip":
+        if (block.linkUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Membership Strip",
+            location: "Strip Link",
+            text: `${block.tierTemplate || ""} ${block.pointsTemplate || ""}`.trim() || "Membership",
+            rawUrl: block.linkUrl,
+            hidden: Boolean(bHidden || block.linkHidden),
+            allowContactSchemes: false,
+          });
+        }
+        break;
+      case "hero_text":
+        pushInline(block, idx, "Hero Text", block.inlineLinks);
+        if (block.buttonLabel?.trim() || block.buttonUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Hero Text",
+            location: "Hero Button",
+            text: block.buttonLabel || "Button",
+            rawUrl: block.buttonUrl || "",
+            hidden: Boolean(bHidden || block.buttonHidden),
+            allowContactSchemes: true,
+          });
+        }
+        break;
+      case "stay_dates":
+        if (block.buttonLabel?.trim() || block.buttonUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Stay Dates",
+            location: "Manage Stay Button",
+            text: block.buttonLabel || "Button",
+            rawUrl: block.buttonUrl || "",
+            hidden: Boolean(bHidden || block.buttonHidden),
+            allowContactSchemes: true,
+          });
+        }
+        break;
+      case "feature_card":
+        if (block.imageLinkUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Feature Card",
+            location: "Card Image Link",
+            text: block.imageAlt || block.title,
+            rawUrl: block.imageLinkUrl,
+            hidden: bHidden,
+            allowContactSchemes: false,
+          });
+        }
+        pushInline(block, idx, "Feature Card", block.inlineLinks);
+        if (block.buttonLabel?.trim() || block.buttonUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Feature Card",
+            location: "Card Button",
+            text: block.buttonLabel || "Button",
+            rawUrl: block.buttonUrl || "",
+            hidden: Boolean(bHidden || block.buttonHidden),
+            allowContactSchemes: true,
+          });
+        }
+        break;
+      case "benefits_list":
+        if (block.badgeImageLinkUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Benefits List",
+            location: "Badge Image Link",
+            text: block.badgeImageAlt || "Badge",
+            rawUrl: block.badgeImageLinkUrl,
+            hidden: bHidden,
+            allowContactSchemes: false,
+          });
+        }
+        pushInline(block, idx, "Benefits List", block.inlineLinks);
+        if (block.buttonLabel?.trim() || block.buttonUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Benefits List",
+            location: "Benefits Button",
+            text: block.buttonLabel || "Button",
+            rawUrl: block.buttonUrl || "",
+            hidden: Boolean(bHidden || block.buttonHidden),
+            allowContactSchemes: true,
+          });
+        }
+        break;
+      case "icon_link_grid":
+        (block.items || []).forEach((it, i) => {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Icon Link Grid",
+            location: `Icon Item #${i + 1}`,
+            text: it.label,
+            rawUrl: it.url,
+            hidden: Boolean(bHidden || it.hidden),
+            allowContactSchemes: true,
+          });
+        });
+        break;
+      case "image_with_list":
+        if (block.imageLinkUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Image + List",
+            location: "Section Image Link",
+            text: block.imageAlt || block.heading,
+            rawUrl: block.imageLinkUrl,
+            hidden: bHidden,
+            allowContactSchemes: false,
+          });
+        }
+        pushInline(block, idx, "Image + List", block.inlineLinks);
+        if (block.buttonLabel?.trim() || block.buttonUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Image + List",
+            location: "Section Button",
+            text: block.buttonLabel || "Button",
+            rawUrl: block.buttonUrl || "",
+            hidden: Boolean(bHidden || block.buttonHidden),
+            allowContactSchemes: true,
+          });
+        }
+        break;
+      case "footer_nav":
+        (block.links || []).forEach((l, i) => {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Footer Navigation",
+            location: `Nav Link #${i + 1}`,
+            text: l.label,
+            rawUrl: l.url,
+            hidden: Boolean(bHidden || l.hidden),
+            allowContactSchemes: true,
+          });
+        });
+        if (block.secondaryLinkUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Footer Navigation",
+            location: "Secondary Link",
+            text: block.secondaryText || "Secondary Link",
+            rawUrl: block.secondaryLinkUrl,
+            hidden: Boolean(bHidden || block.secondaryLinkHidden),
+            allowContactSchemes: true,
+          });
+        }
+        break;
+      case "legal_section":
+        pushInline(block, idx, "Legal Section", block.inlineLinks);
+        if (block.footerLogoLinkUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Legal Section",
+            location: "Footer Logo Link",
+            text: block.footerLogoAlt || "Footer Logo",
+            rawUrl: block.footerLogoLinkUrl,
+            hidden: bHidden,
+            allowContactSchemes: false,
+          });
+        }
+        break;
+      case "footer_contact": {
+        pushInline(block, idx, "Footer: Contact Us", block.inlineLinks);
+        if (block.emailLinkEnabled === true) {
+          const em = sub(block.emailOverride || "{{hotel_email}}").trim();
+          if (em) {
+            pushLink({
+              blockId: block.id,
+              blockIndex: idx,
+              blockLabel: "Footer: Contact Us",
+              location: "Contact Email (mailto:)",
+              text: em,
+              rawUrl: `mailto:${em}`,
+              hidden: bHidden,
+              allowContactSchemes: true,
+            });
+          }
+        }
+        if (block.phoneLinkEnabled === true) {
+          const ph = sub(block.phoneOverride || "{{hotel_phone}}").trim();
+          if (ph) {
+            pushLink({
+              blockId: block.id,
+              blockIndex: idx,
+              blockLabel: "Footer: Contact Us",
+              location: "Contact Phone (tel:)",
+              text: ph,
+              rawUrl: `tel:${ph}`,
+              hidden: bHidden,
+              allowContactSchemes: true,
+            });
+          }
+        }
+        break;
+      }
+      case "footer_authenticity":
+        pushInline(block, idx, "Footer: Authenticity", block.inlineLinks);
+        break;
+      case "footer_legal":
+        pushInline(block, idx, "Footer: Legal / Notice", block.inlineLinks);
+        break;
+      case "footer_copyright":
+        pushInline(block, idx, "Footer: Copyright", block.inlineLinks);
+        if (block.footerLogoLinkUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Footer: Copyright",
+            location: "Footer Logo Link",
+            text: block.footerLogoAlt || "Footer Logo",
+            rawUrl: block.footerLogoLinkUrl,
+            hidden: bHidden,
+            allowContactSchemes: false,
+          });
+        }
+        break;
+      case "footer_powered_by":
+        if (block.linkUrl?.trim()) {
+          pushLink({
+            blockId: block.id,
+            blockIndex: idx,
+            blockLabel: "Footer: Credit",
+            location: "Credit Link",
+            text: block.linkLabel || block.text || "Credit Link",
+            rawUrl: block.linkUrl,
+            hidden: Boolean(bHidden || block.linkHidden),
+            allowContactSchemes: false,
+          });
+        }
+        break;
+      default:
+        break;
+    }
+  });
+
+  return items;
 }

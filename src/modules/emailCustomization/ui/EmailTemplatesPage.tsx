@@ -175,6 +175,9 @@ export function EmailTemplatesPage() {
           onDocumentUpdated={(updated) => {
             setEditingEvent((prev) => (prev ? { ...prev, doc: updated } : null));
           }}
+          onSettingsUpdated={(nextSettings) => {
+            setSettings(nextSettings);
+          }}
         />
       ) : (
         <>
@@ -345,6 +348,7 @@ export function EmailTemplatesPage() {
               verifiedFromAddress={config?.verifiedFromAddress || ""}
               currencyCode={hotel?.defaultCurrency || "NGN"}
               onSaved={(next) => setSettings(next)}
+              onAppliedDefaultFooter={() => void loadWorkspace()}
             />
           ) : (
             <ImageLibraryPanel hotelId={targetHotelId} mode="page" />
