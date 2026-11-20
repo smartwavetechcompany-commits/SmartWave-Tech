@@ -26,6 +26,7 @@ import {
 } from "./defaultTemplates.ts";
 import { fsReadDoc } from "./firestoreRest.ts";
 import {
+  createLocalEmailImageMiddleware,
   deleteHotelImage,
   listHotelImages,
   renameHotelImage,
@@ -92,6 +93,9 @@ export function mountEmailCustomizationRoutes(
   deps: EmailCustomizationRouteDeps
 ): void {
   const { requireAuth, extractBearerToken } = deps;
+
+  // Read-only static serving strictly for local email images under IMAGE_UPLOAD_DIR/email-images
+  app.use("/uploads/email-images", createLocalEmailImageMiddleware());
 
   async function requireEmailModuleAccess(
     req: Request,

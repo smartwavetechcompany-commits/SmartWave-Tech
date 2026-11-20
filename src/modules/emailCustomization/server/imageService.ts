@@ -1,5 +1,10 @@
 import crypto from "crypto";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import type { NextFunction, Request, Response } from "express";
 import sharp from "sharp";
+import { getAppUrl } from "../../../services/emailService.ts";
 import { IMAGE_LIMITS, type EmailImageAsset } from "../shared/types.ts";
 import { stripDangerousMarkup } from "../shared/validation.ts";
 import {
@@ -7,12 +12,12 @@ import {
   fsListCollection,
   fsReadDoc,
   fsSetDoc,
-  getFirebaseAppletConfig,
 } from "./firestoreRest.ts";
 import { findImageReferencesAcrossTemplates } from "./resolver.ts";
 import { EMAIL_EVENT_CATALOG } from "./defaultTemplates.ts";
 
 export type AllowedImageMime = "image/png" | "image/jpeg" | "image/webp";
+export type ImageStorageProviderName = "local" | "cloudinary";
 
 export interface ProcessedImageResult {
   buffer: Buffer;
@@ -23,6 +28,39 @@ export interface ProcessedImageResult {
   sizeBytes: number;
   randomFilename: string;
 }
+
+export interface StoredImageUploadInput {
+  hotelId: string;
+  randomFilename: string;
+  buffer: Buffer;
+  mimeType: AllowedImageMime;
+}
+
+export interface StoredImageUploadResult {
+  url: string;
+  storagePath: string;
+  provider: ImageStorageProviderName;
+}
+
+export interface StoredImageDeleteInput {
+  hotelId: string;
+  storagePath: string;
+}
+
+export interface ImageStorageProvider {
+  readonly name: ImageStorageProviderName;
+  upload(input: StoredImageUploadInput): Promise<StoredImageUploadResult>;
+  delete(input: StoredImageDeleteInput): Promise<{ deleted: boolean }>;
+}
+
+const SAFE_HOTEL_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
+const SAFE_RANDOM_FILENAME_RE = /^[0-9a-f]{32}\.(png|jpg|webp)$/;
+
+const EXT_TO_MIME: Record<string, AllowedImageMime> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".webp": "image/webp",
+};
 
 /**
  * Verifies real binary magic bytes — strictly allows PNG, JPEG, and WebP only.
@@ -191,17 +229,441 @@ export async function validateAndProcessImageBuffer(
   }
 }
 
-function getStorageBucketName(): string {
-  const bucket = getFirebaseAppletConfig().storageBucket;
-  if (!bucket) {
-    throw new Error("Firebase Storage bucket is not configured.");
+/**
+ * Resolves the persistent root directory for local email image storage.
+ * Uses IMAGE_UPLOAD_DIR when configured; otherwise defaults to a persistent
+ * directory outside the build/deploy folder (~/pms-uploads) so redeploys do not wipe uploads.
+ */
+export function resolveLocalUploadRoot(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = typeof env.IMAGE_UPLOAD_DIR === "string" ? env.IMAGE_UPLOAD_DIR.trim() : "";
+  if (configured) {
+    return path.resolve(configured);
   }
-  return bucket;
+  return path.resolve(os.homedir(), "pms-uploads");
+}
+
+export function resolveLocalEmailImagesDir(uploadRoot?: string): string {
+  const root = uploadRoot ? path.resolve(uploadRoot) : resolveLocalUploadRoot();
+  return path.resolve(root, "email-images");
+}
+
+/**
+ * Validates hotelId and filename strictly and returns a guaranteed containment-checked
+ * absolute file path inside `<uploadRoot>/email-images`, or null on any traversal attempt.
+ */
+export function resolveSafeLocalEmailImagePath(
+  hotelId: string,
+  filename: string,
+  uploadRoot?: string
+): { filePath: string; baseDir: string; mimeType: AllowedImageMime } | null {
+  if (!SAFE_HOTEL_ID_RE.test(hotelId) || !SAFE_RANDOM_FILENAME_RE.test(filename)) {
+    return null;
+  }
+
+  const ext = path.extname(filename).toLowerCase();
+  const mimeType = EXT_TO_MIME[ext];
+  if (!mimeType) return null;
+
+  const baseDir = resolveLocalEmailImagesDir(uploadRoot);
+  const hotelDir = path.resolve(baseDir, hotelId);
+  if (!hotelDir.startsWith(baseDir + path.sep)) {
+    return null;
+  }
+
+  const filePath = path.resolve(hotelDir, filename);
+  if (!filePath.startsWith(hotelDir + path.sep)) {
+    return null;
+  }
+
+  return { filePath, baseDir, mimeType };
+}
+
+function resolvePublicAppBaseUrl(env: NodeJS.ProcessEnv = process.env, overrideAppUrl?: string): string {
+  const raw = (overrideAppUrl || env.APP_URL || "").trim().replace(/\/+$/, "");
+  const base = raw || getAppUrl();
+  if (!base.startsWith("https://")) {
+    throw new Error(
+      "APP_URL must start with https:// so uploaded email images can load reliably in guest email clients."
+    );
+  }
+  return base;
+}
+
+export interface LocalProviderOptions {
+  uploadDir?: string;
+  appUrl?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Local persistent filesystem storage provider.
+ * Stores files under `<IMAGE_UPLOAD_DIR>/email-images/<hotelId>/<randomName>.<ext>`
+ * and returns `${APP_URL}/uploads/email-images/<hotelId>/<randomName>.<ext>`.
+ */
+export function createLocalImageStorageProvider(
+  options: LocalProviderOptions = {}
+): ImageStorageProvider {
+  const env = options.env || process.env;
+  const uploadRoot = options.uploadDir
+    ? path.resolve(options.uploadDir)
+    : resolveLocalUploadRoot(env);
+
+  return {
+    name: "local",
+    async upload(input: StoredImageUploadInput): Promise<StoredImageUploadResult> {
+      const safe = resolveSafeLocalEmailImagePath(input.hotelId, input.randomFilename, uploadRoot);
+      if (!safe) {
+        throw new Error("Invalid hotel identifier or image filename.");
+      }
+
+      const appBaseUrl = resolvePublicAppBaseUrl(env, options.appUrl);
+      const hotelDir = path.dirname(safe.filePath);
+      await fs.promises.mkdir(hotelDir, { recursive: true, mode: 0o755 });
+      await fs.promises.writeFile(safe.filePath, input.buffer, { mode: 0o644 });
+
+      const storagePath = `${input.hotelId}/${input.randomFilename}`;
+      const url = `${appBaseUrl}/uploads/email-images/${encodeURIComponent(input.hotelId)}/${encodeURIComponent(input.randomFilename)}`;
+
+      return {
+        url,
+        storagePath,
+        provider: "local",
+      };
+    },
+
+    async delete(input: StoredImageDeleteInput): Promise<{ deleted: boolean }> {
+      const expectedPrefix = `${input.hotelId}/`;
+      if (!input.storagePath.startsWith(expectedPrefix)) {
+        return { deleted: false };
+      }
+
+      const filename = input.storagePath.slice(expectedPrefix.length);
+      const safe = resolveSafeLocalEmailImagePath(input.hotelId, filename, uploadRoot);
+      if (!safe) {
+        return { deleted: false };
+      }
+
+      try {
+        await fs.promises.unlink(safe.filePath);
+        return { deleted: true };
+      } catch (err: any) {
+        if (err && err.code === "ENOENT") {
+          return { deleted: false };
+        }
+        throw err;
+      }
+    },
+  };
+}
+
+export interface CloudinaryProviderOptions {
+  cloudName?: string;
+  apiKey?: string;
+  apiSecret?: string;
+  env?: NodeJS.ProcessEnv;
+  fetchFn?: typeof fetch;
+}
+
+export function buildCloudinarySignature(
+  params: Record<string, string>,
+  apiSecret: string
+): string {
+  const canonical = Object.keys(params)
+    .filter((k) => params[k] !== undefined && params[k] !== "")
+    .sort()
+    .map((k) => `${k}=${params[k]}`)
+    .join("&");
+  return crypto
+    .createHash("sha1")
+    .update(`${canonical}${apiSecret}`)
+    .digest("hex");
+}
+
+/**
+ * Server-side signed Cloudinary storage provider.
+ * Uses CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET
+ * strictly on the server (never exposed to browser, never logged).
+ */
+export function createCloudinaryImageStorageProvider(
+  options: CloudinaryProviderOptions = {}
+): ImageStorageProvider {
+  const env = options.env || process.env;
+  const cloudName = (options.cloudName ?? env.CLOUDINARY_CLOUD_NAME ?? "").trim();
+  const apiKey = (options.apiKey ?? env.CLOUDINARY_API_KEY ?? "").trim();
+  const apiSecret = (options.apiSecret ?? env.CLOUDINARY_API_SECRET ?? "").trim();
+  const fetchImpl = options.fetchFn || fetch;
+
+  const missing: string[] = [];
+  if (!cloudName) missing.push("CLOUDINARY_CLOUD_NAME");
+  if (!apiKey) missing.push("CLOUDINARY_API_KEY");
+  if (!apiSecret) missing.push("CLOUDINARY_API_SECRET");
+  if (missing.length > 0) {
+    throw new Error(
+      `Cloudinary image storage is not configured. Missing server environment variable(s): ${missing.join(", ")}.`
+    );
+  }
+
+  return {
+    name: "cloudinary",
+    async upload(input: StoredImageUploadInput): Promise<StoredImageUploadResult> {
+      if (!SAFE_HOTEL_ID_RE.test(input.hotelId) || !SAFE_RANDOM_FILENAME_RE.test(input.randomFilename)) {
+        throw new Error("Invalid hotel identifier or image filename.");
+      }
+
+      const folder = `pms-email-images/${input.hotelId}`;
+      const publicIdBase = input.randomFilename.replace(/\.[^.]+$/, "");
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const signParams = {
+        folder,
+        overwrite: "true",
+        public_id: publicIdBase,
+        timestamp,
+        unique_filename: "false",
+      };
+      const signature = buildCloudinarySignature(signParams, apiSecret);
+
+      const form = new FormData();
+      form.append(
+        "file",
+        new Blob([new Uint8Array(input.buffer)], { type: input.mimeType }),
+        input.randomFilename
+      );
+      form.append("api_key", apiKey);
+      form.append("timestamp", timestamp);
+      form.append("folder", folder);
+      form.append("public_id", publicIdBase);
+      form.append("overwrite", "true");
+      form.append("unique_filename", "false");
+      form.append("signature", signature);
+
+      const uploadEndpoint = `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/image/upload`;
+      const resp = await fetchImpl(uploadEndpoint, {
+        method: "POST",
+        body: form,
+      });
+
+      if (!resp.ok) {
+        throw new Error(`Image upload to Cloudinary failed with HTTP ${resp.status}.`);
+      }
+
+      const data = (await resp.json().catch(() => ({}))) as Record<string, any>;
+      const secureUrl = typeof data.secure_url === "string" ? data.secure_url.trim() : "";
+      const returnedPublicId =
+        typeof data.public_id === "string" && data.public_id.trim()
+          ? data.public_id.trim()
+          : `${folder}/${publicIdBase}`;
+
+      if (!secureUrl.startsWith("https://")) {
+        throw new Error("Cloudinary did not return a valid HTTPS image URL.");
+      }
+
+      return {
+        url: secureUrl,
+        storagePath: returnedPublicId,
+        provider: "cloudinary",
+      };
+    },
+
+    async delete(input: StoredImageDeleteInput): Promise<{ deleted: boolean }> {
+      const expectedPrefix = `pms-email-images/${input.hotelId}/`;
+      if (!input.storagePath.startsWith(expectedPrefix)) {
+        return { deleted: false };
+      }
+
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const signParams = {
+        invalidate: "true",
+        public_id: input.storagePath,
+        timestamp,
+      };
+      const signature = buildCloudinarySignature(signParams, apiSecret);
+
+      const body = new URLSearchParams({
+        public_id: input.storagePath,
+        invalidate: "true",
+        timestamp,
+        api_key: apiKey,
+        signature,
+      });
+
+      const destroyEndpoint = `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/image/destroy`;
+      const resp = await fetchImpl(destroyEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      });
+
+      if (!resp.ok) {
+        return { deleted: false };
+      }
+      const data = (await resp.json().catch(() => ({}))) as Record<string, any>;
+      return { deleted: data?.result === "ok" };
+    },
+  };
+}
+
+export interface ResolveProviderOptions {
+  env?: NodeJS.ProcessEnv;
+  providerName?: ImageStorageProviderName;
+  uploadDir?: string;
+  appUrl?: string;
+  fetchFn?: typeof fetch;
+}
+
+/**
+ * Selects the active image storage provider from IMAGE_STORAGE_PROVIDER
+ * ("local" default or "cloudinary") without code changes.
+ */
+export function resolveImageStorageProvider(
+  options: ResolveProviderOptions = {}
+): ImageStorageProvider {
+  const env = options.env || process.env;
+  const raw = (
+    options.providerName ??
+    (typeof env.IMAGE_STORAGE_PROVIDER === "string" ? env.IMAGE_STORAGE_PROVIDER : "")
+  )
+    .trim()
+    .toLowerCase();
+
+  const selected = raw || "local";
+
+  if (selected === "local") {
+    return createLocalImageStorageProvider({
+      uploadDir: options.uploadDir,
+      appUrl: options.appUrl,
+      env,
+    });
+  }
+
+  if (selected === "cloudinary") {
+    return createCloudinaryImageStorageProvider({
+      env,
+      fetchFn: options.fetchFn,
+    });
+  }
+
+  throw new Error(
+    `Unsupported IMAGE_STORAGE_PROVIDER "${selected}". Allowed values are "local" and "cloudinary".`
+  );
+}
+
+/**
+ * Read-only Express middleware serving ONLY `<IMAGE_UPLOAD_DIR>/email-images/{hotelId}/{randomFilename}`
+ * at `/uploads/email-images`. Enforces:
+ * - GET/HEAD only
+ * - No directory listing
+ * - Strict path traversal & symlink protection
+ * - Exact image Content-Type, X-Content-Type-Options: nosniff, and immutable long cache headers
+ */
+export function createLocalEmailImageMiddleware(options?: {
+  uploadDir?: string;
+  env?: NodeJS.ProcessEnv;
+}) {
+  return async function serveLocalEmailImage(
+    req: Request,
+    res: Response,
+    _next: NextFunction
+  ): Promise<void> {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      res.setHeader("Allow", "GET, HEAD");
+      res.status(405).end();
+      return;
+    }
+
+    // Inspect raw URL before Express path normalization to block encoded traversal (`%2e%2e`, backslashes, null bytes)
+    const rawPathPart = String(req.originalUrl || req.url || "").split("?")[0];
+    if (
+      rawPathPart.includes("..") ||
+      rawPathPart.includes("\\") ||
+      rawPathPart.includes("\0") ||
+      /%2e/i.test(rawPathPart) ||
+      /%2f/i.test(rawPathPart) ||
+      /%5c/i.test(rawPathPart) ||
+      /%00/i.test(rawPathPart)
+    ) {
+      res.status(400).end();
+      return;
+    }
+
+    // Strictly match exactly /<hotelId>/<filename> (blocks root / and /<hotelId>/ directory listing)
+    const cleanPath = String(req.path || "");
+    const segments = cleanPath.replace(/^\/+/, "").split("/");
+    if (segments.length !== 2 || !segments[0] || !segments[1] || cleanPath.endsWith("/")) {
+      res.status(404).end();
+      return;
+    }
+
+    const [hotelId, filename] = segments;
+    const uploadRoot = options?.uploadDir
+      ? path.resolve(options.uploadDir)
+      : resolveLocalUploadRoot(options?.env || process.env);
+
+    const safe = resolveSafeLocalEmailImagePath(hotelId, filename, uploadRoot);
+    if (!safe) {
+      res.status(404).end();
+      return;
+    }
+
+    try {
+      const lstat = await fs.promises.lstat(safe.filePath);
+      if (!lstat.isFile() || lstat.isSymbolicLink()) {
+        res.status(404).end();
+        return;
+      }
+
+      const [realBaseDir, realFilePath] = await Promise.all([
+        fs.promises.realpath(safe.baseDir),
+        fs.promises.realpath(safe.filePath),
+      ]);
+      if (!realFilePath.startsWith(realBaseDir + path.sep)) {
+        res.status(403).end();
+        return;
+      }
+
+      res.setHeader("Content-Type", safe.mimeType);
+      res.setHeader("Content-Length", String(lstat.size));
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+
+      if (req.method === "HEAD") {
+        res.status(200).end();
+        return;
+      }
+
+      const stream = fs.createReadStream(realFilePath);
+      stream.on("error", () => {
+        if (!res.headersSent) {
+          res.status(404).end();
+        } else {
+          res.end();
+        }
+      });
+      stream.pipe(res);
+    } catch {
+      res.status(404).end();
+    }
+  };
+}
+
+export interface ImageServiceOverrides {
+  storageProvider?: ImageStorageProvider;
+  listDocsFn?: (hotelId: string) => Promise<Array<Record<string, any> & { id: string }>>;
+  readDocFn?: (hotelId: string, imageId: string) => Promise<Record<string, any> | null>;
+  setDocFn?: (hotelId: string, imageId: string, asset: EmailImageAsset) => Promise<{ ok: boolean }>;
+  deleteDocFn?: (hotelId: string, imageId: string) => Promise<{ ok: boolean }>;
+  findRefsFn?: (
+    hotelId: string,
+    imageId: string,
+    url: string
+  ) => Promise<{ publishedTemplates: string[]; draftTemplates: string[] }>;
 }
 
 export async function listHotelImages(
   hotelId: string,
-  bearerToken?: string
+  bearerToken?: string,
+  overrides?: Pick<ImageServiceOverrides, "listDocsFn">
 ): Promise<{
   images: EmailImageAsset[];
   usage: {
@@ -213,7 +675,9 @@ export async function listHotelImages(
 }> {
   let docs: Array<Record<string, any> & { id: string }> = [];
   try {
-    docs = await fsListCollection(`hotels/${hotelId}/emailImages`, bearerToken);
+    docs = overrides?.listDocsFn
+      ? await overrides.listDocsFn(hotelId)
+      : await fsListCollection(`hotels/${hotelId}/emailImages`, bearerToken);
   } catch {
     docs = [];
   }
@@ -225,6 +689,10 @@ export async function listHotelImages(
       label: String(d.label || "Hotel Image"),
       url: String(d.url || ""),
       storagePath: String(d.storagePath || ""),
+      storageProvider:
+        d.storageProvider === "local" || d.storageProvider === "cloudinary"
+          ? (d.storageProvider as ImageStorageProviderName)
+          : undefined,
       mimeType: (d.mimeType || "image/png") as AllowedImageMime,
       width: Number(d.width || 0),
       height: Number(d.height || 0),
@@ -251,8 +719,13 @@ export async function uploadHotelImage(
   hotelId: string,
   payload: { base64Data: string; label?: string },
   actor: string,
-  bearerToken?: string
+  bearerToken?: string,
+  overrides?: ImageServiceOverrides
 ): Promise<{ ok: boolean; image?: EmailImageAsset; error?: string; statusCode?: number }> {
+  if (!SAFE_HOTEL_ID_RE.test(hotelId)) {
+    return { ok: false, statusCode: 400, error: "Invalid hotel identifier." };
+  }
+
   const rawStr = typeof payload.base64Data === "string" ? payload.base64Data.trim() : "";
   if (!rawStr) {
     return { ok: false, statusCode: 400, error: "Image data is required." };
@@ -277,7 +750,7 @@ export async function uploadHotelImage(
   }
 
   // Enforce per-hotel storage quota
-  const existing = await listHotelImages(hotelId, bearerToken);
+  const existing = await listHotelImages(hotelId, bearerToken, overrides);
   if (existing.usage.count >= IMAGE_LIMITS.maxImagesPerHotel) {
     return {
       ok: false,
@@ -293,46 +766,41 @@ export async function uploadHotelImage(
     };
   }
 
-  const bucket = getStorageBucketName();
-  const storagePath = `hotels/${hotelId}/email-images/${processed.result.randomFilename}`;
-  const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o?uploadType=media&name=${encodeURIComponent(storagePath)}`;
-
-  const headers: Record<string, string> = {
-    "Content-Type": processed.result.mimeType,
-  };
-  if (bearerToken) {
-    headers.Authorization = `Firebase ${bearerToken}`;
-  }
-
-  const uploadResp = await fetch(uploadUrl, {
-    method: "POST",
-    headers,
-    body: new Uint8Array(processed.result.buffer),
-  });
-
-  if (!uploadResp.ok) {
+  let provider: ImageStorageProvider;
+  try {
+    provider = overrides?.storageProvider || resolveImageStorageProvider();
+  } catch (err: any) {
     return {
       ok: false,
-      statusCode: 502,
-      error: `Failed to store image in Firebase Storage (${uploadResp.status}). Verify storage rules are deployed.`,
+      statusCode: 500,
+      error: err?.message || "Image storage provider is not configured.",
     };
   }
 
-  const uploadJson = await uploadResp.json().catch(() => ({} as any));
-  const rawTokens = typeof uploadJson?.downloadTokens === "string" ? uploadJson.downloadTokens : "";
-  const firstToken = rawTokens.split(",")[0]?.trim();
-
-  const publicUrl = firstToken
-    ? `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(storagePath)}?alt=media&token=${encodeURIComponent(firstToken)}`
-    : `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(storagePath)}?alt=media`;
+  let stored: StoredImageUploadResult;
+  try {
+    stored = await provider.upload({
+      hotelId,
+      randomFilename: processed.result.randomFilename,
+      buffer: processed.result.buffer,
+      mimeType: processed.result.mimeType,
+    });
+  } catch (err: any) {
+    return {
+      ok: false,
+      statusCode: 502,
+      error: err?.message || "Failed to store uploaded image.",
+    };
+  }
 
   const imageId = `img_${crypto.randomBytes(8).toString("hex")}`;
   const asset: EmailImageAsset = {
     id: imageId,
     hotelId,
     label: sanitizeImageLabel(payload.label, "Hotel Image"),
-    url: publicUrl,
-    storagePath,
+    url: stored.url,
+    storagePath: stored.storagePath,
+    storageProvider: stored.provider,
     mimeType: processed.result.mimeType,
     width: processed.result.width,
     height: processed.result.height,
@@ -341,8 +809,17 @@ export async function uploadHotelImage(
     createdAt: new Date().toISOString(),
   };
 
-  const writeRes = await fsSetDoc(`hotels/${hotelId}/emailImages/${imageId}`, asset, bearerToken);
+  const writeRes = overrides?.setDocFn
+    ? await overrides.setDocFn(hotelId, imageId, asset)
+    : await fsSetDoc(`hotels/${hotelId}/emailImages/${imageId}`, asset, bearerToken);
+
   if (!writeRes.ok) {
+    // Best-effort cleanup so a failed Firestore metadata write does not leave orphaned files in storage
+    try {
+      await provider.delete({ hotelId, storagePath: stored.storagePath });
+    } catch {
+      // ignore cleanup failure
+    }
     return { ok: false, statusCode: 500, error: "Image uploaded but metadata could not be saved." };
   }
 
@@ -374,10 +851,28 @@ export async function renameHotelImage(
   return { ok: true, image: updated };
 }
 
+function inferProviderForStoredAsset(
+  existing: Record<string, any>,
+  hotelId: string
+): ImageStorageProviderName | null {
+  if (existing.storageProvider === "local" || existing.storageProvider === "cloudinary") {
+    return existing.storageProvider;
+  }
+  const storagePath = String(existing.storagePath || "");
+  if (storagePath.startsWith(`pms-email-images/${hotelId}/`)) {
+    return "cloudinary";
+  }
+  if (storagePath.startsWith(`${hotelId}/`)) {
+    return "local";
+  }
+  return null;
+}
+
 export async function deleteHotelImage(
   hotelId: string,
   imageId: string,
-  bearerToken?: string
+  bearerToken?: string,
+  overrides?: ImageServiceOverrides
 ): Promise<{
   ok: boolean;
   error?: string;
@@ -385,21 +880,28 @@ export async function deleteHotelImage(
   referencedByPublished?: string[];
   referencedByDraft?: string[];
 }> {
-  const existing = await fsReadDoc(`hotels/${hotelId}/emailImages/${imageId}`, bearerToken);
+  const existing = overrides?.readDocFn
+    ? await overrides.readDocFn(hotelId, imageId)
+    : await fsReadDoc(`hotels/${hotelId}/emailImages/${imageId}`, bearerToken);
+
   if (!existing || (existing.hotelId && existing.hotelId !== hotelId)) {
     return { ok: false, statusCode: 404, error: "Image not found." };
   }
 
   // Block deletion if image is currently referenced in ANY published template
-  const refs = await findImageReferencesAcrossTemplates(
-    hotelId,
-    imageId,
-    String(existing.url || ""),
-    bearerToken
-  );
+  const refs = overrides?.findRefsFn
+    ? await overrides.findRefsFn(hotelId, imageId, String(existing.url || ""))
+    : await findImageReferencesAcrossTemplates(
+        hotelId,
+        imageId,
+        String(existing.url || ""),
+        bearerToken
+      );
 
   if (refs.publishedTemplates.length > 0) {
-    const names = refs.publishedTemplates.map((ev) => EMAIL_EVENT_CATALOG[ev]?.name || ev);
+    const names = refs.publishedTemplates.map(
+      (ev) => EMAIL_EVENT_CATALOG[ev as keyof typeof EMAIL_EVENT_CATALOG]?.name || ev
+    );
     return {
       ok: false,
       statusCode: 409,
@@ -408,27 +910,34 @@ export async function deleteHotelImage(
     };
   }
 
-  // Delete from Firebase Storage if storagePath belongs to this hotel
+  // Delete image binary from the configured storage provider (matching the asset's provider)
   const storagePath = String(existing.storagePath || "");
-  if (storagePath.startsWith(`hotels/${hotelId}/email-images/`)) {
+  if (storagePath) {
     try {
-      const bucket = getStorageBucketName();
-      const deleteUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(storagePath)}`;
-      const headers: Record<string, string> = {};
-      if (bearerToken) headers.Authorization = `Firebase ${bearerToken}`;
-      await fetch(deleteUrl, { method: "DELETE", headers });
+      const targetProviderName = inferProviderForStoredAsset(existing, hotelId);
+      const provider =
+        overrides?.storageProvider ||
+        (targetProviderName
+          ? resolveImageStorageProvider({ providerName: targetProviderName })
+          : resolveImageStorageProvider());
+      await provider.delete({ hotelId, storagePath });
     } catch {
-      // Proceed with Firestore metadata removal so orphaned records do not get stuck
+      // Proceed with Firestore metadata removal so orphaned metadata records do not get stuck
     }
   }
 
-  const delRes = await fsDeleteDoc(`hotels/${hotelId}/emailImages/${imageId}`, bearerToken);
+  const delRes = overrides?.deleteDocFn
+    ? await overrides.deleteDocFn(hotelId, imageId)
+    : await fsDeleteDoc(`hotels/${hotelId}/emailImages/${imageId}`, bearerToken);
+
   if (!delRes.ok) {
     return { ok: false, statusCode: 500, error: "Could not delete image metadata." };
   }
 
   return {
     ok: true,
-    referencedByDraft: refs.draftTemplates.map((ev) => EMAIL_EVENT_CATALOG[ev]?.name || ev),
+    referencedByDraft: refs.draftTemplates.map(
+      (ev) => EMAIL_EVENT_CATALOG[ev as keyof typeof EMAIL_EVENT_CATALOG]?.name || ev
+    ),
   };
 }

@@ -345,6 +345,7 @@ export interface EmailImageAsset {
   label: string;
   url: string;
   storagePath: string;
+  storageProvider?: "local" | "cloudinary";
   mimeType: "image/png" | "image/jpeg" | "image/webp";
   width: number;
   height: number;

@@ -35,9 +35,20 @@ import {
   isEmailCustomizationEnabled,
 } from "../modules/emailCustomization/server/templateRegistry.ts";
 import { hasPermission, isPMSModuleAssigned } from "../utils/permissions.ts";
+import fs from "fs";
+import http from "http";
+import os from "os";
+import path from "path";
+import express from "express";
 import {
+  buildCloudinarySignature,
+  createLocalEmailImageMiddleware,
+  deleteHotelImage,
   detectAllowedImageMagicBytes,
+  resolveImageStorageProvider,
+  resolveSafeLocalEmailImagePath,
   sanitizeImageLabel,
+  uploadHotelImage,
   validateAndProcessImageBuffer,
 } from "../modules/emailCustomization/server/imageService.ts";
 import { sendHotelEmail } from "../modules/emailCustomization/server/dispatcher.ts";
@@ -1028,6 +1039,283 @@ async function run() {
     assert.strictEqual(sent[0].subject, "Booking Confirmation - Harborview Suites (RES_FALL)");
     assert.ok(sent[0].html.includes("Harborview Suites"));
     assert.ok(sent[0].html.includes("Room 402"));
+  });
+
+  // 20. Local image storage provider: upload returns https URL, loads via read-only middleware with security headers, traversal blocked, delete removes file
+  await test("20. Local image storage: https URL loads via read-only middleware, blocks traversal/listing, and deletes file from disk", async () => {
+    const tmpUploadDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pms-email-img-test-"));
+    const memoryStore = new Map<string, any>();
+
+    try {
+      const localProvider = resolveImageStorageProvider({
+        env: {
+          IMAGE_STORAGE_PROVIDER: "local",
+          IMAGE_UPLOAD_DIR: tmpUploadDir,
+          APP_URL: "https://tidehotels.de/",
+        },
+      });
+      assert.strictEqual(localProvider.name, "local");
+
+      const sampleWebp = await sharp({
+        create: { width: 320, height: 120, channels: 3, background: { r: 14, g: 165, b: 120 } },
+      })
+        .webp({ quality: 80 })
+        .toBuffer();
+
+      const uploadRes = await uploadHotelImage(
+        "hotel_alpha",
+        {
+          base64Data: `data:image/webp;base64,${sampleWebp.toString("base64")}`,
+          label: "Lobby Banner",
+        },
+        "admin@harborview.example",
+        undefined,
+        {
+          storageProvider: localProvider,
+          listDocsFn: async () => Array.from(memoryStore.values()),
+          setDocFn: async (_h, id, asset) => {
+            memoryStore.set(id, asset);
+            return { ok: true };
+          },
+        }
+      );
+
+      assert.strictEqual(uploadRes.ok, true, `Upload failed: ${uploadRes.error}`);
+      assert.ok(uploadRes.image, "Uploaded image metadata should be returned");
+      const img = uploadRes.image!;
+      assert.ok(img.url.startsWith("https://tidehotels.de/uploads/email-images/hotel_alpha/"));
+      assert.ok(img.url.endsWith(".webp"));
+      assert.strictEqual(img.storageProvider, "local");
+      // Metadata only in Firestore — never raw binary
+      assert.strictEqual((img as any).buffer, undefined);
+
+      const urlPath = new URL(img.url).pathname; // /uploads/email-images/hotel_alpha/<hex>.webp
+      const filename = path.basename(urlPath);
+      const diskPath = path.join(tmpUploadDir, "email-images", "hotel_alpha", filename);
+      assert.strictEqual(fs.existsSync(diskPath), true, "Image file must exist on disk");
+
+      // Mount read-only middleware on an ephemeral HTTP server and verify loading & security headers
+      const testApp = express();
+      testApp.use("/uploads/email-images", createLocalEmailImageMiddleware({ uploadDir: tmpUploadDir }));
+      const server = http.createServer(testApp);
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+      const addr = server.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      const baseHttp = `http://127.0.0.1:${port}`;
+
+      try {
+        // 1. Valid image loads with exact headers
+        const getResp = await fetch(`${baseHttp}${urlPath}`);
+        assert.strictEqual(getResp.status, 200);
+        assert.strictEqual(getResp.headers.get("content-type"), "image/webp");
+        assert.strictEqual(getResp.headers.get("x-content-type-options"), "nosniff");
+        assert.ok((getResp.headers.get("cache-control") || "").includes("max-age=31536000"));
+        const fetchedBytes = Buffer.from(await getResp.arrayBuffer());
+        assert.ok(fetchedBytes.length > 0 && fetchedBytes.equals(await fs.promises.readFile(diskPath)));
+
+        // 2. Directory listings blocked
+        const dirRoot = await fetch(`${baseHttp}/uploads/email-images/`);
+        assert.strictEqual(dirRoot.status, 404);
+        const dirHotel = await fetch(`${baseHttp}/uploads/email-images/hotel_alpha/`);
+        assert.strictEqual(dirHotel.status, 404);
+
+        // 3. Path traversal & encoded traversal neutralized (use raw http.get so %2e%2e reaches Express un-normalized)
+        const travStatus = await new Promise<number>((resolve, reject) => {
+          const req = http.get(
+            {
+              hostname: "127.0.0.1",
+              port,
+              path: "/uploads/email-images/hotel_alpha/%2e%2e/%2e%2e/etc/passwd",
+            },
+            (res) => {
+              res.resume();
+              resolve(res.statusCode || 0);
+            }
+          );
+          req.on("error", reject);
+        });
+        assert.strictEqual(travStatus, 400);
+        const trav2 = await fetch(`${baseHttp}/uploads/email-images/hotel_alpha/not-a-valid-file.svg`);
+        assert.strictEqual(trav2.status, 404);
+        assert.strictEqual(resolveSafeLocalEmailImagePath("../hotel_beta", filename, tmpUploadDir), null);
+        assert.strictEqual(resolveSafeLocalEmailImagePath("hotel_alpha", `../${filename}`, tmpUploadDir), null);
+
+        // 4. Read-only: write methods rejected
+        const postResp = await fetch(`${baseHttp}${urlPath}`, { method: "POST" });
+        assert.strictEqual(postResp.status, 405);
+
+        // 5. Deletion blocked (409) when referenced in a published template; file stays on disk
+        const blockedDel = await deleteHotelImage("hotel_alpha", img.id, undefined, {
+          storageProvider: localProvider,
+          readDocFn: async (_h, id) => memoryStore.get(id) || null,
+          findRefsFn: async () => ({ publishedTemplates: ["booking_confirmation"], draftTemplates: [] }),
+          deleteDocFn: async () => ({ ok: true }),
+        });
+        assert.strictEqual(blockedDel.ok, false);
+        assert.strictEqual(blockedDel.statusCode, 409);
+        assert.strictEqual(fs.existsSync(diskPath), true, "Blocked delete must NOT remove file from disk");
+
+        // 6. Unreferenced deletion removes file from disk AND returns 404 over HTTP
+        const delRes = await deleteHotelImage("hotel_alpha", img.id, undefined, {
+          storageProvider: localProvider,
+          readDocFn: async (_h, id) => memoryStore.get(id) || null,
+          findRefsFn: async () => ({ publishedTemplates: [], draftTemplates: [] }),
+          deleteDocFn: async (_h, id) => {
+            memoryStore.delete(id);
+            return { ok: true };
+          },
+        });
+        assert.strictEqual(delRes.ok, true);
+        assert.strictEqual(fs.existsSync(diskPath), false, "Deleted image must be removed from disk");
+        const afterDelResp = await fetch(`${baseHttp}${urlPath}`);
+        assert.strictEqual(afterDelResp.status, 404);
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    } finally {
+      await fs.promises.rm(tmpUploadDir, { recursive: true, force: true });
+    }
+  });
+
+  // 21. Env-var provider switching (local <-> cloudinary) & Cloudinary server-side signed upload/delete
+  await test("21. Provider switches via IMAGE_STORAGE_PROVIDER env var; Cloudinary signs uploads/deletes per hotel without leaking secrets", async () => {
+    const testSecret = "super_secret_do_not_leak_999";
+
+    // Switching via env var with no code changes
+    const pLocal = resolveImageStorageProvider({ env: { IMAGE_STORAGE_PROVIDER: "local" } });
+    assert.strictEqual(pLocal.name, "local");
+
+    assert.throws(
+      () => resolveImageStorageProvider({ env: { IMAGE_STORAGE_PROVIDER: "s3_unsupported" } }),
+      /Unsupported IMAGE_STORAGE_PROVIDER/
+    );
+
+    // Missing Cloudinary credentials fail cleanly without leaking any secret
+    assert.throws(
+      () =>
+        resolveImageStorageProvider({
+          env: { IMAGE_STORAGE_PROVIDER: "cloudinary", CLOUDINARY_CLOUD_NAME: "demo_cloud" },
+        }),
+      /CLOUDINARY_API_KEY.*CLOUDINARY_API_SECRET/
+    );
+
+    const requests: Array<{ url: string; method: string; body: any }> = [];
+    const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, method: init?.method || "GET", body: init?.body });
+
+      if (url.endsWith("/image/upload")) {
+        const form = init?.body as FormData;
+        const folder = String(form.get("folder") || "");
+        const publicId = String(form.get("public_id") || "");
+        const timestamp = String(form.get("timestamp") || "");
+        const signature = String(form.get("signature") || "");
+        const expectedSig = buildCloudinarySignature(
+          {
+            folder,
+            overwrite: "true",
+            public_id: publicId,
+            timestamp,
+            unique_filename: "false",
+          },
+          testSecret
+        );
+        assert.strictEqual(folder, "pms-email-images/hotel_beta");
+        assert.strictEqual(signature, expectedSig, "Cloudinary upload signature must match SHA-1 spec");
+        assert.strictEqual(form.get("api_key"), "test_api_key_123");
+
+        return new Response(
+          JSON.stringify({
+            secure_url: `https://res.cloudinary.com/demo_cloud/image/upload/v1/${folder}/${publicId}.png`,
+            public_id: `${folder}/${publicId}`,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      if (url.endsWith("/image/destroy")) {
+        const params = new URLSearchParams(String(init?.body || ""));
+        const publicId = params.get("public_id") || "";
+        const timestamp = params.get("timestamp") || "";
+        const signature = params.get("signature") || "";
+        const expectedSig = buildCloudinarySignature(
+          {
+            invalidate: "true",
+            public_id: publicId,
+            timestamp,
+          },
+          testSecret
+        );
+        assert.ok(publicId.startsWith("pms-email-images/hotel_beta/"));
+        assert.strictEqual(signature, expectedSig, "Cloudinary destroy signature must match SHA-1 spec");
+        return new Response(JSON.stringify({ result: "ok" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response("Not found", { status: 404 });
+    }) as typeof fetch;
+
+    const pCloud = resolveImageStorageProvider({
+      env: {
+        IMAGE_STORAGE_PROVIDER: "cloudinary",
+        CLOUDINARY_CLOUD_NAME: "demo_cloud",
+        CLOUDINARY_API_KEY: "test_api_key_123",
+        CLOUDINARY_API_SECRET: testSecret,
+      },
+      fetchFn: mockFetch,
+    });
+    assert.strictEqual(pCloud.name, "cloudinary");
+
+    const samplePng = await sharp({
+      create: { width: 100, height: 100, channels: 4, background: { r: 30, g: 80, b: 200, alpha: 1 } },
+    })
+      .png()
+      .toBuffer();
+
+    const memoryStore = new Map<string, any>();
+    const uploadRes = await uploadHotelImage(
+      "hotel_beta",
+      { base64Data: samplePng.toString("base64"), label: "Hotel Beta Logo" },
+      "admin@hotelbeta.example",
+      undefined,
+      {
+        storageProvider: pCloud,
+        listDocsFn: async () => Array.from(memoryStore.values()),
+        setDocFn: async (_h, id, asset) => {
+          memoryStore.set(id, asset);
+          return { ok: true };
+        },
+      }
+    );
+
+    assert.strictEqual(uploadRes.ok, true, `Cloudinary upload failed: ${uploadRes.error}`);
+    assert.ok(uploadRes.image!.url.startsWith("https://res.cloudinary.com/demo_cloud/"));
+    assert.strictEqual(uploadRes.image!.storageProvider, "cloudinary");
+    assert.ok(uploadRes.image!.storagePath.startsWith("pms-email-images/hotel_beta/"));
+
+    // Cross-hotel delete must NOT call destroy on another hotel's asset
+    const crossHotelDel = await pCloud.delete({
+      hotelId: "hotel_alpha",
+      storagePath: uploadRes.image!.storagePath,
+    });
+    assert.strictEqual(crossHotelDel.deleted, false);
+    assert.strictEqual(requests.length, 1, "Cross-hotel delete must not call Cloudinary destroy");
+
+    // Authorized hotel delete removes image from Cloudinary via signed destroy
+    const delRes = await deleteHotelImage("hotel_beta", uploadRes.image!.id, undefined, {
+      storageProvider: pCloud,
+      readDocFn: async (_h, id) => memoryStore.get(id) || null,
+      findRefsFn: async () => ({ publishedTemplates: [], draftTemplates: [] }),
+      deleteDocFn: async (_h, id) => {
+        memoryStore.delete(id);
+        return { ok: true };
+      },
+    });
+    assert.strictEqual(delRes.ok, true);
+    assert.strictEqual(requests.length, 2);
+    assert.ok(requests[1].url.endsWith("/image/destroy"));
   });
 
   if (process.exitCode && process.exitCode !== 0) {
