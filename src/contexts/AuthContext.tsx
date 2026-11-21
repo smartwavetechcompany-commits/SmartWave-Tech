@@ -642,32 +642,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [user, profile, hotel?.settings?.security?.sessionTimeoutMinutes, signOut]);
 
-  // 6. System Settings Fetcher
+  // 6. Real-Time System Settings Listener (propagates SuperAdmin support email & platform settings live to all accounts)
   useEffect(() => {
-    let retryCount = 0;
-    const maxRetries = 3;
-
-    const fetchSettings = async () => {
-      try {
-        const snap = await getDoc(doc(db, 'system', 'settings'));
+    const unsub = onSnapshot(
+      doc(db, 'system', 'settings'),
+      (snap) => {
         if (snap.exists()) {
           setSystemSettings(snap.data() as SystemSettings);
-          setIsOffline(false);
         }
-      } catch (err: any) {
+        setIsOffline(false);
+      },
+      (err: any) => {
         if (err.message?.includes('offline') || err.code === 'unavailable' || err.code === 'network-request-failed') {
           setIsOffline(true);
-          if (retryCount < maxRetries) {
-            retryCount++;
-            setTimeout(fetchSettings, 2000 * retryCount);
-            return;
-          }
         }
         handleFirestoreError(err, OperationType.GET, 'system/settings');
       }
-    };
+    );
 
-    fetchSettings();
+    return () => unsub();
   }, []);
 
   // 7. Branding Color Application

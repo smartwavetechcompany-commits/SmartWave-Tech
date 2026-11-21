@@ -32,17 +32,18 @@ export function SubscriptionExpiredPage() {
   });
 
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const snap = await getDoc(doc(db, 'system', 'settings'));
+    const unsub = onSnapshot(
+      doc(db, 'system', 'settings'),
+      (snap) => {
         if (snap.exists()) {
           setSettings(snap.data() as SystemSettings);
         }
-      } catch (err: any) {
+      },
+      (err: any) => {
         handleFirestoreError(err, OperationType.GET, 'system/settings');
       }
-    };
-    fetchSettings();
+    );
+    return () => unsub();
   }, []);
 
   const showNotification = (message: string, type: 'success' | 'error' = 'success') => {

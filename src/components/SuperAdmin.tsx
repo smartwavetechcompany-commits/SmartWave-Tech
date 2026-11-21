@@ -163,18 +163,35 @@ export function SuperAdmin() {
     };
   }, [profile?.role]);
 
+  const [savingSettings, setSavingSettings] = useState(false);
+
   const updateSettings = async () => {
+    const trimmedSupportEmail = (settings.supportEmail || '').trim();
+    if (trimmedSupportEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedSupportEmail)) {
+      toast.error('Please enter a valid Support Email address.');
+      return;
+    }
+    setSavingSettings(true);
     try {
-      await database.safeSet(doc(db, 'system', 'settings'), settings, {
+      const payload = {
+        ...settings,
+        supportEmail: trimmedSupportEmail,
+      };
+      await database.safeSet(doc(db, 'system', 'settings'), payload, {
         hotelId: 'system',
         module: 'SuperAdmin',
         action: 'UPDATE_SYSTEM_SETTINGS',
-        details: 'Updated global system settings'
+        details: trimmedSupportEmail
+          ? `Updated global system settings (Support Email: ${trimmedSupportEmail})`
+          : 'Updated global system settings'
       });
-      toast.success('System settings updated successfully');
+      setSettings(payload);
+      toast.success('System settings updated across all registered hotel accounts');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'system/settings');
       toast.error('Failed to update settings');
+    } finally {
+      setSavingSettings(false);
     }
   };
 
@@ -2084,6 +2101,9 @@ export function SuperAdmin() {
                     value={settings.supportEmail}
                     onChange={(e) => setSettings({ ...settings, supportEmail: e.target.value })}
                   />
+                  <p className="text-[11px] text-zinc-500 mt-1">
+                    Updates live in Help &amp; Support, Sidebar, Login, and Renewal pages for every hotel account registered under you.
+                  </p>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
@@ -2134,9 +2154,10 @@ export function SuperAdmin() {
               </div>
               <button 
                 onClick={updateSettings}
-                className="w-full bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95 text-sm"
+                disabled={savingSettings}
+                className="w-full bg-emerald-500 text-black font-bold py-2 rounded-lg hover:bg-emerald-400 transition-all active:scale-95 text-sm disabled:opacity-60"
               >
-                Save Settings
+                {savingSettings ? 'Saving Settings...' : 'Save Settings'}
               </button>
             </div>
           </div>

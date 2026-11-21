@@ -61,6 +61,40 @@ export function Settings() {
   const [showConfirmSystemReset, setShowConfirmSystemReset] = useState(false);
   const [showConfirmPurgeTransactions, setShowConfirmPurgeTransactions] = useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
+  const [supportEmailDraft, setSupportEmailDraft] = useState(systemSettings?.supportEmail || '');
+  const [isSavingSupportEmail, setIsSavingSupportEmail] = useState(false);
+
+  useEffect(() => {
+    setSupportEmailDraft(systemSettings?.supportEmail || '');
+  }, [systemSettings?.supportEmail]);
+
+  const handleSaveSupportEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (profile?.role !== 'superAdmin') {
+      toast.error('Only SuperAdmin can update the platform support email.');
+      return;
+    }
+    const trimmed = supportEmailDraft.trim();
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!trimmed || !emailPattern.test(trimmed)) {
+      toast.error('Please enter a valid support email address.');
+      return;
+    }
+    setIsSavingSupportEmail(true);
+    try {
+      await database.safeSet(doc(db, 'system', 'settings'), { supportEmail: trimmed }, {
+        hotelId: 'system',
+        module: 'SuperAdmin',
+        action: 'UPDATE_SUPPORT_EMAIL',
+        details: `Updated platform support email to ${trimmed}`
+      });
+      toast.success('Support email updated across all registered hotel accounts.');
+    } catch (err) {
+      toast.error('Failed to update support email. Please try again.');
+    } finally {
+      setIsSavingSupportEmail(false);
+    }
+  };
   
   const [formData, setFormData] = useState({
     displayName: profile?.displayName || '',
@@ -2961,7 +2995,7 @@ export function Settings() {
                   </div>
                 </div>
 
-                <div className="pt-4 border-t border-zinc-800">
+                <div className="pt-4 border-t border-zinc-800 space-y-4">
                   <a 
                     href={`mailto:${systemSettings?.supportEmail || 'support@tyyltech.com'}`}
                     className="flex items-center justify-center gap-2 w-full bg-emerald-500 text-black font-bold py-3 rounded-lg hover:bg-emerald-400 transition-all active:scale-95"
@@ -2969,6 +3003,37 @@ export function Settings() {
                     <Mail size={18} />
                     {systemSettings?.supportEmail || 'support@tyyltech.com'}
                   </a>
+
+                  {profile?.role === 'superAdmin' && (
+                    <form onSubmit={handleSaveSupportEmail} className="pt-4 border-t border-zinc-800/80 space-y-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1">
+                          Platform Support Email (SuperAdmin)
+                        </label>
+                        <p className="text-xs text-zinc-500 mb-2">
+                          Changing this email immediately updates the support contact across every hotel account registered under you.
+                        </p>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input
+                            type="email"
+                            value={supportEmailDraft}
+                            onChange={(e) => setSupportEmailDraft(e.target.value)}
+                            placeholder="support@yourdomain.com"
+                            required
+                            className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3.5 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-500 outline-none"
+                          />
+                          <button
+                            type="submit"
+                            disabled={isSavingSupportEmail || !supportEmailDraft.trim() || supportEmailDraft.trim() === (systemSettings?.supportEmail || '')}
+                            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-zinc-100 hover:bg-white text-zinc-950 font-semibold text-xs transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                          >
+                            <Save size={14} />
+                            {isSavingSupportEmail ? 'Saving...' : 'Update Support Email'}
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                  )}
                 </div>
               </div>
 
