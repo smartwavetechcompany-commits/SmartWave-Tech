@@ -15,6 +15,7 @@ import {
   RESTAURANT_POSTING_BLOCKED_MESSAGE,
 } from '../utils/restaurantPostingGuard';
 import { notifyPlatformEvent, notifyReservationEmailEvent } from './transactionalEmailClient';
+import { buildPolicyPenaltyLedgerEntry, hasExistingPostedPenalty } from '../utils/policyUtils';
 
 /**
  * Distinguishes corporate account credits (corporate payments, bulk settlements, deposits, or adjustments)
@@ -150,6 +151,25 @@ export const postToLedger = async (
     if (existingRefundDoc) {
       console.warn(`Duplicate refund skipped for reservation ${reservationId}: key ${entry.idempotencyKey}`);
       return { id: existingRefundDoc.id, ...(existingRefundDoc.data() as LedgerEntry) };
+    }
+  }
+
+  // 0d. Prevent duplicate No-Show penalty or Cancellation fee postings
+  if (
+    entry.type === 'debit' &&
+    (entry.category === 'no_show_penalty' ||
+      entry.category === 'cancellation_fee' ||
+      entry.chargeType === 'no_show_penalty' ||
+      entry.chargeType === 'cancellation_fee')
+  ) {
+    const penaltyType: 'no_show_penalty' | 'cancellation_fee' =
+      entry.category === 'cancellation_fee' || entry.chargeType === 'cancellation_fee'
+        ? 'cancellation_fee'
+        : 'no_show_penalty';
+    const existingEntries = querySnap.docs.map((d: any) => ({ id: d.id, ...(d.data() as LedgerEntry) }));
+    if (hasExistingPostedPenalty(existingEntries, reservationId, penaltyType)) {
+      console.warn(`Duplicate ${penaltyType} skipped for reservation ${reservationId}`);
+      return;
     }
   }
 
@@ -424,9 +444,9 @@ export const postToLedger = async (
 
     const totalDiscountAdj = discountCreditsSum - discountDebitsSum;
 
-    // Debit charges that are room, payment, refund, or transfer should NOT increase the reservation's totalAmount.
+    // Debit charges that are room, payment, refund, transfer, or policy penalties should NOT mutate the reservation's original booking totalAmount.
     // Additionally, if the main posted charge is room-related or non-total, any automatic taxes generated for it should also not increase totalAmount.
-    const nonTotalDebits = ['room', 'payment', 'refund', 'transfer', 'city_ledger'];
+    const nonTotalDebits = ['room', 'payment', 'refund', 'transfer', 'city_ledger', 'no_show_penalty', 'cancellation_fee'];
     const isMainEntryNonTotal = nonTotalDebits.includes(entry.category);
     const projectedTotalAdj = isMainEntryNonTotal
       ? 0
@@ -2357,3 +2377,78 @@ export const reconcileCorporateAccountBalance = async (
     return { currentBalance: 0, totalDebits: 0, totalCredits: 0, reconciled: false };
   }
 };
+
+/**
+ * Evaluates the hotel's active Admin Control Policy for No-Show Penalty or Cancellation Fee
+ * and posts a single, duplicate-safe ledger debit when enabled and amount > 0.
+ * Never mutates the reservation's original booking totalAmount and never posts when disabled.
+ */
+export const applyPolicyPenaltyForReservation = async (
+  hotel: Hotel | null,
+  res: Reservation,
+  penaltyType: 'no_show_penalty' | 'cancellation_fee',
+  postedBy: string,
+  userContext?: { uid?: string; email?: string; role?: string; displayName?: string }
+): Promise<{ posted: boolean; amount: number; description?: string; reason?: string }> => {
+  if (!hotel?.id || !res?.id) {
+    return { posted: false, amount: 0, reason: 'missing_context' };
+  }
+
+  try {
+    // Read latest hotel settings from Firestore so freshly saved Admin Control Policy changes apply immediately
+    let activeHotel: Hotel = hotel;
+    try {
+      const hotelSnap = await getDoc(doc(db, 'hotels', hotel.id));
+      if (hotelSnap.exists()) {
+        activeHotel = { id: hotelSnap.id, ...(hotelSnap.data() as Omit<Hotel, 'id'>) } as Hotel;
+      }
+    } catch (hotelReadErr) {
+      console.warn('[applyPolicyPenaltyForReservation] Falling back to local hotel settings:', hotelReadErr);
+    }
+
+    // Fetch existing reservation ledger entries to guarantee zero duplicate postings
+    const existingSnap = await getDocs(
+      query(collection(db, 'hotels', hotel.id, 'ledger'), where('reservationId', '==', res.id))
+    );
+    const existingEntries = existingSnap.docs.map(d => ({ id: d.id, ...d.data() } as LedgerEntry));
+
+    if (hasExistingPostedPenalty(existingEntries, res.id, penaltyType)) {
+      return { posted: false, amount: 0, reason: 'already_posted' };
+    }
+
+    const builtEntry = buildPolicyPenaltyLedgerEntry(
+      res,
+      activeHotel,
+      penaltyType,
+      postedBy || 'system',
+      existingEntries
+    );
+
+    if (!builtEntry || builtEntry.amount <= 0) {
+      return { posted: false, amount: 0, reason: 'policy_disabled_or_zero' };
+    }
+
+    const { hotelId: _h, guestId: _g, reservationId: _r, ...entryPayload } = builtEntry;
+
+    await postToLedger(
+      hotel.id,
+      res.guestId || 'unknown',
+      res.id,
+      entryPayload,
+      postedBy || 'system',
+      res.corporateId,
+      'cash',
+      userContext
+    );
+
+    return {
+      posted: true,
+      amount: builtEntry.amount,
+      description: builtEntry.description
+    };
+  } catch (err) {
+    console.warn(`[applyPolicyPenaltyForReservation] Failed to apply ${penaltyType} for reservation ${res.id}:`, err);
+    return { posted: false, amount: 0, reason: 'error' };
+  }
+};
+

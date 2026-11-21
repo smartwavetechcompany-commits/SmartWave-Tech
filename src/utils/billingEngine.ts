@@ -3,6 +3,7 @@ import { startOfDay, parseISO, differenceInDays, format, addDays } from 'date-fn
 import { calculateReservationAccount } from './financialUtils';
 import { calculateStayDuration, StayDuration, getGracePeriodInfo } from './dateUtils';
 import { calculateBookedRoomTotal, resolveLegacyOriginalRate } from './rateSnapshot';
+import { isPostedPenaltyLedgerEntry } from './policyUtils';
 
 /**
  * Safely parses a date string (YYYY-MM-DD) and optional time string (HH:MM)
@@ -211,12 +212,58 @@ export class BillingEngine {
     const stayDuration = this.calculateStay(res, hotel, currentTime);
     const nightlyRate = this.getNightlyRate(res, hotel, ledgerEntries);
 
+    const resLedger = ledgerEntries ? ledgerEntries.filter(e => e.reservationId === res.id) : undefined;
+
+    // Authoritative classification for No-Show & Cancelled folios:
+    // Never show unposted room booking totals, overstay charges, or room taxes as guest debt.
+    // Only explicitly posted penalties/cancellation fees and actual ledger payments/refunds apply.
+    if (res.status === 'no_show' || res.status === 'cancelled') {
+      const account = calculateReservationAccount(res, hotel, ledgerEntries, { currentTime });
+      const penaltyEntries = (resLedger || []).filter(e => isPostedPenaltyLedgerEntry(e, res.status));
+      const sanitizedDuration: StayDuration = {
+        ...stayDuration,
+        actualStayedNights: 0,
+        chargeableNights: 0,
+        overstayNights: 0,
+        totalNights: 0,
+        totalDays: 0,
+      };
+
+      return {
+        stayDuration: sanitizedDuration,
+        nightlyRate,
+        tier1: {
+          baseRoomGross: 0,
+          overstayGross: 0,
+          ancillaryCharges: penaltyEntries,
+          ancillaryTotal: account.totalCharges,
+          totalGrossRate: account.totalCharges,
+        },
+        tier2: {
+          taxes: [],
+          totalTaxAmount: 0,
+          inclusiveTaxTotal: 0,
+          exclusiveTaxTotal: 0,
+        },
+        tier3: {
+          totalCharges: account.totalCharges,
+          totalPayments: account.totalCredits,
+          totalRefunds: account.totalRefunds,
+          outstandingBalance: account.outstandingBalance,
+          netAmountDue: account.netAmountDue,
+          creditBalance: account.creditBalance,
+          accountStatus: account.accountStatus,
+        },
+        isOverstaying: false,
+        overstayNights: 0,
+        overstayCharge: 0,
+      };
+    }
+
     const activeTaxes = (hotel?.taxes || []).filter(t => 
       (t.status || '').toLowerCase() === 'active' && 
       (t.category || '').toLowerCase() !== 'restaurant'
     );
-
-    const resLedger = ledgerEntries ? ledgerEntries.filter(e => e.reservationId === res.id) : undefined;
 
     let baseRoomGross = 0;
     let ancillaryCharges: LedgerEntry[] = [];

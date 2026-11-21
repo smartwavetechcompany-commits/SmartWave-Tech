@@ -3,7 +3,7 @@ import { collection, onSnapshot, query, orderBy, doc, getDocs, getDoc, where, wr
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking, LedgerEntry, Promotion } from '../types';
-import { postToLedger, settleLedger, transferToCityLedger, processAutomatedBillingForReservation, deleteReservationWithFinancialReversal, reconcileAndRepairReservationFinancials, reconcileCorporateAccountBalance } from '../services/ledgerService';
+import { postToLedger, settleLedger, transferToCityLedger, processAutomatedBillingForReservation, deleteReservationWithFinancialReversal, reconcileAndRepairReservationFinancials, reconcileCorporateAccountBalance, applyPolicyPenaltyForReservation } from '../services/ledgerService';
 import { principalRoomService } from '../services/principalRoomService';
 import { recordOutstandingDebt, checkReturningGuestDebt, syncOutstandingDebtWithReservation } from '../services/debtService';
 import { ReturningGuestDebtModal } from './ReturningGuestDebtModal';
@@ -856,6 +856,14 @@ export function FrontDesk() {
             module: 'Reservation Automation',
             action: 'AUTO_CANCEL_UNPAID',
             details: `Auto-cancelled unpaid reservation ${res.id} after buffer expiry`
+          }).then(async () => {
+            await applyPolicyPenaltyForReservation(
+              hotel,
+              res,
+              'cancellation_fee',
+              profile?.uid || 'system',
+              profile ? { uid: profile.uid, email: profile.email, role: profile.role, displayName: profile.displayName } : undefined
+            );
           });
           batchUpdates.push(p);
           return;
@@ -898,6 +906,14 @@ export function FrontDesk() {
                 });
               }
             }
+            // Enforce Admin Control No-Show Penalty policy if enabled (safe no-op if disabled)
+            await applyPolicyPenaltyForReservation(
+              hotel,
+              res,
+              'no_show_penalty',
+              profile?.uid || 'system',
+              profile ? { uid: profile.uid, email: profile.email, role: profile.role, displayName: profile.displayName } : undefined
+            );
           });
           batchUpdates.push(p);
         }
@@ -3114,14 +3130,42 @@ export function FrontDesk() {
           details: `Room ${res.roomNumber} released due to cancellation`
         });
 
-        // Additive: Trigger transactional cancellation or no-show notification only on real transition
+        // Enforce Admin Control Policy penalty & trigger transactional email only on real transition
         if (status === 'cancelled' && res.status !== 'cancelled') {
+          try {
+            const penaltyResult = await applyPolicyPenaltyForReservation(
+              hotel,
+              res,
+              'cancellation_fee',
+              profile?.uid || 'system',
+              profile ? { uid: profile.uid, email: profile.email, role: profile.role, displayName: profile.displayName } : undefined
+            );
+            if (penaltyResult.posted) {
+              toast.info(`Cancellation fee of ${formatCurrency(penaltyResult.amount, currency, exchangeRate)} posted per hotel policy.`);
+            }
+          } catch (penaltyErr) {
+            console.warn('[FrontDesk] Cancellation fee policy execution skipped:', penaltyErr);
+          }
           try {
             void notifyReservationEmailEvent(hotel.id, res.id, 'cancelled');
           } catch (emailErr) {
             console.warn('[FrontDesk] Booking cancellation email trigger skipped:', emailErr);
           }
         } else if (status === 'no_show' && res.status !== 'no_show') {
+          try {
+            const penaltyResult = await applyPolicyPenaltyForReservation(
+              hotel,
+              res,
+              'no_show_penalty',
+              profile?.uid || 'system',
+              profile ? { uid: profile.uid, email: profile.email, role: profile.role, displayName: profile.displayName } : undefined
+            );
+            if (penaltyResult.posted) {
+              toast.info(`No-Show penalty of ${formatCurrency(penaltyResult.amount, currency, exchangeRate)} posted per hotel policy.`);
+            }
+          } catch (penaltyErr) {
+            console.warn('[FrontDesk] No-Show penalty policy execution skipped:', penaltyErr);
+          }
           try {
             void notifyReservationEmailEvent(hotel.id, res.id, 'no_show');
           } catch (emailErr) {

@@ -5,7 +5,7 @@ import {
   calculateReservationAccount,
   calculateGuestAccount,
 } from '../utils/financialUtils';
-import { getReservationLiveBalance } from '../utils/billingEngine';
+import { BillingEngine, getReservationLiveBalance } from '../utils/billingEngine';
 import { calculateGuestFinancialPosition } from '../services/financialService';
 import {
   getNoShowPenaltyPolicy,
@@ -142,6 +142,19 @@ test('Scenario 1: No-Show without penalty -> ₦0 outstanding debt (ignores unpa
   assert.equal(guestPos.actualStayedNights, 0);
   assert.equal(guestPos.chargeableNights, 0);
   assert.equal(guestAcc.netAmountDue, 0);
+
+  // Guest Folio breakdown must also show ₦0 balance, 0 chargeable nights, and no overstay
+  const folioEmpty = BillingEngine.calculateFolioBreakdown(res, defaultHotel, []);
+  const folioWithRoom = BillingEngine.calculateFolioBreakdown(res, defaultHotel, ledger);
+  assert.equal(folioEmpty.tier1.baseRoomGross, 0);
+  assert.equal(folioEmpty.tier1.totalGrossRate, 0);
+  assert.equal(folioEmpty.tier3.totalCharges, 0);
+  assert.equal(folioEmpty.tier3.outstandingBalance, 0);
+  assert.equal(folioEmpty.stayDuration.chargeableNights, 0);
+  assert.equal(folioEmpty.stayDuration.actualStayedNights, 0);
+  assert.equal(folioEmpty.isOverstaying, false);
+  assert.equal(folioWithRoom.tier3.totalCharges, 0);
+  assert.equal(folioWithRoom.tier3.outstandingBalance, 0);
 });
 
 // 2. No-Show with unpaid ₦50,000 penalty -> ₦50,000 outstanding debt
@@ -184,6 +197,16 @@ test('Scenario 2: No-Show with unpaid ₦50,000 penalty -> ₦50,000 outstanding
   assert.equal(guestPos.totalSpent, 0);
   assert.equal(guestPos.actualStayedNights, 0);
   assert.equal(guestAcc.netAmountDue, 50000);
+
+  // Guest Folio breakdown must show only the explicitly posted ₦50,000 penalty
+  const folioPen = BillingEngine.calculateFolioBreakdown(res, defaultHotel, ledger);
+  assert.equal(folioPen.tier1.baseRoomGross, 0);
+  assert.equal(folioPen.tier1.ancillaryCharges.length, 1);
+  assert.equal(folioPen.tier1.totalGrossRate, 50000);
+  assert.equal(folioPen.tier3.totalCharges, 50000);
+  assert.equal(folioPen.tier3.outstandingBalance, 50000);
+  assert.equal(folioPen.stayDuration.chargeableNights, 0);
+  assert.equal(folioPen.isOverstaying, false);
 });
 
 // 3. Cancelled without cancellation fee -> ₦0 outstanding debt
@@ -269,6 +292,14 @@ test('Scenario 4: Cancelled with unpaid ₦20,000 cancellation fee -> ₦20,000 
   assert.equal(guestPos.totalSpent, 0);
   assert.equal(guestPos.actualStayedNights, 0);
   assert.equal(guestAcc.netAmountDue, 20000);
+
+  // Guest Folio breakdown must reflect only the posted ₦20,000 cancellation fee
+  const folioCancelFee = BillingEngine.calculateFolioBreakdown(res, defaultHotel, ledger);
+  assert.equal(folioCancelFee.tier1.baseRoomGross, 0);
+  assert.equal(folioCancelFee.tier1.ancillaryCharges.length, 1);
+  assert.equal(folioCancelFee.tier3.totalCharges, 20000);
+  assert.equal(folioCancelFee.tier3.outstandingBalance, 20000);
+  assert.equal(folioCancelFee.isOverstaying, false);
 });
 
 // 5. Checked-out guest with unpaid folio -> unpaid folio balance remains debt

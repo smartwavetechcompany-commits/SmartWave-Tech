@@ -8,6 +8,7 @@ import { BillingEngine, calculateBilling, getReservationLiveBalance } from '../u
 import { calculateReservationAccount, cleanLedgerDescription, calculateCorporateUnpostedStayBreakdown } from '../utils/financialUtils';
 import { parseTimestampToDate, safeFormatDate } from '../utils/dateUtils';
 import { calculateBookedRoomTotal, getNightlyRateForStayIndex } from '../utils/rateSnapshot';
+import { isPostedPenaltyLedgerEntry } from '../utils/policyUtils';
 import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { printDocument } from '../utils/printUtils';
@@ -324,8 +325,13 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   // Merge hidden taxes into their parent entries based on active settings
   const processedEntries = processLedgerTaxes(reconciledEntries, hotel.taxes || [], 'showOnReceipt');
   
+  const isNoShowOrCancelledRes = reservation?.status === 'no_show' || reservation?.status === 'cancelled';
   const debits = processedEntries.filter(e => e.type === 'debit');
-  const chargeDebits = debits.filter(e => getSafeStr(e.category).toLowerCase() !== 'refund');
+  const chargeDebits = debits.filter(e => {
+    if (getSafeStr(e.category).toLowerCase() === 'refund') return false;
+    if (isNoShowOrCancelledRes) return isPostedPenaltyLedgerEntry(e, reservation?.status);
+    return true;
+  });
   const credits = processedEntries.filter(e => e.type === 'credit');
   
   const totalDebits = debits.reduce((acc, e) => acc + e.amount, 0);
@@ -380,7 +386,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   const postedNightsCount = roomDebits.length;
 
   let unpostedRoomBase = 0;
-  if (reservation && type !== 'restaurant') {
+  if (reservation && type !== 'restaurant' && !isNoShowOrCancelledRes) {
     const resAccount = calculateReservationAccount(reservation, hotel, reconciledEntries);
     const totalNights = resAccount.totalNights || reservation.nights || 1;
     const bookedNightsCount = resAccount.bookingNights || reservation.nights || 1;

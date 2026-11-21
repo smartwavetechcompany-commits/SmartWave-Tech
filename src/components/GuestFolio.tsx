@@ -6,12 +6,12 @@ import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { Reservation, LedgerEntry, OperationType, Guest, Room, CorporateAccount, Promotion } from '../types';
-import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, refundGuest, validateRefundRequest, transferToCityLedger, purgeCorruptedLedgerEntries, detectAndPurgeDuplicateOverstayCharges, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials } from '../services/ledgerService';
+import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, refundGuest, validateRefundRequest, transferToCityLedger, purgeCorruptedLedgerEntries, detectAndPurgeDuplicateOverstayCharges, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials, applyPolicyPenaltyForReservation } from '../services/ledgerService';
 import { principalRoomService, GroupFinancialSummary } from '../services/principalRoomService';
 import { validatePromotion, recordPromotionRedemption, subscribePromotions } from '../services/promotionService';
 import { logActivity } from '../utils/activityLogger';
 import { validateLedgerTransaction } from '../services/financialService';
-import { canEditInvoice, canVoidTransaction, canApplyDiscount, canProcessRefund } from '../utils/policyUtils';
+import { canEditInvoice, canVoidTransaction, canApplyDiscount, canProcessRefund, getNoShowPenaltyPolicy, getCancellationFeePolicy, calculatePolicyPenaltyAmount, hasExistingPostedPenalty } from '../utils/policyUtils';
 import { ReceiptGenerator, processLedgerTaxes } from './ReceiptGenerator';
 import { DiscountApplication } from './DiscountApplication';
 import { ConfirmModal } from './ConfirmModal';
@@ -117,6 +117,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const [showDiagnosticModal, setShowDiagnosticModal] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<LedgerEntry | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [applyingPolicyPenalty, setApplyingPolicyPenalty] = useState(false);
   const [showSettleOverpayment, setShowSettleOverpayment] = useState(false);
   const [showSettlePayment, setShowSettlePayment] = useState(false);
   const [showOverpaymentWarning, setShowOverpaymentWarning] = useState(false);
@@ -1186,6 +1187,63 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
   const totalCredits = folioBreakdown.tier3.totalPayments;
   const balance = folioBreakdown.tier3.outstandingBalance;
 
+  const isNoShowOrCancelled = currentReservation.status === 'no_show' || currentReservation.status === 'cancelled';
+  const activePenaltyType: 'no_show_penalty' | 'cancellation_fee' =
+    currentReservation.status === 'no_show' ? 'no_show_penalty' : 'cancellation_fee';
+  const activePenaltyPolicy =
+    currentReservation.status === 'no_show'
+      ? getNoShowPenaltyPolicy(hotel)
+      : getCancellationFeePolicy(hotel);
+  const configuredPolicyPenaltyAmount = isNoShowOrCancelled
+    ? calculatePolicyPenaltyAmount(activePenaltyPolicy, currentReservation.totalAmount || 0)
+    : 0;
+  const alreadyHasPostedPenalty = isNoShowOrCancelled
+    ? hasExistingPostedPenalty(ledgerEntries, currentReservation.id, activePenaltyType)
+    : false;
+  const canApplyPolicyPenaltyManually = Boolean(
+    isNoShowOrCancelled &&
+    activePenaltyPolicy.enabled &&
+    configuredPolicyPenaltyAmount > 0 &&
+    !alreadyHasPostedPenalty &&
+    profile &&
+    (profile.role === 'hotelAdmin' ||
+      profile.role === 'superAdmin' ||
+      hasPermission(profile, 'cancel_reservations', customRoles) ||
+      hasPermission(profile, 'edit_settings', customRoles))
+  );
+
+  const handleApplyPolicyPenalty = async () => {
+    if (!hotel?.id || !profile || !isNoShowOrCancelled || applyingPolicyPenalty) return;
+    setApplyingPolicyPenalty(true);
+    try {
+      const result = await applyPolicyPenaltyForReservation(
+        hotel,
+        currentReservation,
+        activePenaltyType,
+        profile.uid,
+        {
+          uid: profile.uid,
+          email: profile.email,
+          role: profile.role,
+          displayName: profile.displayName || (profile as any)?.name || 'Admin'
+        }
+      );
+      if (result.posted) {
+        const label = activePenaltyType === 'no_show_penalty' ? 'No-Show penalty' : 'Cancellation fee';
+        toast.success(`${label} of ${formatCurrency(result.amount, currency, exchangeRate)} posted to folio.`);
+      } else if (result.reason === 'already_posted') {
+        toast.info('A policy penalty has already been posted for this reservation.');
+      } else {
+        toast.info('No penalty posted — check Admin Controls policy settings.');
+      }
+    } catch (err) {
+      console.error('Failed to apply policy penalty:', err);
+      toast.error('Failed to post policy penalty.');
+    } finally {
+      setApplyingPolicyPenalty(false);
+    }
+  };
+
   const folioAvailableCredit = balance < -0.01 ? Number(Math.abs(balance).toFixed(2)) : 0;
   const groupAvailableCredit = (isMasterWithLinks && groupFinancialSummary)
     ? (groupFinancialSummary.groupNetBalance < -0.01
@@ -1998,6 +2056,8 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         "text-[10px] font-bold uppercase px-2 py-0.5 rounded",
                         (currentReservation.operationalStatus || currentReservation.status) === 'checked_in' ? "bg-emerald-500/10 text-emerald-500" :
                         (currentReservation.operationalStatus || currentReservation.status) === 'checked_out' ? "bg-zinc-800 text-zinc-300 border border-zinc-700" :
+                        (currentReservation.operationalStatus || currentReservation.status) === 'no_show' ? "bg-amber-500/15 text-amber-400 border border-amber-500/30" :
+                        (currentReservation.operationalStatus || currentReservation.status) === 'cancelled' ? "bg-red-500/15 text-red-400 border border-red-500/30" :
                         "bg-blue-500/10 text-blue-500"
                       )}>
                         {(currentReservation.operationalStatus || currentReservation.status).replace('_', ' ')}
@@ -2042,7 +2102,60 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   />
                 </div>
 
-                {/* Grace Period & Departure Policy Card */}
+                {/* Grace Period & Departure Policy Card (or No-Show / Cancelled Policy Status Card) */}
+                {isNoShowOrCancelled ? (
+                  <div className="pt-3 mt-2 border-t border-zinc-800/60 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <ShieldAlert size={11} className={currentReservation.status === 'no_show' ? 'text-amber-400' : 'text-red-400'} />
+                        {currentReservation.status === 'no_show' ? 'No-Show Policy Status' : 'Cancellation Policy Status'}
+                      </p>
+                      <span className={cn(
+                        "text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border",
+                        alreadyHasPostedPenalty
+                          ? "bg-amber-500/15 text-amber-300 border-amber-500/30"
+                          : "bg-zinc-800 text-zinc-400 border-zinc-700"
+                      )}>
+                        {alreadyHasPostedPenalty ? 'Penalty Posted' : 'No Penalty Posted'}
+                      </span>
+                    </div>
+
+                    <div className="p-2.5 rounded-xl border bg-zinc-900/60 border-zinc-800 text-xs space-y-1.5">
+                      <p className="text-[11px] text-zinc-300 font-medium">
+                        {currentReservation.status === 'no_show'
+                          ? 'Guest did not check in. Grace period, nightly billing, and overstay charges do not apply.'
+                          : 'Reservation was cancelled. Grace period, nightly billing, and overstay charges do not apply.'}
+                      </p>
+                      <p className="text-[10px] text-zinc-500">
+                        Admin Control Policy:{' '}
+                        {activePenaltyPolicy.enabled && configuredPolicyPenaltyAmount > 0 ? (
+                          <span className="text-amber-400 font-semibold">
+                            Enabled ({activePenaltyPolicy.feeType === 'percentage'
+                              ? `${activePenaltyPolicy.amount}% — ${formatCurrency(configuredPolicyPenaltyAmount, currency, exchangeRate)}`
+                              : formatCurrency(configuredPolicyPenaltyAmount, currency, exchangeRate)})
+                          </span>
+                        ) : (
+                          <span className="text-zinc-400 font-semibold">Disabled (₦0 Automatic Penalty)</span>
+                        )}
+                      </p>
+                      {canApplyPolicyPenaltyManually && (
+                        <button
+                          type="button"
+                          onClick={handleApplyPolicyPenalty}
+                          disabled={applyingPolicyPenalty}
+                          className="mt-1.5 w-full py-1.5 px-3 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+                        >
+                          {applyingPolicyPenalty ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <PlusCircle size={12} />
+                          )}
+                          Apply {currentReservation.status === 'no_show' ? 'No-Show Penalty' : 'Cancellation Fee'} ({formatCurrency(configuredPolicyPenaltyAmount, currency, exchangeRate)})
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
                 <div className="pt-3 mt-2 border-t border-zinc-800/60 space-y-2.5">
                   <div className="flex items-center justify-between">
                     <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -2140,6 +2253,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     );
                   })()}
                 </div>
+                )}
               </div>
             </div>
 
@@ -2170,7 +2284,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   
                   {/* Base rate calculations */}
                   <div className="flex justify-between text-xs">
-                    <span className="text-zinc-500">Base Room Stay Gross ({folioBreakdown.stayDuration.bookedNights} night{folioBreakdown.stayDuration.bookedNights > 1 ? 's' : ''})</span>
+                    <span className="text-zinc-500">
+                      {isNoShowOrCancelled
+                        ? `Base Room Stay Gross (0 chargeable nights — ${currentReservation.status === 'no_show' ? 'No-Show' : 'Cancelled'})`
+                        : `Base Room Stay Gross (${folioBreakdown.stayDuration.bookedNights} night${folioBreakdown.stayDuration.bookedNights > 1 ? 's' : ''})`}
+                    </span>
                     <span className="text-zinc-300 font-medium font-mono">
                       {formatCurrency(folioBreakdown.tier1.baseRoomGross, currency, exchangeRate)}
                     </span>
@@ -2187,10 +2305,12 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                     </div>
                   )}
                   
-                  {/* Ancillary services list if any */}
-                  {folioBreakdown.tier1.ancillaryCharges.length > 0 && (
+                  {/* Ancillary services or posted policy penalties list if any */}
+                  {folioBreakdown.tier1.ancillaryCharges.length > 0 ? (
                     <div className="pt-2 border-t border-zinc-900 space-y-1">
-                      <span className="text-[9px] font-bold text-zinc-600 uppercase">Ancillary Gross Charges</span>
+                      <span className="text-[9px] font-bold text-zinc-600 uppercase">
+                        {isNoShowOrCancelled ? 'Posted Policy Penalty / Fee' : 'Ancillary Gross Charges'}
+                      </span>
                       {folioBreakdown.tier1.ancillaryCharges.map((e, idx) => (
                         <div key={idx} className="flex justify-between text-[11px] text-zinc-400 pl-2">
                           <span className="truncate max-w-[200px]">{e.description}</span>
@@ -2198,7 +2318,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         </div>
                       ))}
                     </div>
-                  )}
+                  ) : isNoShowOrCancelled ? (
+                    <p className="text-[10px] text-zinc-500 italic pt-1">
+                      No policy penalty posted — {formatCurrency(0, currency, exchangeRate)} financial liability
+                    </p>
+                  ) : null}
 
                   {/* Gross Rate Sum */}
                   <div className="flex justify-between text-xs pt-2 mt-2 border-t border-zinc-800 font-bold">
@@ -2320,7 +2444,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                         "text-[9px] font-bold uppercase tracking-wider mt-0.5",
                         balance > 0.01 ? "text-red-500" : balance < -0.01 ? "text-blue-500" : "text-emerald-400"
                       )}>
-                        {balance > 0.01 ? (activeFolio === 'company' ? "Amount Due to Property" : "Guest Debt / Owing") : balance < -0.01 ? "Credit Balance (Overpaid)" : "Account Fully Settled"}
+                        {balance > 0.01
+                          ? (activeFolio === 'company' ? "Amount Due to Property" : "Guest Debt / Owing")
+                          : balance < -0.01
+                            ? "Credit Balance (Overpaid)"
+                            : (isNoShowOrCancelled && totalDebits <= 0.01 ? "No Penalty Applied (₦0 Liability)" : "Account Fully Settled")}
                       </span>
                     </div>
                   </div>
@@ -2374,7 +2502,11 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                   <div className="space-y-2.5">
                     <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-center gap-2 text-emerald-400">
                       <CheckCircle2 size={18} />
-                      <span className="text-xs font-black uppercase tracking-widest">✅ Account Settled</span>
+                      <span className="text-xs font-black uppercase tracking-widest">
+                        {isNoShowOrCancelled && totalDebits <= 0.01 && Math.abs(balance) <= 0.01
+                          ? '✅ No Penalty Applied — ₦0 Liability'
+                          : '✅ Account Settled'}
+                      </span>
                     </div>
 
                     {balance < -0.01 && (() => {

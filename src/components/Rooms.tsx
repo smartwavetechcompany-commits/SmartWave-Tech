@@ -47,7 +47,7 @@ import { canBlockRoom, canUnblockRoom, canCheckout } from '../utils/policyUtils'
 import { ensureBaseRateSnapshot } from '../utils/rateSnapshot';
 import { calculateBilling, parseLocalDateTime, getReservationLiveBalance, BillingService } from '../utils/billingEngine';
 import { calculateStayDuration, safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
-import { postToLedger, transferToCityLedger, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials, reconcileCorporateAccountBalance } from '../services/ledgerService';
+import { postToLedger, transferToCityLedger, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials, reconcileCorporateAccountBalance, applyPolicyPenaltyForReservation } from '../services/ledgerService';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { addDays, subDays, startOfDay, endOfDay, isWithinInterval, parseISO, eachDayOfInterval, isSameDay, format, isAfter, isBefore, differenceInDays } from 'date-fns';
@@ -314,6 +314,14 @@ export function Rooms() {
             });
           }
         }
+        // Enforce Admin Control No-Show Penalty policy if enabled (safe no-op if disabled)
+        await applyPolicyPenaltyForReservation(
+          hotel,
+          res,
+          'no_show_penalty',
+          profile?.uid || 'system',
+          profile ? { uid: profile.uid, email: profile.email, role: profile.role, displayName: profile.displayName } : undefined
+        );
       });
       updates.push(p);
     });

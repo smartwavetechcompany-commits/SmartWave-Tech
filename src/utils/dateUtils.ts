@@ -399,6 +399,10 @@ export function StayDurationDisplay({
   mode?: 'compact' | 'detailed' | 'full';
 }) {
   const duration = calculateStayDuration(checkIn, checkOut, overstayNights, status, currentDate);
+  const isNoShowOrCancelled = status === 'no_show' || status === 'cancelled';
+  const displayedOverstayNights = isNoShowOrCancelled ? 0 : duration.overstayNights;
+  const displayedActualNights = isNoShowOrCancelled ? 0 : duration.actualStayedNights;
+  const displayedChargeableNights = isNoShowOrCancelled ? 0 : duration.chargeableNights;
 
   if (showDetailed || mode === 'full') {
     return React.createElement(
@@ -410,23 +414,23 @@ export function StayDurationDisplay({
         React.createElement('span', { className: 'text-zinc-500 text-[10px] uppercase font-bold tracking-wider' }, 'Original Booking:'),
         React.createElement('span', { className: 'font-semibold text-zinc-200' }, `${duration.bookingNights} Night${duration.bookingNights === 1 ? '' : 's'}`)
       ),
-      duration.overstayNights > 0 && React.createElement(
+      displayedOverstayNights > 0 && React.createElement(
         'div',
         { className: 'flex justify-between items-center text-red-400 font-medium bg-red-500/10 px-2 py-1 rounded border border-red-500/20' },
         React.createElement('span', { className: 'text-red-400 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1' }, 'Overstay Duration:'),
-        React.createElement('span', { className: 'font-extrabold text-red-400' }, `+${duration.overstayNights} Night${duration.overstayNights === 1 ? '' : 's'}`)
+        React.createElement('span', { className: 'font-extrabold text-red-400' }, `+${displayedOverstayNights} Night${displayedOverstayNights === 1 ? '' : 's'}`)
       ),
       React.createElement(
         'div',
         { className: 'flex justify-between items-center text-zinc-300 font-medium' },
         React.createElement('span', { className: 'text-zinc-500 text-[10px] uppercase font-bold tracking-wider' }, 'Actual Stayed:'),
-        React.createElement('span', { className: 'font-semibold text-zinc-200' }, `${duration.actualStayedNights} Night${duration.actualStayedNights === 1 ? '' : 's'}`)
+        React.createElement('span', { className: 'font-semibold text-zinc-200' }, `${displayedActualNights} Night${displayedActualNights === 1 ? '' : 's'}`)
       ),
       React.createElement(
         'div',
         { className: 'flex justify-between items-center pt-1.5 border-t border-zinc-800 text-amber-400 font-bold' },
         React.createElement('span', { className: 'uppercase tracking-wider text-[10px]' }, 'Total Chargeable:'),
-        React.createElement('span', { className: 'text-sm font-black' }, `${duration.chargeableNights} Night${duration.chargeableNights === 1 ? '' : 's'}`)
+        React.createElement('span', { className: 'text-sm font-black' }, `${displayedChargeableNights} Night${displayedChargeableNights === 1 ? '' : 's'}`)
       )
     );
   }
