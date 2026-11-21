@@ -291,11 +291,13 @@ export async function generatePasswordResetToken(options: GenerateTokenOptions):
   const hotelTokenRef = doc(db, 'hotels', hotelId, 'passwordResetTokens', tokenId);
   await setDoc(hotelTokenRef, tokenRecord);
 
-  // 3. Update staff user profile: status becomes 'password_reset_pending'
+  // 3. Update staff user profile: status becomes 'password_reset_pending' with expiry metadata
   try {
     const userDocRef = doc(db, 'users', targetUser.uid);
     await updateDoc(userDocRef, {
       status: 'password_reset_pending',
+      passwordResetTokenId: tokenId,
+      passwordResetExpiresAt: expiresAt,
       lastPasswordResetRequestedAt: createdAt,
       lastPasswordResetRequestedBy: adminProfile.email,
       updatedAt: createdAt
@@ -389,12 +391,15 @@ export async function validatePasswordResetToken(tokenId: string, emailHint?: st
       if (srvData?.valid && srvData?.tokenData) {
         return {
           valid: true,
-          tokenData: srvData.tokenData
+          tokenData: {
+            ...srvData.tokenData,
+            token: srvData.tokenData.token || srvData.tokenData.tokenId || tokenId
+          }
         };
       } else if (srvData && srvData.valid === false) {
         return {
           valid: false,
-          error: srvData.error || 'The activation link is invalid, expired, or has already been used.',
+          error: srvData.error || 'The link is invalid, expired, or has already been used.',
           errorCode: 'INVALID'
         };
       }
@@ -491,17 +496,41 @@ export async function validatePasswordResetToken(tokenId: string, emailHint?: st
     const expiryTime = new Date(tokenData.expiresAt).getTime();
     if (isNaN(expiryTime) || Date.now() > expiryTime) {
       const formattedExpiry = new Date(tokenData.expiresAt).toLocaleString();
+      if ((tokenData.type || 'password_reset') === 'password_reset') {
+        const nowIso = new Date().toISOString();
+        updateDoc(doc(db, 'passwordResetTokens', tokenId), { status: 'expired', updatedAt: nowIso }).catch(() => {});
+        if (tokenData.hotelId) {
+          updateDoc(doc(db, 'hotels', tokenData.hotelId, 'passwordResetTokens', tokenId), { status: 'expired', updatedAt: nowIso }).catch(() => {});
+        }
+        if (tokenData.targetUid) {
+          getDoc(doc(db, 'users', tokenData.targetUid))
+            .then((uSnap) => {
+              if (uSnap.exists() && uSnap.data()?.status === 'password_reset_pending') {
+                return updateDoc(doc(db, 'users', tokenData.targetUid), {
+                  status: 'active',
+                  passwordResetTokenId: null,
+                  passwordResetExpiresAt: null,
+                  updatedAt: nowIso
+                });
+              }
+            })
+            .catch(() => {});
+        }
+      }
       return {
         valid: false,
         tokenData,
-        error: `This password reset link expired on ${formattedExpiry}. Password reset links are time-limited for security. Please request a new link from your Hotel Administrator.`,
+        error: `This password reset link expired on ${formattedExpiry}. Your account status has returned to active so your Hotel Administrator can issue a new link.`,
         errorCode: 'EXPIRED'
       };
     }
 
     return {
       valid: true,
-      tokenData
+      tokenData: {
+        ...tokenData,
+        token: tokenData.token || (tokenData as any).tokenId || tokenId
+      }
     };
   } catch (err: any) {
     console.warn('Error validating password reset token via Firestore:', err);
@@ -533,7 +562,7 @@ export async function validatePasswordResetToken(tokenId: string, emailHint?: st
 
 /**
  * Completes the password reset process:
- * Updates the user's password, marks the token as used, updates Firebase Auth and Firestore, and logs to the audit trail.
+ * Updates the user's password via authoritative server endpoint, marks the token as used, syncs Firebase Auth and Firestore, and logs to the audit trail.
  */
 export async function completePasswordResetWithToken(
   tokenId: string,
@@ -549,119 +578,109 @@ export async function completePasswordResetWithToken(
 
   const { tokenData } = val;
   const now = new Date().toISOString();
+  const isActivation = tokenData.type === 'activation';
+  const targetEmail = (tokenData.targetEmail || emailHint || '').trim().toLowerCase();
+  let targetUid = tokenData.targetUid || '';
 
-  // 2. Update token in Firestore to used immediately to prevent replay attacks
+  // 2. If an oobCode is available from the email link, confirm Firebase Auth reset directly
+  if (oobCode) {
+    try {
+      await confirmPasswordReset(auth, oobCode, newPassword);
+    } catch (fbResetErr: any) {
+      console.warn('Firebase Auth confirmPasswordReset notice:', fbResetErr?.code || fbResetErr?.message);
+    }
+  }
+
+  // Try creating the Firebase Auth account if the staff was provisioned without one
+  if (targetEmail) {
+    try {
+      await createUserWithEmailAndPassword(auth, targetEmail, newPassword);
+    } catch (authCreateErr: any) {
+      if (authCreateErr?.code !== 'auth/email-already-in-use') {
+        console.log('Firebase Auth account creation status:', authCreateErr?.code || authCreateErr?.message);
+      }
+    }
+  }
+
+  // 3. Call authoritative server endpoint to update Firebase Auth password, mark token used, and restore status to active
+  const srvResp = await fetch('/api/auth/complete-password-reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tokenId,
+      hotelId: tokenData.hotelId,
+      targetEmail,
+      targetUid: targetUid || undefined,
+      newPassword,
+      oobCode
+    })
+  });
+
+  const srvJson = await srvResp.json().catch(() => ({}));
+  if (!srvResp.ok) {
+    throw new Error(srvJson?.error || 'Failed to update password. Please try again or request a fresh reset link.');
+  }
+
+  // 4. Best-effort client-side Firestore sync (server already performed authoritative updates)
   const tokenUpdate = {
     isUsed: true,
     status: 'used' as const,
     usedAt: now,
     updatedAt: now
   };
-
-  try {
-    await Promise.all([
-      updateDoc(doc(db, 'passwordResetTokens', tokenId), tokenUpdate).catch(() => {}),
-      updateDoc(doc(db, 'activationTokens', tokenId), tokenUpdate).catch(() => {})
-    ]);
-  } catch (e) {
-    console.warn('Failed to update root token doc:', e);
-  }
-
-  if (tokenData.hotelId) {
-    try {
-      await updateDoc(doc(db, 'hotels', tokenData.hotelId, 'passwordResetTokens', tokenId), tokenUpdate).catch(() => {});
-    } catch (e) {
-      console.warn('Failed to update hotel subcollection token doc:', e);
-    }
-  }
-
-  // 3. Update the user document in Firestore
-  let targetUid = tokenData.targetUid;
-  const userRef = doc(db, 'users', targetUid);
-  const userSnap = await getDoc(userRef);
+  await Promise.all([
+    updateDoc(doc(db, 'passwordResetTokens', tokenId), tokenUpdate).catch(() => {}),
+    isActivation ? updateDoc(doc(db, 'activationTokens', tokenId), tokenUpdate).catch(() => {}) : Promise.resolve(),
+    tokenData.hotelId
+      ? updateDoc(doc(db, 'hotels', tokenData.hotelId, 'passwordResetTokens', tokenId), tokenUpdate).catch(() => {})
+      : Promise.resolve()
+  ]);
 
   let existingData: any = {};
-  if (userSnap.exists()) {
-    existingData = userSnap.data();
-  } else if (tokenData.targetEmail) {
-    // Query by email if targetUid document is not found
-    const q = query(collection(db, 'users'), where('email', '==', tokenData.targetEmail.toLowerCase()));
-    const qSnap = await getDocs(q);
-    if (!qSnap.empty) {
-      targetUid = qSnap.docs[0].id;
-      existingData = qSnap.docs[0].data();
-    }
-  }
-
-  const isActivation = tokenData.type === 'activation';
-
-  const profileUpdate = {
-    ...existingData,
-    temporaryPassword: null,
-    initialPassword: null,
-    forcePasswordChange: false,
-    passwordChangedAt: now,
-    passwordChangedBy: tokenData.targetEmail,
-    status: (existingData.status === 'disabled' || existingData.status === 'suspended') ? 'disabled' : 'active',
-    updatedAt: now
-  };
-
   try {
-    await setDoc(doc(db, 'users', targetUid), profileUpdate, { merge: true });
-  } catch (docErr) {
-    console.warn('Direct Firestore user update error, falling back to server API:', docErr);
-  }
-
-  // 4. Update Firebase Auth password:
-  // If an oobCode is available from the email link, confirm Firebase Auth reset directly
-  if (oobCode) {
-    try {
-      await confirmPasswordReset(auth, oobCode, newPassword);
-      console.log('Successfully confirmed password reset in Firebase Auth with oobCode.');
-    } catch (fbResetErr: any) {
-      console.warn('Firebase Auth confirmPasswordReset error:', fbResetErr?.code || fbResetErr?.message);
+    if (targetUid) {
+      const userSnap = await getDoc(doc(db, 'users', targetUid));
+      if (userSnap.exists()) existingData = userSnap.data();
+    } else if (targetEmail) {
+      const q = query(collection(db, 'users'), where('email', '==', targetEmail));
+      const qSnap = await getDocs(q);
+      if (!qSnap.empty) {
+        targetUid = qSnap.docs[0].id;
+        existingData = qSnap.docs[0].data();
+      }
     }
-  }
-
-  // Try creating the Firebase Auth account if the staff was provisioned without one
-  try {
-    await createUserWithEmailAndPassword(auth, tokenData.targetEmail, newPassword);
-    console.log('Created Firebase Auth account for staff member on first password set.');
-  } catch (authCreateErr: any) {
-    if (authCreateErr.code !== 'auth/email-already-in-use') {
-      console.log('Firebase Auth account creation status:', authCreateErr?.code || authCreateErr?.message);
+    if (targetUid) {
+      await setDoc(
+        doc(db, 'users', targetUid),
+        {
+          temporaryPassword: null,
+          initialPassword: null,
+          passwordResetTokenId: null,
+          passwordResetExpiresAt: null,
+          forcePasswordChange: false,
+          passwordChangedAt: now,
+          passwordChangedBy: targetEmail,
+          status: (existingData.status === 'disabled' || existingData.status === 'suspended') ? existingData.status : 'active',
+          updatedAt: now
+        },
+        { merge: true }
+      ).catch(() => {});
     }
-  }
+  } catch {}
 
-  // 5. Notify server endpoint to finalize and log
-  try {
-    await fetch('/api/auth/complete-password-reset', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tokenId,
-        hotelId: tokenData.hotelId,
-        targetEmail: tokenData.targetEmail,
-        targetUid
-      })
-    });
-  } catch (srvErr) {
-    console.warn('Server complete notification warning:', srvErr);
-  }
-
-  // 6. Log completion in Audit Trail with exact action name
+  // 5. Log completion in Audit Trail with exact action name
   if (tokenData.hotelId) {
     const auditAction = isActivation ? 'ACTIVATION_COMPLETED' : 'PASSWORD_RESET_COMPLETED';
     const auditDetails = isActivation
-      ? `Staff member ${tokenData.targetEmail} completed account activation and successfully established their initial password.`
-      : `Staff member ${tokenData.targetEmail} completed password reset using secure one-time token and updated their password.`;
+      ? `Staff member ${targetEmail} completed account activation and successfully established their initial password.`
+      : `Staff member ${targetEmail} completed password reset using secure one-time token and updated their password.`;
 
     await logActivity(
       tokenData.hotelId,
       {
         uid: targetUid,
-        email: tokenData.targetEmail,
-        displayName: tokenData.targetName || tokenData.targetEmail,
+        email: targetEmail,
+        displayName: tokenData.targetName || targetEmail,
         role: existingData?.role || 'staff'
       },
       auditAction,
@@ -670,7 +689,7 @@ export async function completePasswordResetWithToken(
       targetUid,
       null,
       { tokenId, completedAt: now, type: tokenData.type || 'password_reset' }
-    );
+    ).catch(() => {});
   }
 
   return {
@@ -697,6 +716,19 @@ export async function revokePasswordResetToken(
     updatedAt: now
   };
 
+  let revokedTargetUid: string | undefined;
+  let revokedTargetEmail: string | undefined;
+  let revokedType: string | undefined;
+  try {
+    const tokSnap = await getDoc(doc(db, 'hotels', hotelId, 'passwordResetTokens', tokenId));
+    if (tokSnap.exists()) {
+      const td = tokSnap.data();
+      revokedTargetUid = td.targetUid;
+      revokedTargetEmail = td.targetEmail;
+      revokedType = td.type;
+    }
+  } catch {}
+
   try {
     await updateDoc(doc(db, 'passwordResetTokens', tokenId), updatePayload);
   } catch (e) {
@@ -707,6 +739,41 @@ export async function revokePasswordResetToken(
     await updateDoc(doc(db, 'hotels', hotelId, 'passwordResetTokens', tokenId), updatePayload);
   } catch (e) {
     console.warn('Failed to revoke hotel token doc:', e);
+  }
+
+  // If this was a password_reset token and no other active unexpired reset token remains, return user status to active
+  if (revokedTargetUid && revokedType !== 'activation') {
+    try {
+      const userSnap = await getDoc(doc(db, 'users', revokedTargetUid));
+      if (userSnap.exists() && userSnap.data()?.status === 'password_reset_pending') {
+        let hasOtherActive = false;
+        if (revokedTargetEmail) {
+          const otherQ = query(
+            collection(db, 'hotels', hotelId, 'passwordResetTokens'),
+            where('targetEmail', '==', revokedTargetEmail.toLowerCase())
+          );
+          const otherSnap = await getDocs(otherQ);
+          hasOtherActive = otherSnap.docs.some((d) => {
+            if (d.id === tokenId) return false;
+            const td = d.data();
+            if (td.type === 'activation') return false;
+            if (td.isUsed || td.status === 'used' || td.status === 'revoked' || td.status === 'expired') return false;
+            const expMs = td.expiresAt ? new Date(td.expiresAt).getTime() : NaN;
+            return !isNaN(expMs) && expMs > Date.now();
+          });
+        }
+        if (!hasOtherActive) {
+          await updateDoc(doc(db, 'users', revokedTargetUid), {
+            status: 'active',
+            passwordResetTokenId: null,
+            passwordResetExpiresAt: null,
+            updatedAt: now
+          });
+        }
+      }
+    } catch (revertErr) {
+      console.warn('Could not revert user status after revoking reset token:', revertErr);
+    }
   }
 
   await logActivity(

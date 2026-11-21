@@ -118,6 +118,8 @@ export interface UserProfile {
   activationLink?: string;
   lastPasswordResetRequestedAt?: string;
   lastPasswordResetRequestedBy?: string;
+  passwordResetTokenId?: string | null;
+  passwordResetExpiresAt?: string | null;
   activationTokenId?: string;
   activationLinkExpiresAt?: string;
   activationEmailSentAt?: string;

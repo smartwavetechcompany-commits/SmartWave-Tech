@@ -1330,7 +1330,36 @@ export function TemplateBlockEditor({
                 </div>
 
                 {variant.branding.showLogo && (
-                  <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5">
+                  <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5 space-y-2.5">
+                    <div>
+                      <label className="block text-[11px] text-zinc-400 mb-1">
+                        Header Logo Alignment
+                      </label>
+                      <div className="inline-flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5 gap-0.5">
+                        {(["left", "center", "right"] as const).map((pos) => {
+                          const active = (variant.branding.logoAlign || "left") === pos;
+                          return (
+                            <button
+                              key={pos}
+                              type="button"
+                              onClick={() =>
+                                updateVariant((prev) => ({
+                                  ...prev,
+                                  branding: { ...prev.branding, logoAlign: pos },
+                                }))
+                              }
+                              className={`px-2.5 py-1 rounded text-[11px] font-medium capitalize transition-colors ${
+                                active
+                                  ? "bg-emerald-600 text-white"
+                                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
+                              }`}
+                            >
+                              {pos}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                     <LinkDestinationField
                       label="Optional Header Logo Click Link"
                       url={variant.branding.logoLinkUrl || ""}

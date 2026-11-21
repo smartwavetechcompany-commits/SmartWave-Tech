@@ -1,5 +1,9 @@
 import React from "react";
 import {
+  AlignCenter,
+  AlignJustify,
+  AlignLeft,
+  AlignRight,
   ArrowDown,
   ArrowUp,
   Eye,
@@ -16,8 +20,11 @@ import {
   type BookingDetailsRowConfig,
   type ButtonCornerStyle,
   type EmailBlock,
+  type EmailHorizontalAlign,
   type EmailIconName,
   type EmailIconTone,
+  type EmailTextAlign,
+  type EmailVerticalAlign,
   type FooterContactField,
   type ModernButtonStyle,
   type WebSafeFontId,
@@ -76,6 +83,145 @@ const labelClass = "block text-[11px] font-medium text-zinc-400 mb-1";
 
 function makeId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+const NINE_POINT_POSITIONS: Array<{
+  h: EmailHorizontalAlign;
+  v: EmailVerticalAlign;
+  label: string;
+}> = [
+  { h: "left", v: "top", label: "Top Left" },
+  { h: "center", v: "top", label: "Top Center" },
+  { h: "right", v: "top", label: "Top Right" },
+  { h: "left", v: "middle", label: "Middle Left" },
+  { h: "center", v: "middle", label: "Center" },
+  { h: "right", v: "middle", label: "Middle Right" },
+  { h: "left", v: "bottom", label: "Bottom Left" },
+  { h: "center", v: "bottom", label: "Bottom Center" },
+  { h: "right", v: "bottom", label: "Bottom Right" },
+];
+
+function HorizontalAlignButtons({
+  value,
+  allowJustify = false,
+  onChange,
+}: {
+  value: EmailTextAlign;
+  allowJustify?: boolean;
+  onChange: (next: EmailTextAlign) => void;
+}) {
+  const options: Array<{ id: EmailTextAlign; title: string; icon: React.ReactNode }> = [
+    { id: "left", title: "Align Left", icon: <AlignLeft size={13} /> },
+    { id: "center", title: "Align Center", icon: <AlignCenter size={13} /> },
+    { id: "right", title: "Align Right", icon: <AlignRight size={13} /> },
+    ...(allowJustify
+      ? [{ id: "justify" as const, title: "Justify Text", icon: <AlignJustify size={13} /> }]
+      : []),
+  ];
+
+  return (
+    <div className="inline-flex items-center rounded-lg border border-zinc-800 bg-zinc-950 p-0.5 gap-0.5">
+      {options.map((opt) => {
+        const active = value === opt.id;
+        return (
+          <button
+            key={opt.id}
+            type="button"
+            title={opt.title}
+            onClick={() => onChange(opt.id)}
+            className={`px-2 py-1 rounded text-[11px] flex items-center gap-1 transition-colors ${
+              active
+                ? "bg-emerald-600 text-white font-semibold"
+                : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
+            }`}
+          >
+            {opt.icon}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function NinePointAlignPicker({
+  label,
+  align,
+  verticalAlign,
+  defaultAlign = "left",
+  defaultVerticalAlign = "middle",
+  onChange,
+}: {
+  label: string;
+  align?: EmailHorizontalAlign;
+  verticalAlign?: EmailVerticalAlign;
+  defaultAlign?: EmailHorizontalAlign;
+  defaultVerticalAlign?: EmailVerticalAlign;
+  onChange: (align: EmailHorizontalAlign, verticalAlign: EmailVerticalAlign) => void;
+}) {
+  const currentH = align || defaultAlign;
+  const currentV = verticalAlign || defaultVerticalAlign;
+  const activeEntry =
+    NINE_POINT_POSITIONS.find((p) => p.h === currentH && p.v === currentV) ||
+    NINE_POINT_POSITIONS[4];
+
+  return (
+    <div className="rounded-lg bg-zinc-950/70 border border-zinc-800/80 p-2 space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-medium text-zinc-400">{label}</span>
+        <span className="text-[10px] font-medium text-emerald-400">{activeEntry.label}</span>
+      </div>
+      <div className="flex items-center gap-2.5">
+        <div
+          className="grid grid-cols-3 gap-1 p-1 rounded-md bg-zinc-900 border border-zinc-800 shrink-0"
+          role="group"
+          aria-label={label}
+        >
+          {NINE_POINT_POSITIONS.map((pos) => {
+            const isSelected = pos.h === currentH && pos.v === currentV;
+            return (
+              <button
+                key={`${pos.v}-${pos.h}`}
+                type="button"
+                title={pos.label}
+                aria-label={pos.label}
+                onClick={() => onChange(pos.h, pos.v)}
+                className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${
+                  isSelected
+                    ? "bg-emerald-500 text-zinc-950"
+                    : "bg-zinc-950 hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    isSelected ? "bg-zinc-950" : "bg-current"
+                  }`}
+                />
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex flex-col gap-1 text-[10px] text-zinc-500 leading-tight">
+          <span>Click any of the 9 anchor points (Top Left, Center, Bottom Right, etc.)</span>
+          <div className="flex items-center gap-1 pt-0.5">
+            {(["left", "center", "right"] as const).map((h) => (
+              <button
+                key={h}
+                type="button"
+                onClick={() => onChange(h, currentV)}
+                className={`px-1.5 py-0.5 rounded capitalize border ${
+                  currentH === h
+                    ? "bg-emerald-600/20 border-emerald-500/50 text-emerald-300"
+                    : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                {h}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function ImageFieldControl({
@@ -293,6 +439,7 @@ function ModernButtonEditor({
 function BlockStyleControls({
   style,
   showAlign = false,
+  showVerticalAlign = false,
   showBorder = false,
   showRadius = false,
   showTypography = false,
@@ -301,6 +448,7 @@ function BlockStyleControls({
 }: {
   style?: BlockStyleConfig;
   showAlign?: boolean;
+  showVerticalAlign?: boolean;
   showBorder?: boolean;
   showRadius?: boolean;
   showTypography?: boolean;
@@ -354,23 +502,29 @@ function BlockStyleControls({
             />
           </div>
         )}
-        {showAlign && (
+        {showAlign && !showVerticalAlign && (
           <div>
             <label className={labelClass}>Alignment</label>
-            <select
+            <HorizontalAlignButtons
               value={s.align || "center"}
-              onChange={(e) =>
-                onChange({ ...s, align: e.target.value as "left" | "center" | "right" })
+              onChange={(next) =>
+                onChange({ ...s, align: next as EmailHorizontalAlign })
               }
-              className={inputClass}
-            >
-              <option value="left">Left</option>
-              <option value="center">Center</option>
-              <option value="right">Right</option>
-            </select>
+            />
           </div>
         )}
       </div>
+
+      {showAlign && showVerticalAlign && (
+        <NinePointAlignPicker
+          label="Content Position & Alignment"
+          align={s.align}
+          verticalAlign={s.verticalAlign}
+          defaultAlign="center"
+          defaultVerticalAlign="middle"
+          onChange={(align, verticalAlign) => onChange({ ...s, align, verticalAlign })}
+        />
+      )}
 
       {showTypography && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -478,46 +632,44 @@ export function BlockInspector({
     // --- 10 CLASSIC BLOCKS ---
     case "heading":
       return (
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-          <div className="sm:col-span-3">
-            <input
-              type="text"
-              value={block.text}
-              onChange={(e) =>
-                onChange((b) => (b.type === "heading" ? { ...b, text: e.target.value } : b))
-              }
-              className={inputClass}
-            />
+        <div className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+            <div className="sm:col-span-3">
+              <input
+                type="text"
+                value={block.text}
+                onChange={(e) =>
+                  onChange((b) => (b.type === "heading" ? { ...b, text: e.target.value } : b))
+                }
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <select
+                value={block.level}
+                onChange={(e) =>
+                  onChange((b) =>
+                    b.type === "heading" ? { ...b, level: Number(e.target.value) as 1 | 2 | 3 } : b
+                  )
+                }
+                className={inputClass}
+              >
+                <option value={1}>H1</option>
+                <option value={2}>H2</option>
+                <option value={3}>H3</option>
+              </select>
+            </div>
           </div>
-          <div className="flex gap-1.5">
-            <select
-              value={block.level}
-              onChange={(e) =>
-                onChange((b) =>
-                  b.type === "heading" ? { ...b, level: Number(e.target.value) as 1 | 2 | 3 } : b
-                )
-              }
-              className={inputClass}
-            >
-              <option value={1}>H1</option>
-              <option value={2}>H2</option>
-              <option value={3}>H3</option>
-            </select>
-            <select
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] text-zinc-400">Text Alignment:</span>
+            <HorizontalAlignButtons
               value={block.align || "left"}
-              onChange={(e) =>
+              onChange={(next) =>
                 onChange((b) =>
-                  b.type === "heading"
-                    ? { ...b, align: e.target.value as "left" | "center" | "right" }
-                    : b
+                  b.type === "heading" ? { ...b, align: next as EmailHorizontalAlign } : b
                 )
               }
-              className={inputClass}
-            >
-              <option value="left">Left</option>
-              <option value="center">Center</option>
-              <option value="right">Right</option>
-            </select>
+            />
           </div>
         </div>
       );
@@ -533,7 +685,7 @@ export function BlockInspector({
             }
             className={inputClass}
           />
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <select
               value={block.tone || "default"}
               onChange={(e) =>
@@ -549,21 +701,13 @@ export function BlockInspector({
               <option value="muted">Muted tone</option>
               <option value="accent">Brand accent</option>
             </select>
-            <select
+            <HorizontalAlignButtons
               value={block.align || "left"}
-              onChange={(e) =>
-                onChange((b) =>
-                  b.type === "paragraph"
-                    ? { ...b, align: e.target.value as "left" | "center" | "right" }
-                    : b
-                )
+              allowJustify
+              onChange={(next) =>
+                onChange((b) => (b.type === "paragraph" ? { ...b, align: next } : b))
               }
-              className={`${inputClass} w-28`}
-            >
-              <option value="left">Left</option>
-              <option value="center">Center</option>
-              <option value="right">Right</option>
-            </select>
+            />
           </div>
           <InlineLinksEditor
             inlineLinks={block.inlineLinks}
@@ -606,9 +750,9 @@ export function BlockInspector({
             }
             imageActions={imageActions}
           />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-start">
             <div>
-              <label className={labelClass}>Width (80–544px)</label>
+              <label className={labelClass}>Max Width (80–544px)</label>
               <input
                 type="number"
                 min={80}
@@ -622,24 +766,16 @@ export function BlockInspector({
                 className={inputClass}
               />
             </div>
-            <div>
-              <label className={labelClass}>Alignment</label>
-              <select
-                value={block.align || "center"}
-                onChange={(e) =>
-                  onChange((b) =>
-                    b.type === "image"
-                      ? { ...b, align: e.target.value as "left" | "center" | "right" }
-                      : b
-                  )
-                }
-                className={inputClass}
-              >
-                <option value="left">Left</option>
-                <option value="center">Center</option>
-                <option value="right">Right</option>
-              </select>
-            </div>
+            <NinePointAlignPicker
+              label="Image Position"
+              align={block.align}
+              verticalAlign={block.verticalAlign}
+              defaultAlign="center"
+              defaultVerticalAlign="top"
+              onChange={(align, verticalAlign) =>
+                onChange((b) => (b.type === "image" ? { ...b, align, verticalAlign } : b))
+              }
+            />
           </div>
           <div className="rounded-lg bg-zinc-950/60 border border-zinc-800/80 p-2.5">
             <LinkDestinationField
@@ -1627,6 +1763,32 @@ export function BlockInspector({
               onChange((b) => (b.type === "brand_header" ? { ...b, iconTone } : b))
             }
           />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <NinePointAlignPicker
+              label="Logo Placement"
+              align={block.logoAlign}
+              verticalAlign={block.logoVerticalAlign}
+              defaultAlign="left"
+              defaultVerticalAlign="middle"
+              onChange={(logoAlign, logoVerticalAlign) =>
+                onChange((b) =>
+                  b.type === "brand_header" ? { ...b, logoAlign, logoVerticalAlign } : b
+                )
+              }
+            />
+            <NinePointAlignPicker
+              label="Contact Info Placement"
+              align={block.contactAlign}
+              verticalAlign={block.contactVerticalAlign}
+              defaultAlign="right"
+              defaultVerticalAlign="middle"
+              onChange={(contactAlign, contactVerticalAlign) =>
+                onChange((b) =>
+                  b.type === "brand_header" ? { ...b, contactAlign, contactVerticalAlign } : b
+                )
+              }
+            />
+          </div>
           <BlockStyleControls
             style={block.style}
             showBorder
@@ -1697,6 +1859,32 @@ export function BlockInspector({
               onChange((b) => (b.type === "promo_banner" ? { ...b, ...patch } : b))
             }
           />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <NinePointAlignPicker
+              label="Thumbnail Placement"
+              align={block.imageAlign}
+              verticalAlign={block.imageVerticalAlign}
+              defaultAlign="left"
+              defaultVerticalAlign="middle"
+              onChange={(imageAlign, imageVerticalAlign) =>
+                onChange((b) =>
+                  b.type === "promo_banner" ? { ...b, imageAlign, imageVerticalAlign } : b
+                )
+              }
+            />
+            <NinePointAlignPicker
+              label="Banner Text Placement"
+              align={block.textAlign || block.style?.align}
+              verticalAlign={block.textVerticalAlign || block.style?.verticalAlign}
+              defaultAlign="left"
+              defaultVerticalAlign="middle"
+              onChange={(textAlign, textVerticalAlign) =>
+                onChange((b) =>
+                  b.type === "promo_banner" ? { ...b, textAlign, textVerticalAlign } : b
+                )
+              }
+            />
+          </div>
           <BlockStyleControls
             style={block.style}
             onChange={(style) =>
@@ -1879,6 +2067,7 @@ export function BlockInspector({
           <BlockStyleControls
             style={block.style}
             showAlign
+            showVerticalAlign
             onChange={(style) =>
               onChange((b) => (b.type === "hero_text" ? { ...b, style } : b))
             }
@@ -2140,6 +2329,32 @@ export function BlockInspector({
               onChange((b) => (b.type === "feature_card" ? { ...b, ...patch } : b))
             }
           />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <NinePointAlignPicker
+              label="Card Image Placement"
+              align={block.imageAlign}
+              verticalAlign={block.imageVerticalAlign}
+              defaultAlign="left"
+              defaultVerticalAlign="top"
+              onChange={(imageAlign, imageVerticalAlign) =>
+                onChange((b) =>
+                  b.type === "feature_card" ? { ...b, imageAlign, imageVerticalAlign } : b
+                )
+              }
+            />
+            <NinePointAlignPicker
+              label="Card Text Placement"
+              align={block.textAlign || block.style?.align}
+              verticalAlign={block.textVerticalAlign || block.style?.verticalAlign}
+              defaultAlign="left"
+              defaultVerticalAlign="middle"
+              onChange={(textAlign, textVerticalAlign) =>
+                onChange((b) =>
+                  b.type === "feature_card" ? { ...b, textAlign, textVerticalAlign } : b
+                )
+              }
+            />
+          </div>
           <BlockStyleControls
             style={block.style}
             showBorder
@@ -2332,6 +2547,7 @@ export function BlockInspector({
           />
           <BlockStyleControls
             style={block.style}
+            showAlign
             onChange={(style) =>
               onChange((b) => (b.type === "benefits_list" ? { ...b, style } : b))
             }
@@ -2780,6 +2996,32 @@ export function BlockInspector({
               onChange((b) => (b.type === "image_with_list" ? { ...b, ...patch } : b))
             }
           />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <NinePointAlignPicker
+              label="Image Placement"
+              align={block.imageAlign}
+              verticalAlign={block.imageVerticalAlign}
+              defaultAlign="left"
+              defaultVerticalAlign="middle"
+              onChange={(imageAlign, imageVerticalAlign) =>
+                onChange((b) =>
+                  b.type === "image_with_list" ? { ...b, imageAlign, imageVerticalAlign } : b
+                )
+              }
+            />
+            <NinePointAlignPicker
+              label="Text & List Placement"
+              align={block.textAlign || block.style?.align}
+              verticalAlign={block.textVerticalAlign || block.style?.verticalAlign}
+              defaultAlign="left"
+              defaultVerticalAlign="middle"
+              onChange={(textAlign, textVerticalAlign) =>
+                onChange((b) =>
+                  b.type === "image_with_list" ? { ...b, textAlign, textVerticalAlign } : b
+                )
+              }
+            />
+          </div>
           <BlockStyleControls
             style={block.style}
             showRadius

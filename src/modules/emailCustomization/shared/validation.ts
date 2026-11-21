@@ -35,6 +35,8 @@ const EMAIL_ICON_TONE_SET = new Set<string>(EMAIL_ICON_TONES);
 const BUTTON_STYLE_SET = new Set<string>(["filled", "outlined", "dark"]);
 const BUTTON_CORNER_SET = new Set<string>(["square", "rounded", "pill"]);
 const ALIGN_SET = new Set<string>(["left", "center", "right"]);
+const TEXT_ALIGN_SET = new Set<string>(["left", "center", "right", "justify"]);
+const VERTICAL_ALIGN_SET = new Set<string>(["top", "middle", "bottom"]);
 const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 const STRICT_EMAIL_RE =
   /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
@@ -600,6 +602,12 @@ function validateBlockStyleConfig(
       message: `Block #${blockNumber} alignment must be left, center, or right.`,
     });
   }
+  if (style.verticalAlign !== undefined && !VERTICAL_ALIGN_SET.has(style.verticalAlign)) {
+    issues.push({
+      path: `${prefix}.style.verticalAlign`,
+      message: `Block #${blockNumber} vertical alignment must be top, middle, or bottom.`,
+    });
+  }
   if (
     style.paddingY !== undefined &&
     (!Number.isFinite(style.paddingY) || style.paddingY < 0 || style.paddingY > 40)
@@ -871,6 +879,9 @@ export function validateTemplateVariant(variant: EmailTemplateVariant): Validati
       });
       if (!llv.valid && llv.error) issues.push({ path: "branding.logoLinkUrl", message: llv.error });
     }
+    if (b.logoAlign !== undefined && !ALIGN_SET.has(b.logoAlign)) {
+      issues.push({ path: "branding.logoAlign", message: "Header logo alignment must be left, center, or right." });
+    }
   }
 
   if (!Array.isArray(variant.blocks) || variant.blocks.length === 0) {
@@ -955,10 +966,22 @@ export function validateEmailBlock(
         if (block.color && !isValidHexColor(block.color)) {
           issues.push({ path: `${prefix}.color`, message: `Heading block #${num} color must be a valid hex color.` });
         }
+        if (block.align !== undefined && !ALIGN_SET.has(block.align)) {
+          issues.push({ path: `${prefix}.align`, message: `Heading block #${num} alignment must be left, center, or right.` });
+        }
+        if (block.verticalAlign !== undefined && !VERTICAL_ALIGN_SET.has(block.verticalAlign)) {
+          issues.push({ path: `${prefix}.verticalAlign`, message: `Heading block #${num} vertical alignment must be top, middle, or bottom.` });
+        }
         break;
       }
       case "paragraph": {
         checkVar(block.text, `${prefix}.text`, `Paragraph block #${num}`);
+        if (block.align !== undefined && !TEXT_ALIGN_SET.has(block.align)) {
+          issues.push({ path: `${prefix}.align`, message: `Paragraph block #${num} alignment must be left, center, right, or justify.` });
+        }
+        if (block.verticalAlign !== undefined && !VERTICAL_ALIGN_SET.has(block.verticalAlign)) {
+          issues.push({ path: `${prefix}.verticalAlign`, message: `Paragraph block #${num} vertical alignment must be top, middle, or bottom.` });
+        }
         validateInlineLinksList(block.inlineLinks, prefix, num, issues);
         break;
       }
@@ -974,6 +997,12 @@ export function validateEmailBlock(
           });
         } else {
           checkVar(block.alt, `${prefix}.alt`, `Image block #${num} alt text`);
+        }
+        if (block.align !== undefined && !ALIGN_SET.has(block.align)) {
+          issues.push({ path: `${prefix}.align`, message: `Image block #${num} alignment must be left, center, or right.` });
+        }
+        if (block.verticalAlign !== undefined && !VERTICAL_ALIGN_SET.has(block.verticalAlign)) {
+          issues.push({ path: `${prefix}.verticalAlign`, message: `Image block #${num} vertical alignment must be top, middle, or bottom.` });
         }
         if (block.linkUrl && block.linkUrl.trim()) {
           const lc = validateEmailUrl(block.linkUrl, {
@@ -1091,6 +1120,18 @@ export function validateEmailBlock(
       // --- 13 New Modern Additive Block Validations ---
       case "brand_header": {
         validateBlockStyleConfig(block.style, prefix, num, issues);
+        if (block.logoAlign !== undefined && !ALIGN_SET.has(block.logoAlign)) {
+          issues.push({ path: `${prefix}.logoAlign`, message: `Header block #${num} logo alignment must be left, center, or right.` });
+        }
+        if (block.logoVerticalAlign !== undefined && !VERTICAL_ALIGN_SET.has(block.logoVerticalAlign)) {
+          issues.push({ path: `${prefix}.logoVerticalAlign`, message: `Header block #${num} logo vertical alignment must be top, middle, or bottom.` });
+        }
+        if (block.contactAlign !== undefined && !ALIGN_SET.has(block.contactAlign)) {
+          issues.push({ path: `${prefix}.contactAlign`, message: `Header block #${num} contact alignment must be left, center, or right.` });
+        }
+        if (block.contactVerticalAlign !== undefined && !VERTICAL_ALIGN_SET.has(block.contactVerticalAlign)) {
+          issues.push({ path: `${prefix}.contactVerticalAlign`, message: `Header block #${num} contact vertical alignment must be top, middle, or bottom.` });
+        }
         if (block.iconTone && !isValidEmailIconTone(block.iconTone)) {
           issues.push({ path: `${prefix}.iconTone`, message: `Header block #${num} icon color is not allowed.` });
         }
@@ -1134,6 +1175,18 @@ export function validateEmailBlock(
 
       case "promo_banner": {
         validateBlockStyleConfig(block.style, prefix, num, issues);
+        if (block.imageAlign !== undefined && !ALIGN_SET.has(block.imageAlign)) {
+          issues.push({ path: `${prefix}.imageAlign`, message: `Promo banner #${num} image alignment must be left, center, or right.` });
+        }
+        if (block.imageVerticalAlign !== undefined && !VERTICAL_ALIGN_SET.has(block.imageVerticalAlign)) {
+          issues.push({ path: `${prefix}.imageVerticalAlign`, message: `Promo banner #${num} image vertical alignment must be top, middle, or bottom.` });
+        }
+        if (block.textAlign !== undefined && !ALIGN_SET.has(block.textAlign)) {
+          issues.push({ path: `${prefix}.textAlign`, message: `Promo banner #${num} text alignment must be left, center, or right.` });
+        }
+        if (block.textVerticalAlign !== undefined && !VERTICAL_ALIGN_SET.has(block.textVerticalAlign)) {
+          issues.push({ path: `${prefix}.textVerticalAlign`, message: `Promo banner #${num} text vertical alignment must be top, middle, or bottom.` });
+        }
         if (!block.text || !block.text.trim()) {
           issues.push({ path: `${prefix}.text`, message: `Promo banner #${num} requires text.` });
         } else {
@@ -1233,6 +1286,18 @@ export function validateEmailBlock(
         validateBlockStyleConfig(block.style, prefix, num, issues);
         if (block.imagePosition !== "left" && block.imagePosition !== "right") {
           issues.push({ path: `${prefix}.imagePosition`, message: `Feature card #${num} image position must be left or right.` });
+        }
+        if (block.imageAlign !== undefined && !ALIGN_SET.has(block.imageAlign)) {
+          issues.push({ path: `${prefix}.imageAlign`, message: `Feature card #${num} image alignment must be left, center, or right.` });
+        }
+        if (block.imageVerticalAlign !== undefined && !VERTICAL_ALIGN_SET.has(block.imageVerticalAlign)) {
+          issues.push({ path: `${prefix}.imageVerticalAlign`, message: `Feature card #${num} image vertical alignment must be top, middle, or bottom.` });
+        }
+        if (block.textAlign !== undefined && !ALIGN_SET.has(block.textAlign)) {
+          issues.push({ path: `${prefix}.textAlign`, message: `Feature card #${num} text alignment must be left, center, or right.` });
+        }
+        if (block.textVerticalAlign !== undefined && !VERTICAL_ALIGN_SET.has(block.textVerticalAlign)) {
+          issues.push({ path: `${prefix}.textVerticalAlign`, message: `Feature card #${num} text vertical alignment must be top, middle, or bottom.` });
         }
         const ic = validateEmailUrl(block.imageUrl, { fieldName: `Feature card #${num} image URL` });
         if (!ic.valid && ic.error) issues.push({ path: `${prefix}.imageUrl`, message: ic.error });
@@ -1345,6 +1410,18 @@ export function validateEmailBlock(
 
       case "image_with_list": {
         validateBlockStyleConfig(block.style, prefix, num, issues);
+        if (block.imageAlign !== undefined && !ALIGN_SET.has(block.imageAlign)) {
+          issues.push({ path: `${prefix}.imageAlign`, message: `Image + List #${num} image alignment must be left, center, or right.` });
+        }
+        if (block.imageVerticalAlign !== undefined && !VERTICAL_ALIGN_SET.has(block.imageVerticalAlign)) {
+          issues.push({ path: `${prefix}.imageVerticalAlign`, message: `Image + List #${num} image vertical alignment must be top, middle, or bottom.` });
+        }
+        if (block.textAlign !== undefined && !ALIGN_SET.has(block.textAlign)) {
+          issues.push({ path: `${prefix}.textAlign`, message: `Image + List #${num} text alignment must be left, center, or right.` });
+        }
+        if (block.textVerticalAlign !== undefined && !VERTICAL_ALIGN_SET.has(block.textVerticalAlign)) {
+          issues.push({ path: `${prefix}.textVerticalAlign`, message: `Image + List #${num} text vertical alignment must be top, middle, or bottom.` });
+        }
         const ic = validateEmailUrl(block.imageUrl, { fieldName: `Image + List #${num} image URL` });
         if (!ic.valid && ic.error) issues.push({ path: `${prefix}.imageUrl`, message: ic.error });
         if (!block.imageAlt || !block.imageAlt.trim()) {

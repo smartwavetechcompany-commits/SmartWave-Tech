@@ -3377,6 +3377,94 @@ async function run() {
     assert.ok(rendered.html.includes("width:auto;height:auto;max-width:160px;max-height:160px;object-fit:contain"), "Header logo must scale proportionally within max-width/max-height");
   });
 
+  // 52. Expanded horizontal, justify, and 9-point vertical+horizontal alignment for text, logos, images, headers & cards
+  await test("52. Expanded text, logo, and 9-point alignment controls render email-safe attributes and reject invalid values", () => {
+    const preset = buildStarterPresetVariant("modern_resort", "booking_confirmation", "en", "https://tidehotels.de");
+    preset.branding.showLogo = true;
+    preset.branding.logoUrl = "https://cdn.harborview.example/logo.png";
+    preset.branding.logoAlign = "center";
+
+    preset.blocks = preset.blocks.map((b) => {
+      if (b.type === "brand_header") {
+        return {
+          ...b,
+          logoUrl: "https://cdn.harborview.example/logo.png",
+          logoAlign: "center",
+          logoVerticalAlign: "top",
+          contactAlign: "left",
+          contactVerticalAlign: "bottom",
+        };
+      }
+      if (b.type === "feature_card") {
+        return {
+          ...b,
+          imageAlign: "right",
+          imageVerticalAlign: "bottom",
+          textAlign: "center",
+          textVerticalAlign: "top",
+        };
+      }
+      if (b.type === "hero_text") {
+        return {
+          ...b,
+          style: { ...(b.style || {}), align: "right", verticalAlign: "bottom" },
+        };
+      }
+      return b;
+    });
+
+    preset.blocks.push(
+      {
+        id: "p_justify",
+        type: "paragraph",
+        text: "Welcome to {{hotel_name}} — your suite awaits.",
+        align: "justify",
+      },
+      {
+        id: "img_pos",
+        type: "image",
+        src: "https://cdn.harborview.example/suite.jpg",
+        alt: "Suite",
+        widthPx: 420,
+        align: "right",
+        verticalAlign: "bottom",
+      }
+    );
+
+    const validIssues = validateTemplateVariant(preset);
+    assert.strictEqual(validIssues.length, 0, `Expected 0 validation issues, got: ${JSON.stringify(validIssues)}`);
+
+    const rendered = renderEmailTemplate({
+      variant: preset,
+      context: BASE_CONTEXT,
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+
+    assert.ok(rendered.html.includes('valign="top" align="center"'), "Brand header logo should render Top Center");
+    assert.ok(rendered.html.includes('valign="bottom" align="left"'), "Brand header contact should render Bottom Left");
+    assert.ok(rendered.html.includes('align="right" valign="bottom"'), "Feature card image should render Bottom Right");
+    assert.ok(rendered.html.includes('align="center" valign="top"'), "Feature card text should render Top Center");
+    assert.ok(rendered.html.includes("text-align:justify;"), "Paragraph should support justify alignment");
+    assert.ok(rendered.html.includes('margin-left:auto;margin-right:0;'), "Right-aligned images should apply right auto-margin");
+
+    // Validation must reject invalid alignment tokens
+    const invalidVariant = JSON.parse(JSON.stringify(preset)) as EmailTemplateVariant;
+    (invalidVariant.branding as any).logoAlign = "justify";
+    const imgBlock = invalidVariant.blocks.find((b) => b.id === "img_pos") as any;
+    imgBlock.verticalAlign = "diagonal";
+    const invalidIssues = validateTemplateVariant(invalidVariant);
+    assert.ok(
+      invalidIssues.some((i) => i.path === "branding.logoAlign"),
+      "Invalid branding.logoAlign must be rejected"
+    );
+    assert.ok(
+      invalidIssues.some((i) => i.path.endsWith(".verticalAlign")),
+      "Invalid verticalAlign must be rejected"
+    );
+  });
+
   if (process.exitCode && process.exitCode !== 0) {
     console.error(`\nFAILED: ${passed} tests passed, failures occurred.`);
     process.exit(1);

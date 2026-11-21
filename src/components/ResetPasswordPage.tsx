@@ -50,23 +50,27 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const activeToken = tokenParam || params.get('resetToken') || params.get('token');
+    const activeEmail = emailParam || params.get('email') || undefined;
     if (activeToken) {
       setTokenInput(activeToken);
-      performValidation(activeToken);
+      performValidation(activeToken, activeEmail);
     } else {
       setIsValidating(false);
       setValidationError('No security token was provided. Please use the activation or password reset link sent to your email, or contact your Hotel Administrator.');
     }
-  }, [tokenParam]);
+  }, [tokenParam, emailParam]);
 
   // Validate the token
-  const performValidation = async (tokenId: string) => {
+  const performValidation = async (tokenId: string, emailHint?: string) => {
     setIsValidating(true);
     setValidationError(null);
     try {
-      const result = await validatePasswordResetToken(tokenId);
+      const result = await validatePasswordResetToken(tokenId, emailHint);
       if (result.valid && result.tokenData) {
-        setTokenData(result.tokenData);
+        setTokenData({
+          ...result.tokenData,
+          token: result.tokenData.token || (result.tokenData as any).tokenId || tokenId
+        });
       } else {
         setValidationError(result.error || 'The link is invalid, expired, or has already been used.');
       }
@@ -79,13 +83,21 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
 
   // Live expiration timer
   useEffect(() => {
-    if (!tokenData?.expiresAt || tokenData.isUsed) return;
+    if (!tokenData?.expiresAt || tokenData.isUsed || submitSuccess) return;
 
+    let expiryTriggered = false;
     const calculateTimeLeft = () => {
       const diff = new Date(tokenData.expiresAt).getTime() - Date.now();
       if (diff <= 0) {
         setTimeLeft(null);
         setValidationError(`This link expired at ${new Date(tokenData.expiresAt).toLocaleTimeString()}. Please request a new link from your Hotel Administrator.`);
+        if (!expiryTriggered) {
+          expiryTriggered = true;
+          const activeToken = tokenData.token || (tokenData as any).tokenId || tokenInput;
+          if (activeToken) {
+            validatePasswordResetToken(activeToken, tokenData.targetEmail || emailParam).catch(() => {});
+          }
+        }
         return;
       }
       const minutes = Math.floor(diff / 60000);
@@ -96,7 +108,7 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
     calculateTimeLeft();
     const timer = setInterval(calculateTimeLeft, 1000);
     return () => clearInterval(timer);
-  }, [tokenData]);
+  }, [tokenData, submitSuccess, tokenInput, emailParam]);
 
   // Password rules validation
   const rules = {
@@ -111,7 +123,11 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tokenData?.token) return;
+    const activeToken = tokenData?.token || (tokenData as any)?.tokenId || tokenInput;
+    if (!activeToken) {
+      setSubmitError('Missing security token. Please reopen the link from your email.');
+      return;
+    }
 
     if (!isPasswordValid) {
       setSubmitError('Please satisfy all password security requirements before proceeding.');
@@ -129,8 +145,9 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
     try {
       const params = new URLSearchParams(window.location.search);
       const oobCode = params.get('oobCode') || undefined;
+      const resolvedEmail = tokenData?.targetEmail || emailParam || params.get('email') || undefined;
 
-      await completePasswordResetWithToken(tokenData.token, newPassword, oobCode);
+      await completePasswordResetWithToken(activeToken, newPassword, oobCode, resolvedEmail);
       setSubmitSuccess(true);
     } catch (err: any) {
       setSubmitError(err.message || 'Failed to update password. Please try again or contact your administrator.');

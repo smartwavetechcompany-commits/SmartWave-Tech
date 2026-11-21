@@ -1817,6 +1817,7 @@ async function startServer() {
         return res.status(200).json({
           valid: true,
           tokenData: {
+            token: tokenId,
             tokenId,
             targetEmail: mem.email || email,
             targetUid: mem.uid,
@@ -1830,10 +1831,11 @@ async function startServer() {
 
       // 2. Check Firestore tokens
       if (db) {
-        const { doc, getDoc, collection, query, where, getDocs } = await import('firebase/firestore');
+        const { doc, getDoc, updateDoc, collection, query, where, getDocs } = await import('firebase/firestore');
 
         // Check passwordResetTokens
         let snap = await getDoc(doc(db, 'passwordResetTokens', tokenId));
+        let fromPasswordResetCol = snap.exists();
         if (!snap.exists()) {
           // Check activationTokens
           snap = await getDoc(doc(db, 'activationTokens', tokenId));
@@ -1841,27 +1843,106 @@ async function startServer() {
 
         if (snap.exists()) {
           const data = snap.data();
+          const tokenType: 'activation' | 'password_reset' =
+            data.type || (fromPasswordResetCol ? 'password_reset' : 'activation');
+          const linkKindLabel = tokenType === 'activation' ? 'activation' : 'password reset';
+
           if (data.status === 'revoked') {
-            return res.status(200).json({ valid: false, error: "This activation link has been revoked by an administrator." });
+            return res.status(200).json({ valid: false, error: `This ${linkKindLabel} link has been revoked by an administrator.` });
           }
           if (data.isUsed || data.status === 'used') {
-            return res.status(200).json({ valid: false, error: "This activation link has already been used." });
+            return res.status(200).json({ valid: false, error: `This ${linkKindLabel} link has already been used.` });
           }
           if (data.expiresAt) {
             const exp = new Date(data.expiresAt).getTime();
             if (!isNaN(exp) && Date.now() > exp) {
+              const nowIso = new Date().toISOString();
+              // Mark expired token and revert password_reset_pending user back to active
+              if (tokenType === 'password_reset') {
+                try {
+                  await updateDoc(doc(db, 'passwordResetTokens', tokenId), {
+                    status: 'expired',
+                    updatedAt: nowIso
+                  });
+                } catch {}
+                if (data.hotelId) {
+                  try {
+                    await updateDoc(doc(db, 'hotels', data.hotelId, 'passwordResetTokens', tokenId), {
+                      status: 'expired',
+                      updatedAt: nowIso
+                    });
+                  } catch {}
+                }
+                try {
+                  let targetUidToRevert = data.targetUid || data.uid;
+                  let userDocData: any = null;
+                  if (targetUidToRevert) {
+                    const uSnap = await getDoc(doc(db, 'users', targetUidToRevert));
+                    if (uSnap.exists()) userDocData = uSnap.data();
+                  } else if (data.targetEmail || data.email) {
+                    const emailLookup = String(data.targetEmail || data.email).trim().toLowerCase();
+                    const uq = query(collection(db, 'users'), where('email', '==', emailLookup));
+                    const uqSnap = await getDocs(uq);
+                    if (!uqSnap.empty) {
+                      targetUidToRevert = uqSnap.docs[0].id;
+                      userDocData = uqSnap.docs[0].data();
+                    }
+                  }
+                  if (targetUidToRevert && userDocData?.status === 'password_reset_pending') {
+                    // Only revert if this user has no newer unexpired active reset token
+                    let hasNewerActiveToken = false;
+                    if (data.hotelId && (data.targetEmail || data.email)) {
+                      try {
+                        const tq = query(
+                          collection(db, 'hotels', data.hotelId, 'passwordResetTokens'),
+                          where('targetEmail', '==', String(data.targetEmail || data.email).trim().toLowerCase())
+                        );
+                        const tqSnap = await getDocs(tq);
+                        hasNewerActiveToken = tqSnap.docs.some((d) => {
+                          if (d.id === tokenId) return false;
+                          const td = d.data();
+                          if (td.type === 'activation') return false;
+                          if (td.isUsed || td.status === 'used' || td.status === 'revoked' || td.status === 'expired') return false;
+                          const tExp = td.expiresAt ? new Date(td.expiresAt).getTime() : NaN;
+                          return !isNaN(tExp) && tExp > Date.now();
+                        });
+                      } catch {}
+                    }
+                    if (!hasNewerActiveToken) {
+                      await updateDoc(doc(db, 'users', targetUidToRevert), {
+                        status: 'active',
+                        passwordResetTokenId: null,
+                        passwordResetExpiresAt: null,
+                        updatedAt: nowIso
+                      });
+                    }
+                  }
+                } catch (revertErr) {
+                  console.warn("[VALIDATE TOKEN] Expired status revert notice:", revertErr);
+                }
+                return res.status(200).json({
+                  valid: false,
+                  error: "This password reset link has expired. Your account status has returned to active so an administrator can issue a new reset link."
+                });
+              }
               return res.status(200).json({ valid: false, error: "This activation link has expired. Please request a new link." });
             }
           }
           return res.status(200).json({
             valid: true,
             tokenData: {
+              id: tokenId,
+              token: tokenId,
               tokenId,
               targetEmail: data.targetEmail || data.email || email,
               targetUid: data.targetUid || data.uid,
+              targetName: data.targetName || '',
               hotelId: data.hotelId,
+              hotelName: data.hotelName || '',
+              isUsed: Boolean(data.isUsed),
               status: data.status || 'active',
-              type: data.type || 'activation',
+              type: tokenType,
+              createdAt: data.createdAt || '',
               expiresAt: data.expiresAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
             }
           });
@@ -1877,6 +1958,8 @@ async function startServer() {
               return res.status(200).json({
                 valid: true,
                 tokenData: {
+                  id: tokenId,
+                  token: tokenId,
                   tokenId,
                   targetEmail: userData.email,
                   targetUid: userSnap.docs[0].id,
@@ -3084,7 +3167,7 @@ async function startServer() {
 
   // API Route: Complete Password Reset and Sync User (Server-side)
   app.post("/api/auth/complete-password-reset", async (req, res) => {
-    const { tokenId, hotelId, targetEmail, targetUid } = req.body;
+    const { tokenId, hotelId, targetEmail, targetUid, newPassword, oobCode } = req.body;
     if (!tokenId || !isSafeIdentifier(tokenId)) {
       return res.status(400).json({ error: "Valid token ID is required." });
     }
@@ -3095,6 +3178,23 @@ async function startServer() {
       return res.status(400).json({ error: "Invalid targetUid format." });
     }
 
+    // Server-side password strength validation when setting a new password
+    if (newPassword !== undefined) {
+      if (
+        typeof newPassword !== 'string' ||
+        newPassword.length < 8 ||
+        newPassword.length > 128 ||
+        !/[A-Z]/.test(newPassword) ||
+        !/[a-z]/.test(newPassword) ||
+        !/[0-9]/.test(newPassword) ||
+        !/[!@#$%^&*(),.?":{}|<>]/.test(newPassword)
+      ) {
+        return res.status(400).json({
+          error: "Password must be 8-128 characters and include uppercase, lowercase, number, and special symbol."
+        });
+      }
+    }
+
     if (!db) {
       return res.status(500).json({ error: "Database unavailable." });
     }
@@ -3102,11 +3202,12 @@ async function startServer() {
     const caller = await verifyFirebaseTokenAndCaller(req, false);
 
     try {
-      const { doc, updateDoc, getDoc } = await import('firebase/firestore');
+      const { doc, updateDoc, getDoc, collection, query, where, getDocs } = await import('firebase/firestore');
       const now = new Date().toISOString();
 
       // Verify token actually exists in Firestore
       let tokenSnap = await getDoc(doc(db, 'passwordResetTokens', tokenId));
+      const fromPasswordResetCol = tokenSnap.exists();
       if (!tokenSnap.exists()) {
         tokenSnap = await getDoc(doc(db, 'activationTokens', tokenId));
       }
@@ -3115,12 +3216,46 @@ async function startServer() {
       }
 
       const tokenData = tokenSnap.data();
+      const tokenType: 'activation' | 'password_reset' =
+        tokenData?.type || (fromPasswordResetCol ? 'password_reset' : 'activation');
+
       if (tokenData.status === 'revoked') {
         return res.status(403).json({ error: "This security token has been revoked." });
       }
+
+      const boundTargetUidInitial = tokenData.targetUid || tokenData.uid || targetUid;
+      const boundTargetEmail = (tokenData.targetEmail || tokenData.email || targetEmail || '').trim().toLowerCase();
+      const boundHotelId = tokenData.hotelId || hotelId;
+
       const expMs = tokenData.expiresAt ? new Date(tokenData.expiresAt).getTime() : NaN;
       if (!isNaN(expMs) && Date.now() > expMs) {
-        return res.status(403).json({ error: "This security token has expired." });
+        // Revert expired password_reset_pending account back to active
+        if (tokenType === 'password_reset') {
+          try {
+            await updateDoc(doc(db, 'passwordResetTokens', tokenId), { status: 'expired', updatedAt: now });
+          } catch {}
+          if (boundHotelId) {
+            try {
+              await updateDoc(doc(db, 'hotels', boundHotelId, 'passwordResetTokens', tokenId), { status: 'expired', updatedAt: now });
+            } catch {}
+          }
+          if (boundTargetUidInitial) {
+            try {
+              const uSnap = await getDoc(doc(db, 'users', boundTargetUidInitial));
+              if (uSnap.exists() && uSnap.data()?.status === 'password_reset_pending') {
+                await updateDoc(doc(db, 'users', boundTargetUidInitial), {
+                  status: 'active',
+                  passwordResetTokenId: null,
+                  passwordResetExpiresAt: null,
+                  updatedAt: now
+                });
+              }
+            } catch {}
+          }
+        }
+        return res.status(403).json({
+          error: "This security token has expired. Your account status has been restored to active so an administrator can issue a new reset link."
+        });
       }
 
       // Allow if token is unused, or if just marked used client-side within last 120 seconds, or caller owns targetUid
@@ -3133,20 +3268,160 @@ async function startServer() {
         }
       }
 
-      const boundTargetUid = tokenData.targetUid || tokenData.uid || targetUid;
-      const boundTargetEmail = (tokenData.targetEmail || tokenData.email || targetEmail || '').toLowerCase();
-      const boundHotelId = tokenData.hotelId || hotelId;
-
-      if (targetUid && boundTargetUid && targetUid !== boundTargetUid) {
+      if (targetUid && boundTargetUidInitial && targetUid !== boundTargetUidInitial) {
         return res.status(403).json({ error: "Token does not match target user." });
       }
       if (targetEmail && boundTargetEmail && targetEmail.trim().toLowerCase() !== boundTargetEmail) {
         return res.status(403).json({ error: "Token does not match target email." });
       }
 
-      const tokenType: 'activation' | 'password_reset' = tokenData?.type || 'password_reset';
+      // Load user document (by UID or fallback by email)
+      let boundTargetUid = boundTargetUidInitial;
+      let userDocData: any = null;
+      if (boundTargetUid) {
+        try {
+          const uSnap = await getDoc(doc(db, 'users', boundTargetUid));
+          if (uSnap.exists()) userDocData = uSnap.data();
+        } catch {}
+      }
+      if (!userDocData && boundTargetEmail) {
+        try {
+          const uq = query(collection(db, 'users'), where('email', '==', boundTargetEmail));
+          const uqSnap = await getDocs(uq);
+          if (!uqSnap.empty) {
+            boundTargetUid = uqSnap.docs[0].id;
+            userDocData = uqSnap.docs[0].data();
+          }
+        } catch {}
+      }
 
-      // Mark token as used in root collection
+      // Authoritatively update the Firebase Auth password when newPassword is provided
+      let passwordUpdatedInAuth = false;
+      let updatedUserToken: string | null = null;
+      let resolvedAuthUid: string | null = userDocData?.firebase_uid || boundTargetUid || null;
+
+      if (newPassword) {
+        // Method 1: Firebase Admin SDK (preferred authoritative server update)
+        if (adminAuth) {
+          try {
+            let authUserRecord: any = null;
+            if (resolvedAuthUid) {
+              try {
+                authUserRecord = await adminAuth.getUser(resolvedAuthUid);
+              } catch {
+                authUserRecord = null;
+              }
+            }
+            if (!authUserRecord && boundTargetEmail) {
+              try {
+                authUserRecord = await adminAuth.getUserByEmail(boundTargetEmail);
+              } catch {
+                authUserRecord = null;
+              }
+            }
+            if (authUserRecord) {
+              resolvedAuthUid = authUserRecord.uid;
+              await adminAuth.updateUser(authUserRecord.uid, {
+                password: newPassword,
+                emailVerified: true
+              });
+              passwordUpdatedInAuth = true;
+              console.log(`[PASSWORD RESET ADMIN] Updated password for user ${authUserRecord.uid}`);
+            } else if (boundTargetEmail) {
+              const created = await adminAuth.createUser({
+                uid: boundTargetUid || undefined,
+                email: boundTargetEmail,
+                password: newPassword,
+                displayName: userDocData?.displayName || tokenData.targetName || undefined,
+                emailVerified: true
+              });
+              resolvedAuthUid = created.uid;
+              passwordUpdatedInAuth = true;
+              console.log(`[PASSWORD RESET ADMIN] Created Auth user during reset for ${created.uid}`);
+            }
+          } catch (adminErr) {
+            console.warn("[PASSWORD RESET ADMIN] Admin password update notice:", adminErr);
+          }
+        }
+
+        // Method 2: Identity Toolkit REST with oobCode (if Admin SDK unavailable)
+        if (!passwordUpdatedInAuth && oobCode && firebaseConfig?.apiKey) {
+          try {
+            const resetRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:resetPassword?key=${firebaseConfig.apiKey}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ oobCode, newPassword })
+            });
+            const resetData = await resetRes.json();
+            if (resetRes.ok) {
+              passwordUpdatedInAuth = true;
+              if (resetData?.idToken) updatedUserToken = resetData.idToken;
+            }
+          } catch (oobErr) {
+            console.warn("[PASSWORD RESET REST] oobCode update notice:", oobErr);
+          }
+        }
+
+        // Method 3: Identity Toolkit REST sign-in with stored previous secret + password update
+        if (!passwordUpdatedInAuth && boundTargetEmail && firebaseConfig?.apiKey) {
+          const candidateSecrets = [
+            userDocData?.systemAuthSecret,
+            userDocData?.initialTempPass,
+            userDocData?.temporaryPassword,
+            tokenData?.tempPass
+          ].filter((s): s is string => typeof s === 'string' && s.length > 0);
+
+          for (const candidate of candidateSecrets) {
+            try {
+              const signInRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: boundTargetEmail, password: candidate, returnSecureToken: true })
+              });
+              const signInData = await signInRes.json();
+              if (signInRes.ok && signInData?.idToken) {
+                const updateRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:update?key=${firebaseConfig.apiKey}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ idToken: signInData.idToken, password: newPassword, returnSecureToken: true })
+                });
+                const updateData = await updateRes.json();
+                if (updateRes.ok) {
+                  passwordUpdatedInAuth = true;
+                  if (updateData?.idToken) updatedUserToken = updateData.idToken;
+                  if (updateData?.localId) resolvedAuthUid = updateData.localId;
+                  break;
+                }
+              }
+            } catch {}
+          }
+        }
+
+        // Method 4: Verify if client-side confirmPasswordReset / createUser already applied newPassword
+        if (!passwordUpdatedInAuth && boundTargetEmail && firebaseConfig?.apiKey) {
+          try {
+            const verifyRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: boundTargetEmail, password: newPassword, returnSecureToken: true })
+            });
+            const verifyData = await verifyRes.json();
+            if (verifyRes.ok && verifyData?.idToken) {
+              passwordUpdatedInAuth = true;
+              updatedUserToken = verifyData.idToken;
+              if (verifyData?.localId) resolvedAuthUid = verifyData.localId;
+            }
+          } catch {}
+        }
+
+        if (!passwordUpdatedInAuth) {
+          return res.status(500).json({
+            error: "Unable to update authentication password automatically. Please ask your Hotel Administrator to resend a fresh password reset link."
+          });
+        }
+      }
+
+      // Mark token as used in root collection(s)
       try {
         await updateDoc(doc(db, 'passwordResetTokens', tokenId), {
           isUsed: true,
@@ -3156,6 +3431,17 @@ async function startServer() {
         });
       } catch (e) {
         console.warn("Failed to mark root token as used:", e);
+      }
+
+      if (tokenType === 'activation') {
+        try {
+          await updateDoc(doc(db, 'activationTokens', tokenId), {
+            isUsed: true,
+            status: 'used',
+            usedAt: tokenData.usedAt || now,
+            updatedAt: now
+          });
+        } catch {}
       }
 
       // Mark token in hotel subcollection if hotelId is known
@@ -3172,27 +3458,51 @@ async function startServer() {
         }
       }
 
-      // Update target user profile: status becomes 'active', clear temp passwords
+      // Update target user profile: status returns to 'active', clear temp passwords & reset expiry markers
       if (boundTargetUid) {
+        const nextStatus =
+          userDocData?.status === 'disabled' || userDocData?.status === 'suspended'
+            ? userDocData.status
+            : 'active';
+        const userUpdatePayload: Record<string, any> = {
+          status: nextStatus,
+          isVerified: true,
+          emailVerified: true,
+          temporaryPassword: null,
+          initialPassword: null,
+          initialTempPass: null,
+          passwordResetTokenId: null,
+          passwordResetExpiresAt: null,
+          forcePasswordChange: false,
+          passwordChangedAt: now,
+          passwordChangedBy: boundTargetEmail || 'user',
+          updatedAt: now
+        };
+        if (newPassword) {
+          userUpdatePayload.systemAuthSecret = newPassword;
+        }
+        if (resolvedAuthUid && resolvedAuthUid !== userDocData?.firebase_uid) {
+          userUpdatePayload.firebase_uid = resolvedAuthUid;
+        }
         try {
-          await updateDoc(doc(db, 'users', boundTargetUid), {
-            status: 'active',
-            temporaryPassword: null,
-            initialPassword: null,
-            forcePasswordChange: false,
-            passwordChangedAt: now,
-            passwordChangedBy: boundTargetEmail || 'user',
-            updatedAt: now
-          });
+          await updateDoc(doc(db, 'users', boundTargetUid), userUpdatePayload);
         } catch (uErr) {
-          console.warn("Failed to update user status to active:", uErr);
+          console.warn("Failed to update user status via SDK, attempting REST write:", uErr);
+          try {
+            await saveUserProfileToFirestore(boundTargetUid, {
+              ...(userDocData || {}),
+              ...userUpdatePayload
+            }, updatedUserToken || undefined);
+          } catch (restErr) {
+            console.warn("Failed to update user status via REST:", restErr);
+          }
         }
       }
 
-      return res.json({ 
-        success: true, 
+      return res.json({
+        success: true,
         tokenType,
-        message: "Security token marked as used and account status updated to active." 
+        message: "Password updated, security token marked as used, and account status updated to active."
       });
     } catch (err: any) {
       console.error("Error in complete-password-reset endpoint:", err);

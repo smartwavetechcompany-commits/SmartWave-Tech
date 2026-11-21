@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, doc, onSnapshot, getDocs, getDoc } from 'firebase/firestore';
+import { collection, query, where, doc, onSnapshot, getDocs, getDoc, updateDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { ConfirmModal } from './ConfirmModal';
@@ -251,6 +251,109 @@ export function StaffManagement({ hotelId: propHotelId }: { hotelId?: string }) 
 
     syncPendingStaff();
     return () => { isMounted = false; };
+  }, [staff, hotelId, profile]);
+
+  // Auto-revert 'password_reset_pending' staff back to 'active' once their password reset link expires
+  useEffect(() => {
+    if (!hotelId || !profile || staff.length === 0) return;
+    const resetPendingMembers = staff.filter(s => s.status === 'password_reset_pending' && s.email);
+    if (resetPendingMembers.length === 0) return;
+
+    let isMounted = true;
+    let nextExpiryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const reconcileExpiredPasswordResets = async () => {
+      let nearestFutureExpiryMs: number | null = null;
+      const nowMs = Date.now();
+      const nowIso = new Date(nowMs).toISOString();
+
+      for (const member of resetPendingMembers) {
+        if (!isMounted || !member.email) break;
+        const normalizedEmail = member.email.trim().toLowerCase();
+        try {
+          const qTok = query(
+            collection(db, 'hotels', hotelId, 'passwordResetTokens'),
+            where('targetEmail', '==', normalizedEmail)
+          );
+          const snapTok = await getDocs(qTok);
+          const resetTokens = snapTok.docs
+            .map(d => ({ id: d.id, ...(d.data() as any) }))
+            .filter(t => t.type !== 'activation');
+
+          let hasActiveUnexpired = false;
+          const expiredActiveIds: string[] = [];
+
+          for (const tok of resetTokens) {
+            if (tok.isUsed || tok.status === 'used' || tok.status === 'revoked' || tok.status === 'expired') {
+              continue;
+            }
+            const expMs = tok.expiresAt ? new Date(tok.expiresAt).getTime() : NaN;
+            if (!isNaN(expMs) && expMs > nowMs) {
+              hasActiveUnexpired = true;
+              if (nearestFutureExpiryMs === null || expMs < nearestFutureExpiryMs) {
+                nearestFutureExpiryMs = expMs;
+              }
+            } else {
+              expiredActiveIds.push(tok.id);
+            }
+          }
+
+          // Mark expired active tokens cleanly
+          for (const expId of expiredActiveIds) {
+            updateDoc(doc(db, 'hotels', hotelId, 'passwordResetTokens', expId), {
+              status: 'expired',
+              updatedAt: nowIso
+            }).catch(() => {});
+            updateDoc(doc(db, 'passwordResetTokens', expId), {
+              status: 'expired',
+              updatedAt: nowIso
+            }).catch(() => {});
+          }
+
+          // Also check user doc's own passwordResetExpiresAt when no active token was found
+          if (!hasActiveUnexpired && member.passwordResetExpiresAt) {
+            const docExpMs = new Date(member.passwordResetExpiresAt).getTime();
+            if (!isNaN(docExpMs) && docExpMs > nowMs && resetTokens.length === 0) {
+              hasActiveUnexpired = true;
+              if (nearestFutureExpiryMs === null || docExpMs < nearestFutureExpiryMs) {
+                nearestFutureExpiryMs = docExpMs;
+              }
+            }
+          }
+
+          if (!hasActiveUnexpired && isMounted) {
+            console.log(`[STAFF SYNC] Password reset link expired for ${member.email}; reverting status to active.`);
+            await database.safeUpdate(doc(db, 'users', member.uid), {
+              status: 'active',
+              passwordResetTokenId: null,
+              passwordResetExpiresAt: null,
+              updatedAt: nowIso
+            }, {
+              hotelId: member.hotelId || hotelId || 'system',
+              module: 'Staff Security',
+              action: 'PASSWORD_RESET_EXPIRED_RESTORED_ACTIVE',
+              details: `Password reset link expired for ${member.email}; account status automatically restored to active.`
+            });
+          }
+        } catch (err) {
+          console.warn("[STAFF SYNC] Password reset expiry check notice:", err);
+        }
+      }
+
+      // Schedule automatic re-check right when the next active reset link expires
+      if (isMounted && nearestFutureExpiryMs !== null) {
+        const delayMs = Math.max(1000, Math.min(nearestFutureExpiryMs - Date.now() + 1000, 2147483000));
+        nextExpiryTimer = setTimeout(() => {
+          if (isMounted) reconcileExpiredPasswordResets();
+        }, delayMs);
+      }
+    };
+
+    reconcileExpiredPasswordResets();
+    return () => {
+      isMounted = false;
+      if (nextExpiryTimer) clearTimeout(nextExpiryTimer);
+    };
   }, [staff, hotelId, profile]);
 
   // Add staff submission

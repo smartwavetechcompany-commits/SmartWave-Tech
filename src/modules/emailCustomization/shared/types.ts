@@ -258,12 +258,17 @@ export const EMAIL_ICON_TONE_HEX: Record<EmailIconTone, { label: string; hex: st
 export type ModernButtonStyle = "filled" | "outlined" | "dark";
 export type ButtonCornerStyle = "square" | "rounded" | "pill";
 
+export type EmailHorizontalAlign = "left" | "center" | "right";
+export type EmailTextAlign = "left" | "center" | "right" | "justify";
+export type EmailVerticalAlign = "top" | "middle" | "bottom";
+
 export interface BlockStyleConfig {
   backgroundColor?: string;
   textColor?: string;
   borderColor?: string;
   accentColor?: string;
-  align?: "left" | "center" | "right";
+  align?: EmailHorizontalAlign;
+  verticalAlign?: EmailVerticalAlign;
   paddingY?: number; // 0..40 px
   paddingX?: number; // 0..40 px
   borderRadius?: number; // 0..16 px
@@ -368,14 +373,16 @@ export interface HeadingBlock extends EmailBlockBase {
   type: "heading";
   level: 1 | 2 | 3;
   text: string;
-  align?: "left" | "center" | "right";
+  align?: EmailHorizontalAlign;
+  verticalAlign?: EmailVerticalAlign;
   color?: string;
 }
 
 export interface ParagraphBlock extends EmailBlockBase {
   type: "paragraph";
   text: string;
-  align?: "left" | "center" | "right";
+  align?: EmailTextAlign;
+  verticalAlign?: EmailVerticalAlign;
   tone?: "default" | "muted" | "accent";
   inlineLinks?: InlineTextLink[];
 }
@@ -386,7 +393,8 @@ export interface ImageBlock extends EmailBlockBase {
   src: string;
   alt: string;
   widthPx: number;
-  align?: "left" | "center" | "right";
+  align?: EmailHorizontalAlign;
+  verticalAlign?: EmailVerticalAlign;
   fallbackBg?: string;
   linkUrl?: string;
   linkOpenInNewTab?: boolean;
@@ -490,6 +498,10 @@ export interface BrandHeaderBlock extends EmailBlockBase {
   logoWidthPx?: number;
   logoLinkUrl?: string;
   logoLinkOpenInNewTab?: boolean;
+  logoAlign?: EmailHorizontalAlign;
+  logoVerticalAlign?: EmailVerticalAlign;
+  contactAlign?: EmailHorizontalAlign;
+  contactVerticalAlign?: EmailVerticalAlign;
   showHotelName: boolean;
   showAddress: boolean;
   showPhone: boolean;
@@ -508,6 +520,10 @@ export interface PromoBannerBlock extends EmailBlockBase {
   imageId?: string;
   imageAlt?: string;
   imageLinkUrl?: string;
+  imageAlign?: EmailHorizontalAlign;
+  imageVerticalAlign?: EmailVerticalAlign;
+  textAlign?: EmailHorizontalAlign;
+  textVerticalAlign?: EmailVerticalAlign;
   text: string;
   buttonLabel: string;
   buttonUrl: string;
@@ -592,6 +608,10 @@ export interface FeatureCardBlock extends EmailBlockBase {
   imageId?: string;
   imageAlt: string;
   imageLinkUrl?: string;
+  imageAlign?: EmailHorizontalAlign;
+  imageVerticalAlign?: EmailVerticalAlign;
+  textAlign?: EmailHorizontalAlign;
+  textVerticalAlign?: EmailVerticalAlign;
   title: string;
   body: string;
   inlineLinks?: InlineTextLink[];
@@ -670,6 +690,10 @@ export interface ImageWithListBlock extends EmailBlockBase {
   imageId?: string;
   imageAlt: string;
   imageLinkUrl?: string;
+  imageAlign?: EmailHorizontalAlign;
+  imageVerticalAlign?: EmailVerticalAlign;
+  textAlign?: EmailHorizontalAlign;
+  textVerticalAlign?: EmailVerticalAlign;
   heading: string;
   iconTone?: EmailIconTone;
   items: ImageWithListItem[];
@@ -831,6 +855,7 @@ export interface EmailTemplateBranding {
   logoImageId?: string;
   logoAlt?: string;
   logoWidthPx?: number;
+  logoAlign?: EmailHorizontalAlign;
   logoLinkUrl?: string;
   logoLinkOpenInNewTab?: boolean;
 }

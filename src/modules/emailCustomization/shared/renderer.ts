@@ -429,11 +429,22 @@ export function renderEmailTemplate(options: {
       ? `<tr><td style="height:${accentThickness}px;line-height:${accentThickness}px;font-size:1px;background-color:${escapeHtml(accentBarColor)};">&nbsp;</td></tr>`
       : "";
 
+    const logoAlign =
+      branding.logoAlign === "center" || branding.logoAlign === "right"
+        ? branding.logoAlign
+        : undefined;
+    const logoMarginStyle =
+      logoAlign === "center"
+        ? "margin:0 auto;"
+        : logoAlign === "right"
+          ? "margin-left:auto;margin-right:0;"
+          : "";
     const logoImgTag = safeLogoUrl
-      ? `<img src="${escapeHtml(safeLogoUrl)}" alt="${escapeHtml(logoAlt)}" style="display:block;width:auto;height:auto;max-width:${logoWidth}px;max-height:${logoWidth}px;object-fit:contain;border:0;background-color:transparent;" />`
+      ? `<img src="${escapeHtml(safeLogoUrl)}" alt="${escapeHtml(logoAlt)}" style="display:block;${logoMarginStyle}width:auto;height:auto;max-width:${logoWidth}px;max-height:${logoWidth}px;object-fit:contain;border:0;background-color:transparent;" />`
       : "";
+    const logoWrapperStyle = logoAlign ? `margin:0 0 14px 0;text-align:${logoAlign};` : "margin:0 0 14px 0;";
     const logoHtml = safeLogoUrl
-      ? `<div style="margin:0 0 14px 0;">${
+      ? `<div style="${logoWrapperStyle}">${
           safeLogoLinkUrl
             ? `<a href="${escapeHtml(safeLogoLinkUrl)}"${buildLinkTargetAttrs(safeLogoLinkUrl, branding.logoLinkOpenInNewTab)} style="text-decoration:none;border:0;">${logoImgTag}</a>`
             : logoImgTag
@@ -505,21 +516,31 @@ ${preheaderHtml}
   const textParts: string[] = [];
 
   if (!hasBrandHeader && (safeLogoUrl || eyebrowText)) {
+    const v2LogoAlign =
+      branding.logoAlign === "center" || branding.logoAlign === "right"
+        ? branding.logoAlign
+        : "left";
+    const v2LogoMarginStyle =
+      v2LogoAlign === "center"
+        ? "margin:0 auto;"
+        : v2LogoAlign === "right"
+          ? "margin-left:auto;margin-right:0;"
+          : "";
     const legacyLogoImg = safeLogoUrl
-      ? `<img src="${escapeHtml(safeLogoUrl)}" alt="${escapeHtml(logoAlt)}" style="display:block;width:auto;height:auto;max-width:${logoWidth}px;max-height:${logoWidth}px;object-fit:contain;border:0;background-color:transparent;" />`
+      ? `<img src="${escapeHtml(safeLogoUrl)}" alt="${escapeHtml(logoAlt)}" style="display:block;${v2LogoMarginStyle}width:auto;height:auto;max-width:${logoWidth}px;max-height:${logoWidth}px;object-fit:contain;border:0;background-color:transparent;" />`
       : "";
     const legacyLogoHtml = safeLogoUrl
-      ? `<div style="margin:0 0 10px 0;">${
+      ? `<div style="margin:0 0 10px 0;${v2LogoAlign !== "left" ? `text-align:${v2LogoAlign};` : ""}">${
           safeLogoLinkUrl
             ? `<a href="${escapeHtml(safeLogoLinkUrl)}"${buildLinkTargetAttrs(safeLogoLinkUrl, branding.logoLinkOpenInNewTab)} style="text-decoration:none;border:0;">${legacyLogoImg}</a>`
             : legacyLogoImg
         }</div>`
       : "";
     const legacyEyebrowHtml = eyebrowText
-      ? `<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:${escapeHtml(primaryColor)};font-family:${fontCss};">${escapeHtml(eyebrowText)}</div>`
+      ? `<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:${escapeHtml(primaryColor)};${v2LogoAlign !== "left" ? `text-align:${v2LogoAlign};` : ""}font-family:${fontCss};">${escapeHtml(eyebrowText)}</div>`
       : "";
     rowParts.push(
-      `<tr><td class="ec-pad-sm" style="padding:20px 28px 8px 28px;background-color:#ffffff;">${legacyLogoHtml}${legacyEyebrowHtml}</td></tr>`
+      `<tr><td class="ec-pad-sm"${v2LogoAlign !== "left" ? ` align="${v2LogoAlign}"` : ""} style="padding:20px 28px 8px 28px;background-color:#ffffff;">${legacyLogoHtml}${legacyEyebrowHtml}</td></tr>`
     );
     if (eyebrowText) textParts.push(eyebrowText);
   }
@@ -677,9 +698,13 @@ function renderSingleBlock(
       const size = block.level === 1 ? "24px" : block.level === 3 ? "16px" : "20px";
       const color = sanitizeHexColor(block.color || secondaryColor, secondaryColor);
       const align = block.align || "left";
+      const vAlignStyle =
+        block.verticalAlign === "top" || block.verticalAlign === "middle" || block.verticalAlign === "bottom"
+          ? `vertical-align:${block.verticalAlign};`
+          : "";
       const tag = block.level === 1 ? "h1" : block.level === 3 ? "h3" : "h2";
       return {
-        html: `<${tag} style="margin:0 0 16px 0;font-size:${size};line-height:1.3;font-weight:700;color:${escapeHtml(color)};text-align:${align};font-family:${fontCss};">${escapeHtml(content)}</${tag}>`,
+        html: `<${tag} style="margin:0 0 16px 0;font-size:${size};line-height:1.3;font-weight:700;color:${escapeHtml(color)};text-align:${align};${vAlignStyle}font-family:${fontCss};">${escapeHtml(content)}</${tag}>`,
         text: content,
       };
     }
@@ -692,7 +717,14 @@ function renderSingleBlock(
         primaryColor
       );
       if (!rendered.text && !rendered.html) return { html: "", text: "" };
-      const align = block.align || "left";
+      const align =
+        block.align === "center" || block.align === "right" || block.align === "justify"
+          ? block.align
+          : "left";
+      const vAlignStyle =
+        block.verticalAlign === "top" || block.verticalAlign === "middle" || block.verticalAlign === "bottom"
+          ? `vertical-align:${block.verticalAlign};`
+          : "";
       const color =
         block.tone === "muted"
           ? "#52525b"
@@ -701,7 +733,7 @@ function renderSingleBlock(
             : "#27272a";
       const fontSize = block.tone === "muted" ? "13px" : "14px";
       return {
-        html: `<p style="margin:0 0 14px 0;font-size:${fontSize};line-height:1.6;color:${escapeHtml(color)};text-align:${align};font-family:${fontCss};">${rendered.html}</p>`,
+        html: `<p style="margin:0 0 14px 0;font-size:${fontSize};line-height:1.6;color:${escapeHtml(color)};text-align:${align};${vAlignStyle}font-family:${fontCss};">${rendered.html}</p>`,
         text: rendered.text,
       };
     }
@@ -712,16 +744,27 @@ function renderSingleBlock(
       const altText = substituteVariablesRaw(block.alt || "", variables) || variables.hotel_name;
       const width = Math.max(80, Math.min(544, Number(block.widthPx) || 544));
       const align = block.align || "center";
+      const vAlign =
+        block.verticalAlign === "top" || block.verticalAlign === "middle" || block.verticalAlign === "bottom"
+          ? block.verticalAlign
+          : undefined;
+      const imgMargin =
+        align === "center"
+          ? "margin:0 auto;"
+          : align === "right"
+            ? "margin-left:auto;margin-right:0;"
+            : "";
       const safeLink =
         block.linkUrl && block.linkHidden !== true
           ? resolveSafeUrlOnRender(block.linkUrl, variables, false)
           : "";
-      const imgTag = `<img class="ec-fluid-img" src="${escapeHtml(safeSrc)}" alt="${escapeHtml(altText)}" style="display:block;width:auto;max-width:${width}px;height:auto;object-fit:contain;border:0;border-radius:6px;background-color:transparent;" />`;
+      const imgTag = `<img class="ec-fluid-img" src="${escapeHtml(safeSrc)}" alt="${escapeHtml(altText)}" style="display:block;${imgMargin}width:auto;max-width:${width}px;height:auto;object-fit:contain;border:0;border-radius:6px;background-color:transparent;" />`;
       const wrapped = safeLink
         ? `<a href="${escapeHtml(safeLink)}"${buildLinkTargetAttrs(safeLink, block.linkOpenInNewTab)} style="text-decoration:none;border:0;">${imgTag}</a>`
         : imgTag;
+      const vAlignAttr = vAlign ? ` valign="${vAlign}" style="vertical-align:${vAlign};"` : "";
       return {
-        html: `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0;"><tr><td align="${align}">${wrapped}</td></tr></table>`,
+        html: `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0;"><tr><td align="${align}"${vAlignAttr}>${wrapped}</td></tr></table>`,
         text: safeLink ? `[Image: ${altText}] (${safeLink})` : `[Image: ${altText}]`,
       };
     }
@@ -1028,9 +1071,26 @@ function renderSingleBlock(
       const logoAlt =
         substituteVariablesRaw(block.logoAlt || "{{hotel_name}}", variables) || variables.hotel_name;
 
+      const logoAlign = safeAlign(block.logoAlign, "left");
+      const logoVAlign =
+        block.logoVerticalAlign === "top" || block.logoVerticalAlign === "bottom"
+          ? block.logoVerticalAlign
+          : "middle";
+      const contactAlign = safeAlign(block.contactAlign, "right");
+      const contactVAlign =
+        block.contactVerticalAlign === "top" || block.contactVerticalAlign === "bottom"
+          ? block.contactVerticalAlign
+          : "middle";
+      const logoMarginStyle =
+        logoAlign === "center"
+          ? "margin:0 auto;"
+          : logoAlign === "right"
+            ? "margin-left:auto;margin-right:0;"
+            : "";
+
       const leftInner = safeLogo
-        ? `<img src="${escapeHtml(safeLogo)}" alt="${escapeHtml(logoAlt)}" style="display:block;width:auto;height:auto;max-width:${logoW}px;max-height:${logoW}px;object-fit:contain;border:0;background-color:transparent;" />`
-        : `<div style="font-size:18px;font-weight:700;letter-spacing:-0.01em;color:${escapeHtml(textCol)};font-family:${fontCss};">${escapeHtml(variables.hotel_name)}</div>`;
+        ? `<img src="${escapeHtml(safeLogo)}" alt="${escapeHtml(logoAlt)}" style="display:block;${logoMarginStyle}width:auto;height:auto;max-width:${logoW}px;max-height:${logoW}px;object-fit:contain;border:0;background-color:transparent;" />`
+        : `<div style="font-size:18px;font-weight:700;letter-spacing:-0.01em;color:${escapeHtml(textCol)};text-align:${logoAlign};font-family:${fontCss};">${escapeHtml(variables.hotel_name)}</div>`;
       const leftHtml = safeLogoLink
         ? `<a href="${escapeHtml(safeLogoLink)}"${buildLinkTargetAttrs(safeLogoLink, block.logoLinkOpenInNewTab)} style="text-decoration:none;border:0;color:inherit;">${leftInner}</a>`
         : leftInner;
@@ -1101,10 +1161,10 @@ function renderSingleBlock(
   <td class="ec-pad-sm" style="padding:${pad};background-color:${escapeHtml(bg)};border-bottom:1px solid ${escapeHtml(borderCol)};">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
       <tr>
-        <td class="ec-stack ec-center-sm" width="42%" valign="middle" align="left" style="padding:4px 8px 4px 0;">
+        <td class="ec-stack ec-center-sm" width="42%" valign="${logoVAlign}" align="${logoAlign}" style="padding:4px 8px 4px 0;text-align:${logoAlign};vertical-align:${logoVAlign};">
           ${leftHtml}
         </td>
-        <td class="ec-stack ec-center-sm" width="58%" valign="middle" align="right" style="padding:4px 0 4px 8px;">
+        <td class="ec-stack ec-center-sm" width="58%" valign="${contactVAlign}" align="${contactAlign}" style="padding:4px 0 4px 8px;text-align:${contactAlign};vertical-align:${contactVAlign};">
           ${rightRows.join("")}
         </td>
       </tr>
@@ -1132,11 +1192,30 @@ function renderSingleBlock(
         : "";
       const imgAlt = substituteVariablesRaw(block.imageAlt || "", variables) || variables.hotel_name;
 
+      const imgAlign = safeAlign(block.imageAlign, "left");
+      const imgVAlign =
+        block.imageVerticalAlign === "top" || block.imageVerticalAlign === "bottom"
+          ? block.imageVerticalAlign
+          : "middle";
+      const textAlign = safeAlign(block.textAlign || block.style?.align, "left");
+      const textVAlign =
+        block.textVerticalAlign === "top" || block.textVerticalAlign === "bottom"
+          ? block.textVerticalAlign
+          : block.style?.verticalAlign === "top" || block.style?.verticalAlign === "bottom"
+            ? block.style.verticalAlign
+            : "middle";
+      const promoImgMargin =
+        imgAlign === "center"
+          ? "margin:0 auto;"
+          : imgAlign === "right"
+            ? "margin-left:auto;margin-right:0;"
+            : "";
+
       const imgTag = safeImg
-        ? `<img src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" style="display:block;width:auto;height:auto;max-width:64px;max-height:64px;object-fit:contain;border-radius:6px;border:0;background-color:transparent;" />`
+        ? `<img src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" style="display:block;${promoImgMargin}width:auto;height:auto;max-width:64px;max-height:64px;object-fit:contain;border-radius:6px;border:0;background-color:transparent;" />`
         : "";
       const imgCell = safeImg
-        ? `<td class="ec-hide-sm" width="56" valign="middle" style="padding-right:14px;">
+        ? `<td class="ec-hide-sm" width="56" align="${imgAlign}" valign="${imgVAlign}" style="padding-right:14px;vertical-align:${imgVAlign};">
             ${
               safeImgLink
                 ? `<a href="${escapeHtml(safeImgLink)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;border:0;">${imgTag}</a>`
@@ -1168,12 +1247,12 @@ function renderSingleBlock(
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
       <tr>
         ${imgCell}
-        <td class="ec-stack ec-center-sm" valign="middle" style="font-size:12px;line-height:1.45;color:${escapeHtml(fg)};font-family:${fontCss};padding:4px 12px 4px 0;">
+        <td class="ec-stack ec-center-sm" align="${textAlign}" valign="${textVAlign}" style="font-size:12px;line-height:1.45;color:${escapeHtml(fg)};text-align:${textAlign};vertical-align:${textVAlign};font-family:${fontCss};padding:4px 12px 4px 0;">
           ${renderMultilineEscaped(text)}
         </td>
         ${
           btnHtml
-            ? `<td class="ec-stack ec-center-sm" width="140" valign="middle" align="right" style="padding:6px 0 4px 0;">${btnHtml}</td>`
+            ? `<td class="ec-stack ec-center-sm" width="140" valign="${textVAlign}" align="right" style="padding:6px 0 4px 0;vertical-align:${textVAlign};">${btnHtml}</td>`
             : ""
         }
       </tr>
@@ -1272,6 +1351,10 @@ function renderSingleBlock(
       const bg = sanitizeHexColor(block.style?.backgroundColor, "#ffffff");
       const fg = sanitizeHexColor(block.style?.textColor, "#18181b");
       const align = safeAlign(block.style?.align, "center");
+      const vAlign =
+        block.style?.verticalAlign === "top" || block.style?.verticalAlign === "middle" || block.style?.verticalAlign === "bottom"
+          ? block.style.verticalAlign
+          : undefined;
       const pad = getSectionPadding(block.style, 24, 32);
 
       const btnHtml =
@@ -1292,7 +1375,7 @@ function renderSingleBlock(
           : "";
 
       const html = `<tr>
-  <td class="ec-pad-sm" align="${align}" style="padding:${pad};background-color:${escapeHtml(bg)};text-align:${align};font-family:${fontCss};">
+  <td class="ec-pad-sm" align="${align}"${vAlign ? ` valign="${vAlign}"` : ""} style="padding:${pad};background-color:${escapeHtml(bg)};text-align:${align};${vAlign ? `vertical-align:${vAlign};` : ""}font-family:${fontCss};">
     ${
       headline
         ? `<h1 style="margin:0 0 ${bodyRendered.html ? "12px" : "0"} 0;font-size:28px;line-height:1.22;font-weight:700;letter-spacing:-0.02em;color:${escapeHtml(fg)};font-family:${fontCss};">${escapeHtml(headline)}</h1>`
@@ -1436,6 +1519,25 @@ function renderSingleBlock(
       const pad = getSectionPadding(block.style, 10, 24);
       const isImageRight = block.imagePosition === "right";
 
+      const imgAlign = safeAlign(block.imageAlign, "left");
+      const imgVAlign =
+        block.imageVerticalAlign === "middle" || block.imageVerticalAlign === "bottom"
+          ? block.imageVerticalAlign
+          : "top";
+      const textAlign = safeAlign(block.textAlign || block.style?.align, "left");
+      const textVAlign =
+        block.textVerticalAlign === "top" || block.textVerticalAlign === "bottom"
+          ? block.textVerticalAlign
+          : block.style?.verticalAlign === "top" || block.style?.verticalAlign === "bottom"
+            ? block.style.verticalAlign
+            : "middle";
+      const cardImgMargin =
+        imgAlign === "center"
+          ? "margin:0 auto;"
+          : imgAlign === "right"
+            ? "margin-left:auto;margin-right:0;"
+            : "";
+
       const btnLabel = block.buttonHidden
         ? ""
         : substituteVariablesRaw(block.buttonLabel || "", variables);
@@ -1456,20 +1558,20 @@ function renderSingleBlock(
               openInNewTab: block.buttonOpenInNewTab,
               defaultBrandColor: buttonColor,
               fontCss,
-              align: "left",
+              align: textAlign,
             })}</div>`
           : "";
 
-      const imgTag = `<img class="ec-stack-img" src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" style="display:block;width:auto;max-width:100%;height:auto;object-fit:contain;border:0;" />`;
+      const imgTag = `<img class="ec-stack-img" src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" style="display:block;${cardImgMargin}width:auto;max-width:100%;height:auto;object-fit:contain;border:0;" />`;
       // Use dir="rtl" on the row when imagePosition === "right" so DOM order puts image first -> mobile ALWAYS stacks image on top!
-      const imgTd = `<td class="ec-stack" dir="ltr" width="48%" valign="top" style="padding:0;line-height:0;font-size:0;">
+      const imgTd = `<td class="ec-stack" dir="ltr" width="48%" align="${imgAlign}" valign="${imgVAlign}" style="padding:0;line-height:0;font-size:0;text-align:${imgAlign};vertical-align:${imgVAlign};">
           ${
             safeImgLink
               ? `<a href="${escapeHtml(safeImgLink)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;border:0;display:block;">${imgTag}</a>`
               : imgTag
           }
         </td>`;
-      const textTd = `<td class="ec-stack" dir="ltr" width="52%" valign="middle" style="padding:22px 24px;text-align:left;font-family:${fontCss};">
+      const textTd = `<td class="ec-stack" dir="ltr" width="52%" align="${textAlign}" valign="${textVAlign}" style="padding:22px 24px;text-align:${textAlign};vertical-align:${textVAlign};font-family:${fontCss};">
           <h3 style="margin:0 0 8px 0;font-size:18px;line-height:1.3;font-weight:700;color:${escapeHtml(fg)};font-family:${fontCss};">${escapeHtml(title)}</h3>
           ${bodyRendered.html ? `<p style="margin:0;font-size:13px;line-height:1.55;color:#52525b;font-family:${fontCss};">${bodyRendered.html}</p>` : ""}
           ${btnHtml}
@@ -1523,17 +1625,24 @@ function renderSingleBlock(
       const tone = safeTone(block.iconTone, "dark");
       const iconName = safeIcon(block.itemIcon, "check");
 
+      const sectionAlign = safeAlign(block.style?.align, "left");
+      const badgeImgMargin =
+        sectionAlign === "center"
+          ? "margin:0 auto;"
+          : sectionAlign === "right"
+            ? "margin-left:auto;margin-right:0;"
+            : "";
       const badgeImgTag = badgeImgUrl
-        ? `<img src="${escapeHtml(badgeImgUrl)}" alt="${escapeHtml(badgeImgAlt)}" style="display:block;width:auto;height:auto;max-width:140px;max-height:80px;object-fit:contain;border:0;background-color:transparent;" />`
+        ? `<img src="${escapeHtml(badgeImgUrl)}" alt="${escapeHtml(badgeImgAlt)}" style="display:block;${badgeImgMargin}width:auto;height:auto;max-width:140px;max-height:80px;object-fit:contain;border:0;background-color:transparent;" />`
         : "";
       const badgeHtml = badgeImgUrl
-        ? `<div style="margin:0 0 10px 0;">${
+        ? `<div style="margin:0 0 10px 0;text-align:${sectionAlign};">${
             badgeImgLink
               ? `<a href="${escapeHtml(badgeImgLink)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;border:0;">${badgeImgTag}</a>`
               : badgeImgTag
           }</div>`
         : badgeText
-          ? `<div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${escapeHtml(primaryColor)};margin:0 0 8px 0;font-family:${fontCss};">${escapeHtml(badgeText)}</div>`
+          ? `<div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${escapeHtml(primaryColor)};text-align:${sectionAlign};margin:0 0 8px 0;font-family:${fontCss};">${escapeHtml(badgeText)}</div>`
           : "";
 
       const rowsHtml = renderedItems
@@ -1544,7 +1653,7 @@ function renderSingleBlock(
               : `<span style="color:${escapeHtml(fg)};font-size:14px;line-height:1;">&#8226;</span>`;
           return `<tr>
             <td width="22" valign="top" style="padding:4px 8px 4px 0;line-height:1.5;">${marker}</td>
-            <td valign="top" style="padding:4px 0;font-size:14px;line-height:1.55;color:#27272a;font-family:${fontCss};">${item.html}</td>
+            <td valign="top" style="padding:4px 0;font-size:14px;line-height:1.55;color:#27272a;text-align:${sectionAlign};font-family:${fontCss};">${item.html}</td>
           </tr>`;
         })
         .join("");
@@ -1569,16 +1678,16 @@ function renderSingleBlock(
               openInNewTab: block.buttonOpenInNewTab,
               defaultBrandColor: buttonColor,
               fontCss,
-              align: "left",
+              align: sectionAlign,
             })}</div>`
           : "";
 
       const html = `<tr>
-  <td class="ec-pad-sm" style="padding:${pad};background-color:${escapeHtml(bg)};font-family:${fontCss};">
+  <td class="ec-pad-sm" align="${sectionAlign}" style="padding:${pad};background-color:${escapeHtml(bg)};text-align:${sectionAlign};font-family:${fontCss};">
     ${badgeHtml}
     ${
       heading
-        ? `<h2 style="margin:0 0 14px 0;font-size:22px;line-height:1.25;font-weight:700;color:${escapeHtml(fg)};font-family:${fontCss};">${escapeHtml(heading)}</h2>`
+        ? `<h2 style="margin:0 0 14px 0;font-size:22px;line-height:1.25;font-weight:700;color:${escapeHtml(fg)};text-align:${sectionAlign};font-family:${fontCss};">${escapeHtml(heading)}</h2>`
         : ""
     }
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -1586,7 +1695,7 @@ function renderSingleBlock(
     </table>
     ${
       footnoteRendered.html
-        ? `<p style="margin:14px 0 0 0;font-size:11px;line-height:1.5;color:#71717a;font-family:${fontCss};">${footnoteRendered.html}</p>`
+        ? `<p style="margin:14px 0 0 0;font-size:11px;line-height:1.5;color:#71717a;text-align:${sectionAlign};font-family:${fontCss};">${footnoteRendered.html}</p>`
         : ""
     }
     ${btnHtml}
@@ -1713,6 +1822,25 @@ function renderSingleBlock(
         )
         .join("");
 
+      const imgAlign = safeAlign(block.imageAlign, "left");
+      const imgVAlign =
+        block.imageVerticalAlign === "top" || block.imageVerticalAlign === "bottom"
+          ? block.imageVerticalAlign
+          : "middle";
+      const textAlign = safeAlign(block.textAlign || block.style?.align, "left");
+      const textVAlign =
+        block.textVerticalAlign === "top" || block.textVerticalAlign === "bottom"
+          ? block.textVerticalAlign
+          : block.style?.verticalAlign === "top" || block.style?.verticalAlign === "bottom"
+            ? block.style.verticalAlign
+            : "middle";
+      const listImgMargin =
+        imgAlign === "center"
+          ? "margin:0 auto;"
+          : imgAlign === "right"
+            ? "margin-left:auto;margin-right:0;"
+            : "";
+
       const btnLabel = block.buttonHidden
         ? ""
         : substituteVariablesRaw(block.buttonLabel || "", variables);
@@ -1733,15 +1861,15 @@ function renderSingleBlock(
               openInNewTab: block.buttonOpenInNewTab,
               defaultBrandColor: buttonColor,
               fontCss,
-              align: "left",
+              align: textAlign,
             })}</div>`
           : "";
 
       const imgTag = safeImg
-        ? `<img class="ec-stack-img" src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" style="display:block;width:auto;max-width:100%;height:auto;object-fit:contain;border:0;border-radius:${radius}px;" />`
+        ? `<img class="ec-stack-img" src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" style="display:block;${listImgMargin}width:auto;max-width:100%;height:auto;object-fit:contain;border:0;border-radius:${radius}px;" />`
         : "";
       const imgTd = safeImg
-        ? `<td class="ec-stack" dir="ltr" width="46%" valign="middle" style="padding:0 0 12px 0;">
+        ? `<td class="ec-stack" dir="ltr" width="46%" align="${imgAlign}" valign="${imgVAlign}" style="padding:0 0 12px 0;text-align:${imgAlign};vertical-align:${imgVAlign};">
             ${
               safeImgLink
                 ? `<a href="${escapeHtml(safeImgLink)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;border:0;display:block;">${imgTag}</a>`
@@ -1749,10 +1877,10 @@ function renderSingleBlock(
             }
           </td>`
         : "";
-      const listTd = `<td class="ec-stack" dir="ltr" width="${safeImg ? "54%" : "100%"}" valign="middle" style="padding:${safeImg ? (isRight ? "0 20px 0 0" : "0 0 0 22px") : "0"};text-align:left;font-family:${fontCss};">
+      const listTd = `<td class="ec-stack" dir="ltr" width="${safeImg ? "54%" : "100%"}" align="${textAlign}" valign="${textVAlign}" style="padding:${safeImg ? (isRight ? "0 20px 0 0" : "0 0 0 22px") : "0"};text-align:${textAlign};vertical-align:${textVAlign};font-family:${fontCss};">
           ${
             heading
-              ? `<h2 style="margin:0 0 14px 0;font-size:22px;line-height:1.25;font-weight:700;color:${escapeHtml(fg)};font-family:${fontCss};">${escapeHtml(heading)}</h2>`
+              ? `<h2 style="margin:0 0 14px 0;font-size:22px;line-height:1.25;font-weight:700;color:${escapeHtml(fg)};text-align:${textAlign};font-family:${fontCss};">${escapeHtml(heading)}</h2>`
               : ""
           }
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
