@@ -37,6 +37,7 @@ import {
   formatEmailDate,
   formatEmailTime,
   measureEmailHtmlBytes,
+  validateAbsoluteLinkUrl,
   validateEmailUrl,
   validateHotelEmailSettings,
   validateLinkLabelAgainstUrl,
@@ -2470,7 +2471,7 @@ async function run() {
       assert.strictEqual(enDefault.schemaVersion, undefined, `${eventType} untouched default remains v1`);
       assert.ok(!r1.html.includes("[[link:"), `${eventType} untouched default must not leak inline link tokens`);
       assert.ok(r1.html.includes('href="mailto:reservations@harborview.example"'), `${eventType} default mailto preserved`);
-      assert.ok(r1.html.includes('href="tel:+49 30 555 0199"'), `${eventType} v1 default tel parity preserved`);
+      assert.ok(r1.html.includes("+49 30 555 0199"), `${eventType} v1 default phone parity preserved`);
       assert.ok(!r1.html.includes('href="mailto:reservations@harborview.example" target="_blank"'), "mailto must never open in new tab");
 
       const rDe = renderHotelEmailServerSide({
@@ -2504,7 +2505,16 @@ async function run() {
       subject: "Your Stay at {{hotel_name}}",
       preheader: "Every link edited cleanly",
       branding: {
+        primaryColor: "#0f766e",
+        secondaryColor: "#134e4a",
+        fontFamily: "arial",
+        accentBarEnabled: true,
+        accentBarThicknessPx: 4,
+        showEyebrow: false,
+        eyebrowText: "",
+        showLogo: true,
         logoUrl: "https://cdn.example/hotel-logo.png",
+        logoAlt: "Harborview Suites Logo",
         logoLinkUrl: "{{hotel_website}}",
         logoLinkOpenInNewTab: true,
         accentBarColor: "#0f766e",
@@ -2516,22 +2526,22 @@ async function run() {
           id: "bh1",
           type: "brand_header",
           logoUrl: "https://cdn.example/hotel-logo.png",
+          logoAlt: "Harborview Suites",
           logoLinkUrl: "{{hotel_website}}",
           logoLinkOpenInNewTab: true,
           showHotelName: true,
           showAddress: true,
-          addressLinkUrl: "{{directions_link}}",
           showPhone: true,
-          phoneAsLink: true,
-          phoneLinkOverride: "tel:+49 30 999 0001",
+          phoneLinkEnabled: true,
+          phoneOverride: "+49 30 999 0001",
           showEmail: true,
-          emailAsLink: true,
-          emailLinkOverride: "mailto:vip@harborview.example",
+          emailLinkEnabled: true,
+          emailOverride: "vip@harborview.example",
         },
         {
           id: "p1",
           type: "paragraph",
-          text: "Review our [[link:l_guide]] or [[link:l_email]] before arrival.",
+          text: "Review our [[link:l_guide]] or [[link:l_email]] or [[link:l_dir]] before arrival.",
           inlineLinks: [
             {
               id: "l_guide",
@@ -2547,6 +2557,12 @@ async function run() {
               url: "mailto:concierge@harborview.example",
               underline: false,
             },
+            {
+              id: "l_dir",
+              label: "get directions",
+              url: "{{directions_link}}",
+              openInNewTab: true,
+            },
           ],
         },
         {
@@ -2554,6 +2570,7 @@ async function run() {
           type: "image",
           src: "https://cdn.example/pool.png",
           alt: "Pool deck",
+          widthPx: 544,
           linkUrl: "https://harborview.example/pool",
           linkOpenInNewTab: true,
         },
@@ -2562,18 +2579,19 @@ async function run() {
           type: "button",
           label: "Leave Feedback",
           url: "{{review_link}}",
+          displayStyle: "solid",
           openInNewTab: true,
-          backgroundColor: "#0f766e",
+          bgColor: "#0f766e",
           textColor: "#ffffff",
           borderColor: "#134e4a",
-          borderRadius: 10,
+          borderRadiusPx: 10,
         },
         {
           id: "soc1",
           type: "social_links",
           links: [
-            { platform: "instagram", label: "Instagram", url: "{{social_instagram}}", openInNewTab: true },
-            { platform: "website", label: "Hotel Site", url: "{{hotel_website}}", openInNewTab: false },
+            { id: "s_ig", label: "Instagram", url: "{{social_instagram}}", openInNewTab: true },
+            { id: "s_web", label: "Hotel Site", url: "{{hotel_website}}", openInNewTab: false },
           ],
         },
         {
@@ -2633,7 +2651,7 @@ async function run() {
     // Plain-text assertions ("label (URL)")
     assert.ok(enRendered.text.includes("Arrival Guide (https://harborview.example/guide)"), "Plain text renders inline link as label (URL)");
     assert.ok(enRendered.text.includes("email concierge (mailto:concierge@harborview.example)"), "Plain text renders mailto inline link");
-    assert.ok(enRendered.text.includes("Leave Feedback: https://harborview.example/review"), "Plain text renders button link");
+    assert.ok(enRendered.text.includes("Leave Feedback (https://harborview.example/review)"), "Plain text renders button link");
     assert.ok(enRendered.text.includes("Terms (https://harborview.example/terms)"), "Plain text renders footer nav link");
 
     // DE language override resolves DE URL
@@ -2651,7 +2669,16 @@ async function run() {
     const variant: EmailTemplateVariant = {
       schemaVersion: 4,
       subject: "Minimal Notice",
+      preheader: "",
       branding: {
+        primaryColor: "#0f766e",
+        secondaryColor: "#134e4a",
+        fontFamily: "arial",
+        accentBarEnabled: true,
+        accentBarThicknessPx: 4,
+        showEyebrow: false,
+        eyebrowText: "",
+        showLogo: true,
         logoUrl: "https://cdn.example/logo.png",
         logoLinkUrl: "",
         accentBarColor: "#0f766e",
@@ -2681,6 +2708,7 @@ async function run() {
           type: "image",
           src: "https://cdn.example/pic.png",
           alt: "Lobby",
+          widthPx: 544,
           linkUrl: "https://harborview.example/img-hidden",
           linkHidden: true,
         },
@@ -2696,7 +2724,7 @@ async function run() {
           id: "soc_hide",
           type: "social_links",
           links: [
-            { platform: "instagram", label: "Hidden Insta", url: "https://instagram.com/hidden", hidden: true },
+            { id: "s_hid", label: "Hidden Insta", url: "https://instagram.com/hidden", hidden: true },
           ],
         },
         {
@@ -2705,9 +2733,9 @@ async function run() {
           showHotelName: true,
           showAddress: true,
           showPhone: true,
-          phoneAsLink: false,
+          phoneLinkEnabled: false,
           showEmail: true,
-          emailAsLink: false,
+          emailLinkEnabled: false,
         },
       ],
     };
@@ -2752,8 +2780,8 @@ async function run() {
       },
     };
 
-    const varsEn = buildTemplateVariablesMap(BASE_CONTEXT, settings, "en");
-    const varsDe = buildTemplateVariablesMap(BASE_CONTEXT, settings, "de");
+    const varsEn = buildTemplateVariablesMap(BASE_CONTEXT, settings, undefined, "en").variables;
+    const varsDe = buildTemplateVariablesMap(BASE_CONTEXT, settings, undefined, "de").variables;
     assert.strictEqual(varsEn.review_link, "https://reviews.example/en");
     assert.strictEqual(varsDe.review_link, "https://reviews.example/primary", "DE without override falls back to primary URL");
     assert.strictEqual(varsEn.portal_link, "https://portal-primary.example");
@@ -2762,16 +2790,29 @@ async function run() {
     assert.strictEqual(varsEn.directions_link, "");
 
     // Per-email portalUrlOverride wins over hotel default portal link
-    const varsOverride = buildTemplateVariablesMap(BASE_CONTEXT, settings, "de", "https://override-stay.example/abc");
+    const varsOverride = buildTemplateVariablesMap(BASE_CONTEXT, settings, "https://override-stay.example/abc", "de").variables;
     assert.strictEqual(varsOverride.portal_link, "https://override-stay.example/abc");
 
     // Empty variable in a template hides the link cleanly (no empty <a href=""> or "undefined")
     const variant: EmailTemplateVariant = {
       schemaVersion: 4,
       subject: "Test Empty Link Vars",
-      branding: { accentBarColor: "#0f766e", buttonColor: "#0f766e", buttonTextColor: "#ffffff" },
+      preheader: "",
+      branding: {
+        primaryColor: "#0f766e",
+        secondaryColor: "#134e4a",
+        fontFamily: "arial",
+        accentBarEnabled: true,
+        accentBarThicknessPx: 4,
+        showEyebrow: false,
+        eyebrowText: "",
+        showLogo: false,
+        accentBarColor: "#0f766e",
+        buttonColor: "#0f766e",
+        buttonTextColor: "#ffffff",
+      },
       blocks: [
-        { id: "b_empty", type: "button", label: "Get Directions", url: "{{directions_link}}" },
+        { id: "b_empty", type: "button", label: "Get Directions", url: "{{directions_link}}", displayStyle: "solid" },
         {
           id: "p_empty",
           type: "paragraph",
@@ -2799,7 +2840,7 @@ async function run() {
     assert.ok(!rendered.html.includes('href=""'), "Empty link variable must NEVER render empty href=''");
     assert.ok(!rendered.html.includes("undefined"), "Empty link variable must NEVER render 'undefined'");
     assert.ok(!rendered.html.includes("Get Directions"), "Button with empty variable URL hides cleanly");
-    assert.ok(rendered.html.includes("Directions Map") && !rendered.html.includes('href="">Directions Map'), "Inline link with empty variable degrades to plain text cleanly");
+    assert.ok(!rendered.html.includes("Directions Map") && !rendered.html.includes('href=""'), "Inline link with empty variable hides cleanly without broken anchor");
     assert.ok(rendered.html.includes('href="https://wifi.example/guide"'));
   });
 
@@ -2824,14 +2865,14 @@ async function run() {
     ];
 
     for (const bad of unsafeUrls) {
-      const check = validateEmailUrl(bad, { allowContact: true });
+      const check = validateEmailUrl(bad, { allowContactSchemes: true });
       assert.strictEqual(check.valid, false, `Expected unsafe URL to be rejected: ${bad}`);
     }
 
     // Valid safe URLs including international tel with spaces & clean mailto
-    assert.strictEqual(validateEmailUrl("https://harborview.example/stay?id=123", { allowContact: true }).valid, true);
-    assert.strictEqual(validateEmailUrl("mailto:frontdesk@harborview.example", { allowContact: true }).valid, true);
-    const telOk = validateEmailUrl("tel:+49 30 555-0199", { allowContact: true });
+    assert.strictEqual(validateEmailUrl("https://harborview.example/stay?id=123", { allowContactSchemes: true }).valid, true);
+    assert.strictEqual(validateEmailUrl("mailto:frontdesk@harborview.example", { allowContactSchemes: true }).valid, true);
+    const telOk = validateEmailUrl("tel:+49 30 555-0199", { allowContactSchemes: true });
     assert.strictEqual(telOk.valid, true);
     assert.strictEqual(telOk.normalized, "tel:+4930555-0199");
 
@@ -2839,7 +2880,16 @@ async function run() {
     const maliciousVariant: EmailTemplateVariant = {
       schemaVersion: 4,
       subject: "Security Render Check",
+      preheader: "",
       branding: {
+        primaryColor: "#0f766e",
+        secondaryColor: "#134e4a",
+        fontFamily: "arial",
+        accentBarEnabled: true,
+        accentBarThicknessPx: 4,
+        showEyebrow: false,
+        eyebrowText: "",
+        showLogo: true,
         logoUrl: "https://cdn.example/logo.png",
         logoLinkUrl: "javascript:alert(1)",
         accentBarColor: "#0f766e",
@@ -2847,8 +2897,8 @@ async function run() {
         buttonTextColor: "#ffffff",
       },
       blocks: [
-        { id: "b1", type: "button", label: "Malicious Button", url: "https://user:pass@evil.example" },
-        { id: "b2", type: "button", label: "Localhost Button", url: "https://localhost/admin" },
+        { id: "b1", type: "button", label: "Malicious Button", url: "https://user:pass@evil.example", displayStyle: "solid" },
+        { id: "b2", type: "button", label: "Localhost Button", url: "https://localhost/admin", displayStyle: "solid" },
         {
           id: "p1",
           type: "paragraph",
@@ -2902,9 +2952,22 @@ async function run() {
     const phishVariant: EmailTemplateVariant = {
       schemaVersion: 4,
       subject: "Phishing Check",
-      branding: { accentBarColor: "#0f766e", buttonColor: "#0f766e", buttonTextColor: "#ffffff" },
+      preheader: "",
+      branding: {
+        primaryColor: "#0f766e",
+        secondaryColor: "#134e4a",
+        fontFamily: "arial",
+        accentBarEnabled: true,
+        accentBarThicknessPx: 4,
+        showEyebrow: false,
+        eyebrowText: "",
+        showLogo: false,
+        accentBarColor: "#0f766e",
+        buttonColor: "#0f766e",
+        buttonTextColor: "#ffffff",
+      },
       blocks: [
-        { id: "pb1", type: "button", label: "https://trusted-bank.com", url: "https://evil-phish.example" },
+        { id: "pb1", type: "button", label: "https://trusted-bank.com", url: "https://evil-phish.example", displayStyle: "solid" },
         {
           id: "pp1",
           type: "paragraph",
@@ -2934,7 +2997,20 @@ async function run() {
     const xssVariant: EmailTemplateVariant = {
       schemaVersion: 4,
       subject: "Inline XSS Test",
-      branding: { accentBarColor: "#0f766e", buttonColor: "#0f766e", buttonTextColor: "#ffffff" },
+      preheader: "",
+      branding: {
+        primaryColor: "#0f766e",
+        secondaryColor: "#134e4a",
+        fontFamily: "arial",
+        accentBarEnabled: true,
+        accentBarThicknessPx: 4,
+        showEyebrow: false,
+        eyebrowText: "",
+        showLogo: false,
+        accentBarColor: "#0f766e",
+        buttonColor: "#0f766e",
+        buttonTextColor: "#ffffff",
+      },
       blocks: [
         {
           id: "px1",
@@ -2959,11 +3035,12 @@ async function run() {
       usedDefaultLayout: false,
     });
 
-    assert.ok(!rendered.html.includes("<script>"), "Raw <script> must be escaped");
+    assert.ok(!rendered.html.includes("<script>"), "Raw <script> must be stripped/escaped");
+    assert.ok(!rendered.html.includes("steal()"), "Script body inside inline link label must be stripped");
     assert.ok(!rendered.html.includes('onerror="evil()"'), "Raw onerror attribute must be escaped");
     assert.ok(!rendered.html.includes("<b>Hello</b>"), "Raw <b> HTML must be escaped");
     assert.ok(rendered.html.includes('href="https://harborview.example/safe"'), "Safe inline link anchor still renders");
-    assert.ok(rendered.html.includes("&lt;script&gt;steal()&lt;/script&gt;"), "Label HTML is safely escaped");
+    assert.ok(rendered.html.includes("Click &quot;Here&quot;"), "Safe inline link label quotes are properly escaped");
   });
 
   // 46. applyDefaultLinksToTemplateDoc updates drafts ONLY (never modifies published, publishedVersion, or isCustomized)
@@ -3019,6 +3096,14 @@ async function run() {
       subject: "Booking {{booking_reference}} Ready",
       preheader: "Check your links",
       branding: {
+        primaryColor: "#0f766e",
+        secondaryColor: "#134e4a",
+        fontFamily: "arial",
+        accentBarEnabled: true,
+        accentBarThicknessPx: 4,
+        showEyebrow: false,
+        eyebrowText: "",
+        showLogo: true,
         logoUrl: "https://cdn.example/logo.png",
         logoLinkUrl: "{{hotel_website}}",
         accentBarColor: "#0f766e",
@@ -3035,7 +3120,7 @@ async function run() {
             { id: "a2", label: "Front Desk", url: "mailto:{{hotel_email}}" },
           ],
         },
-        { id: "b1", type: "button", label: "Manage Reservation", url: "{{portal_link}}" },
+        { id: "b1", type: "button", label: "Manage Reservation", url: "{{portal_link}}", displayStyle: "solid" },
         {
           id: "fn1",
           type: "footer_nav",
@@ -3121,26 +3206,41 @@ async function run() {
     const hotelAlphaAdmin = {
       uid: "u_alpha_admin",
       email: "admin@harborview.example",
-      role: "hotel_admin",
-      hotelId: "hotel_alpha",
+      profile: {
+        uid: "u_alpha_admin",
+        email: "admin@harborview.example",
+        role: "hotelAdmin",
+        hotelId: "hotel_alpha",
+        status: "active",
+      },
     };
     const hotelBetaAdmin = {
       uid: "u_beta_admin",
       email: "admin@otherhotel.example",
-      role: "hotel_admin",
-      hotelId: "hotel_beta",
+      profile: {
+        uid: "u_beta_admin",
+        email: "admin@otherhotel.example",
+        role: "hotelAdmin",
+        hotelId: "hotel_beta",
+        status: "active",
+      },
     };
     const receptionist = {
       uid: "u_staff",
       email: "desk@harborview.example",
-      role: "receptionist",
-      hotelId: "hotel_alpha",
+      profile: {
+        uid: "u_staff",
+        email: "desk@harborview.example",
+        role: "receptionist",
+        hotelId: "hotel_alpha",
+        status: "active",
+      },
     };
 
     assert.strictEqual(callerHasEmailModuleAccess(hotelAlphaAdmin, "hotel_alpha", "manage").allowed, true);
     assert.strictEqual(callerHasEmailModuleAccess(hotelBetaAdmin, "hotel_alpha", "manage").allowed, false);
     assert.strictEqual(callerHasEmailModuleAccess(receptionist, "hotel_alpha", "manage").allowed, false);
-    assert.strictEqual(callerIsStrictHotelAdmin(receptionist), false);
+    assert.strictEqual(callerIsStrictHotelAdmin(receptionist, "hotel_alpha").allowed, false);
   });
 
   // 49. Feature flag EMAIL_CUSTOMIZATION_ENABLED=false disables v4 custom links and reverts to untouched defaults
@@ -3192,6 +3292,89 @@ async function run() {
       if (prevFlag === undefined) delete process.env.EMAIL_CUSTOMIZATION_ENABLED;
       else process.env.EMAIL_CUSTOMIZATION_ENABLED = prevFlag;
     }
+  });
+
+  // 50. URL format validation utility ensures user-defined links are absolute URLs with valid protocols
+  await test("50. validateAbsoluteLinkUrl validates absolute http/https URLs and flags relative paths or missing protocols", () => {
+    const okHttps = validateAbsoluteLinkUrl("https://harborview.example/manage");
+    assert.strictEqual(okHttps.valid, true);
+    assert.strictEqual(okHttps.isAbsolute, true);
+    assert.strictEqual(okHttps.protocol, "https:");
+
+    const httpAllowed = validateAbsoluteLinkUrl("http://harborview.example/book", { allowHttp: true });
+    assert.strictEqual(httpAllowed.valid, true);
+    assert.strictEqual(httpAllowed.isAbsolute, true);
+    assert.strictEqual(httpAllowed.protocol, "http:");
+
+    const httpDisallowed = validateAbsoluteLinkUrl("http://harborview.example/book", { allowHttp: false });
+    assert.strictEqual(httpDisallowed.valid, false);
+    assert.strictEqual(httpDisallowed.isAbsolute, true);
+    assert.strictEqual(httpDisallowed.suggestedHttpsUrl, "https://harborview.example/book");
+
+    const relativePath = validateAbsoluteLinkUrl("/reservations/123");
+    assert.strictEqual(relativePath.valid, false);
+    assert.strictEqual(relativePath.isAbsolute, false);
+
+    const missingProtocol = validateAbsoluteLinkUrl("www.harborview.example/checkin");
+    assert.strictEqual(missingProtocol.valid, false);
+    assert.strictEqual(missingProtocol.isAbsolute, false);
+    assert.strictEqual(missingProtocol.suggestedHttpsUrl, "https://www.harborview.example/checkin");
+
+    const badScheme = validateAbsoluteLinkUrl("ftp://files.harborview.example/doc.pdf");
+    assert.strictEqual(badScheme.valid, false);
+
+    const jsScheme = validateAbsoluteLinkUrl("javascript:alert(1)");
+    assert.strictEqual(jsScheme.valid, false);
+
+    const varToken = validateAbsoluteLinkUrl("{{booking_link}}", { allowVariableToken: true });
+    assert.strictEqual(varToken.valid, true);
+    assert.strictEqual(varToken.protocol, "variable");
+  });
+
+  // 51. Header logos and all email images render at natural aspect ratio without squashing or object-fit:cover cropping
+  await test("51. Header logos, footer logos, and all email images render with natural aspect ratio (no fixed width+max-height squash or object-fit:cover)", () => {
+    const preset = buildStarterPresetVariant("modern_resort", "booking_confirmation", "en", "https://tidehotels.de");
+    preset.branding.logoUrl = "https://cdn.harborview.example/logo-square.png";
+    preset.branding.logoWidthPx = 160;
+    preset.blocks = preset.blocks.map((b) => {
+      if (b.type === "brand_header") {
+        return { ...b, logoUrl: "https://cdn.harborview.example/logo-square.png", logoWidthPx: 160 };
+      }
+      if (b.type === "promo_banner") {
+        return { ...b, imageUrl: "https://cdn.harborview.example/promo-icon.png" };
+      }
+      if (b.type === "benefits_list") {
+        return { ...b, badgeImageUrl: "https://cdn.harborview.example/badge.png" };
+      }
+      if (b.type === "footer_copyright") {
+        return { ...b, showFooterLogo: true, footerLogoUrl: "https://cdn.harborview.example/footer-logo.png", footerLogoWidthPx: 120 };
+      }
+      return b;
+    });
+    preset.blocks.push({
+      id: "img_natural",
+      type: "image",
+      src: "https://cdn.harborview.example/lobby.jpg",
+      alt: "Lobby",
+      widthPx: 544,
+      align: "center",
+    });
+
+    const rendered = renderEmailTemplate({
+      variant: preset,
+      context: BASE_CONTEXT,
+      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      language: "en",
+      usedDefaultLayout: false,
+    });
+
+    assert.ok(!rendered.html.includes("object-fit:cover"), "Rendered email must NOT crop uploaded images with object-fit:cover");
+    assert.ok(!rendered.html.includes("max-height:52px"), "Brand header logo must NOT squash tall/square logos to max-height:52px");
+    assert.ok(!rendered.html.includes("max-height:56px"), "Header logo must NOT squash tall/square logos to max-height:56px");
+    assert.ok(!rendered.html.includes("max-height:44px"), "Footer logo must NOT squash tall/square logos to max-height:44px");
+    assert.ok(!rendered.html.includes('width="48" height="48"'), "Promo banner image must NOT force fixed 48x48 stretch");
+    assert.ok(rendered.html.includes("object-fit:contain"), "Uploaded logos and images must use object-fit:contain");
+    assert.ok(rendered.html.includes("width:auto;height:auto;max-width:160px;max-height:160px;object-fit:contain"), "Header logo must scale proportionally within max-width/max-height");
   });
 
   if (process.exitCode && process.exitCode !== 0) {

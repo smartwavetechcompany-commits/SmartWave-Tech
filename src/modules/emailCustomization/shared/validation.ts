@@ -286,6 +286,165 @@ export function validateEmailUrl(
   return { valid: true, normalized };
 }
 
+export interface AbsoluteUrlValidationResult {
+  valid: boolean;
+  isAbsolute: boolean;
+  protocol?: "https:" | "http:" | "mailto:" | "tel:" | "variable";
+  normalized?: string;
+  suggestedHttpsUrl?: string;
+  error?: string;
+}
+
+/**
+ * URL format validation utility for the link editor.
+ * Ensures user-defined links are absolute URLs with valid protocols (http/https,
+ * plus optional mailto:/tel: and allow-listed dynamic variables), while flagging
+ * relative paths, missing protocols, invalid hostnames, and unsafe schemes.
+ */
+export function validateAbsoluteLinkUrl(
+  rawUrl: unknown,
+  options: {
+    allowHttp?: boolean;
+    allowEmpty?: boolean;
+    allowContactSchemes?: boolean;
+    allowVariableToken?: boolean;
+    fieldName?: string;
+  } = {}
+): AbsoluteUrlValidationResult {
+  const field = options.fieldName || "Link URL";
+  const allowHttp = options.allowHttp ?? false;
+
+  if (rawUrl === undefined || rawUrl === null || String(rawUrl).trim() === "") {
+    if (options.allowEmpty) {
+      return { valid: true, isAbsolute: false, normalized: "" };
+    }
+    return { valid: false, isAbsolute: false, error: `${field} is required.` };
+  }
+
+  const trimmed = String(rawUrl).trim();
+  if (trimmed.length > MAX_URL_LENGTH) {
+    return {
+      valid: false,
+      isAbsolute: false,
+      error: `${field} exceeds the maximum length of ${MAX_URL_LENGTH} characters.`,
+    };
+  }
+
+  if (/[\x00-\x1f\x7f]/.test(trimmed) || /\s/.test(trimmed)) {
+    return {
+      valid: false,
+      isAbsolute: false,
+      error: `${field} must not contain spaces or control characters.`,
+    };
+  }
+
+  if (options.allowVariableToken && ALLOWED_URL_VARIABLES.has(trimmed)) {
+    return { valid: true, isAbsolute: true, protocol: "variable", normalized: trimmed };
+  }
+  if (
+    options.allowVariableToken &&
+    options.allowContactSchemes &&
+    ALLOWED_CONTACT_URL_VARIABLES.has(trimmed)
+  ) {
+    return { valid: true, isAbsolute: true, protocol: "variable", normalized: trimmed };
+  }
+
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith("mailto:") || lower.startsWith("tel:")) {
+    const emailRes = validateEmailUrl(trimmed, {
+      allowEmpty: options.allowEmpty,
+      allowContactSchemes: options.allowContactSchemes,
+      allowVariableToken: options.allowVariableToken,
+      fieldName: field,
+    });
+    return {
+      valid: emailRes.valid,
+      isAbsolute: true,
+      protocol: lower.startsWith("mailto:") ? "mailto:" : "tel:",
+      normalized: emailRes.normalized,
+      error: emailRes.error,
+    };
+  }
+
+  // Catch relative URLs (e.g. "/book", "./rooms", "#section", "hotel.com/book")
+  if (trimmed.startsWith("/") || trimmed.startsWith("./") || trimmed.startsWith("../") || trimmed.startsWith("#")) {
+    return {
+      valid: false,
+      isAbsolute: false,
+      error: `${field} must be an absolute URL starting with https:// (relative paths like "${trimmed.slice(0, 24)}" cannot work in emails).`,
+    };
+  }
+
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
+    const looksLikeDomain = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[/:?#].*)?$/i.test(trimmed);
+    return {
+      valid: false,
+      isAbsolute: false,
+      ...(looksLikeDomain ? { suggestedHttpsUrl: `https://${trimmed}` } : {}),
+      error: `${field} must be an absolute URL including protocol (for example, https://${looksLikeDomain ? trimmed : "yourhotel.com"}).`,
+    };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return {
+      valid: false,
+      isAbsolute: false,
+      error: `${field} is not a valid absolute URL.`,
+    };
+  }
+
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return {
+      valid: false,
+      isAbsolute: true,
+      error: `${field} uses unsupported protocol "${parsed.protocol}". Use an absolute https:// URL.`,
+    };
+  }
+
+  if (parsed.username || parsed.password) {
+    return {
+      valid: false,
+      isAbsolute: true,
+      protocol: parsed.protocol,
+      error: `${field} must not include embedded credentials (username:password@).`,
+    };
+  }
+
+  if (!parsed.hostname || !parsed.hostname.includes(".") || isLocalhostOrIpHost(parsed.hostname)) {
+    return {
+      valid: false,
+      isAbsolute: true,
+      protocol: parsed.protocol,
+      error: `${field} must include a valid public domain name (localhost and raw IP addresses are not allowed).`,
+    };
+  }
+
+  const normalized =
+    parsed.pathname === "/" && !parsed.search && !parsed.hash
+      ? parsed.origin
+      : parsed.toString();
+
+  if (parsed.protocol === "http:" && !allowHttp) {
+    return {
+      valid: false,
+      isAbsolute: true,
+      protocol: "http:",
+      suggestedHttpsUrl: normalized.replace(/^http:\/\//i, "https://"),
+      error: `${field} uses http:// — upgrade to https:// for secure email links.`,
+    };
+  }
+
+  return {
+    valid: true,
+    isAbsolute: true,
+    protocol: parsed.protocol,
+    normalized,
+  };
+}
+
 function normalizeHostForCompare(host: string): string {
   return host.trim().toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
 }
@@ -1725,8 +1884,8 @@ export function resolveLocalizedLink(
   if (!linkVal || typeof linkVal !== "object") return "";
   const candidates = [
     linkVal.byLanguage?.[guestLang],
-    linkVal.byLanguage?.[hotelDefaultLang],
     linkVal.defaultUrl,
+    linkVal.byLanguage?.[hotelDefaultLang],
   ];
   for (const cand of candidates) {
     if (cand && cand.trim()) {

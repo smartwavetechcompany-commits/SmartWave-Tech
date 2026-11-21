@@ -199,9 +199,9 @@ async function main() {
       id: "edited_links_social",
       type: "social_links" as const,
       links: [
-        { platform: "instagram" as const, label: "Instagram", url: "{{social_instagram}}", openInNewTab: true },
-        { platform: "facebook" as const, label: "Facebook", url: "{{social_facebook}}", openInNewTab: true },
-        { platform: "website" as const, label: "Official Website", url: "{{hotel_website}}", openInNewTab: true },
+        { id: "soc_ig", label: "Instagram", url: "{{social_instagram}}", openInNewTab: true },
+        { id: "soc_fb", label: "Facebook", url: "{{social_facebook}}", openInNewTab: true },
+        { id: "soc_web", label: "Official Website", url: "{{hotel_website}}", openInNewTab: true },
       ],
     };
     if (contactIdx >= 0) {

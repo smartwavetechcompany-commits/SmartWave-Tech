@@ -26,6 +26,7 @@ import {
 } from "../shared/types";
 import {
   extractTemplateLinksOverview,
+  validateAbsoluteLinkUrl,
   validateEmailUrl,
   validateLinkLabelAgainstUrl,
 } from "../shared/validation";
@@ -151,11 +152,29 @@ export function LinkDestinationField({
     url.trim().toLowerCase().startsWith("mailto:") ||
     url.trim().toLowerCase().startsWith("tel:");
 
+  const formatCheck = useMemo(() => {
+    const trimmed = (url || "").trim();
+    if (!trimmed) {
+      return allowEmpty
+        ? { valid: true, isAbsolute: false }
+        : { valid: false, isAbsolute: false, error: "Destination URL is required." };
+    }
+    return validateAbsoluteLinkUrl(trimmed, {
+      allowHttp: false,
+      allowEmpty,
+      allowVariableToken: true,
+      allowContactSchemes,
+      fieldName: label || "Link URL",
+    });
+  }, [url, allowEmpty, allowContactSchemes, label]);
+
   const validationError = useMemo(() => {
     const trimmed = (url || "").trim();
     if (!trimmed) {
       return allowEmpty ? null : "Destination URL is required.";
     }
+    if (!formatCheck.valid) return formatCheck.error || "Invalid link URL.";
+
     const urlCheck = validateEmailUrl(trimmed, {
       allowEmpty,
       allowVariableToken: true,
@@ -169,7 +188,7 @@ export function LinkDestinationField({
       if (!phish.valid) return phish.error || "Visible text does not match link destination.";
     }
     return null;
-  }, [url, allowEmpty, allowContactSchemes, label, visibleLabel, preview.resolved]);
+  }, [url, allowEmpty, allowContactSchemes, label, visibleLabel, preview.resolved, formatCheck]);
 
   const handleSelectMode = (nextMode: LinkDestinationMode) => {
     setExplicitMode(nextMode);
@@ -316,9 +335,23 @@ export function LinkDestinationField({
 
       {/* Live resolved URL preview & validation */}
       {validationError ? (
-        <div className="flex items-start gap-1.5 text-[11px] text-red-400 leading-snug">
-          <AlertCircle size={12} className="shrink-0 mt-0.5" />
-          <span>{validationError}</span>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-red-400 leading-snug">
+          <div className="flex items-start gap-1.5 min-w-0">
+            <AlertCircle size={12} className="shrink-0 mt-0.5" />
+            <span>{validationError}</span>
+          </div>
+          {formatCheck.suggestedHttpsUrl && (
+            <button
+              type="button"
+              onClick={() => {
+                setExplicitMode("https");
+                onChangeUrl(formatCheck.suggestedHttpsUrl!);
+              }}
+              className="px-2 py-0.5 rounded bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30 text-[10px] font-medium whitespace-nowrap"
+            >
+              Use https://
+            </button>
+          )}
         </div>
       ) : preview.isEmptyVariable ? (
         <div className="flex items-start gap-1.5 text-[11px] text-amber-400 leading-snug">

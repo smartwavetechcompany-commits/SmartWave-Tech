@@ -430,7 +430,7 @@ export function renderEmailTemplate(options: {
       : "";
 
     const logoImgTag = safeLogoUrl
-      ? `<img src="${escapeHtml(safeLogoUrl)}" alt="${escapeHtml(logoAlt)}" width="${logoWidth}" style="display:block;max-width:${logoWidth}px;max-height:56px;height:auto;border:0;background-color:#f4f4f5;" />`
+      ? `<img src="${escapeHtml(safeLogoUrl)}" alt="${escapeHtml(logoAlt)}" style="display:block;width:auto;height:auto;max-width:${logoWidth}px;max-height:${logoWidth}px;object-fit:contain;border:0;background-color:transparent;" />`
       : "";
     const logoHtml = safeLogoUrl
       ? `<div style="margin:0 0 14px 0;">${
@@ -506,7 +506,7 @@ ${preheaderHtml}
 
   if (!hasBrandHeader && (safeLogoUrl || eyebrowText)) {
     const legacyLogoImg = safeLogoUrl
-      ? `<img src="${escapeHtml(safeLogoUrl)}" alt="${escapeHtml(logoAlt)}" width="${logoWidth}" style="display:block;max-width:${logoWidth}px;max-height:56px;height:auto;border:0;background-color:#ffffff;" />`
+      ? `<img src="${escapeHtml(safeLogoUrl)}" alt="${escapeHtml(logoAlt)}" style="display:block;width:auto;height:auto;max-width:${logoWidth}px;max-height:${logoWidth}px;object-fit:contain;border:0;background-color:transparent;" />`
       : "";
     const legacyLogoHtml = safeLogoUrl
       ? `<div style="margin:0 0 10px 0;">${
@@ -591,7 +591,8 @@ ${preheaderHtml}
   @media only screen and (max-width: 600px) {
     .ec-container { width: 100% !important; max-width: 100% !important; }
     .ec-stack { display: block !important; width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; }
-    .ec-stack-img { width: 100% !important; max-width: 100% !important; height: auto !important; }
+    .ec-stack-img { width: auto !important; max-width: 100% !important; height: auto !important; }
+    .ec-fluid-img { max-width: 100% !important; height: auto !important; }
     .ec-hide-sm { display: none !important; width: 0 !important; height: 0 !important; overflow: hidden !important; }
     .ec-center-sm { text-align: center !important; }
     .ec-pad-sm { padding-left: 18px !important; padding-right: 18px !important; }
@@ -711,12 +712,11 @@ function renderSingleBlock(
       const altText = substituteVariablesRaw(block.alt || "", variables) || variables.hotel_name;
       const width = Math.max(80, Math.min(544, Number(block.widthPx) || 544));
       const align = block.align || "center";
-      const bg = sanitizeHexColor(block.fallbackBg, "#f4f4f5");
       const safeLink =
         block.linkUrl && block.linkHidden !== true
           ? resolveSafeUrlOnRender(block.linkUrl, variables, false)
           : "";
-      const imgTag = `<img src="${escapeHtml(safeSrc)}" alt="${escapeHtml(altText)}" width="${width}" style="display:block;width:100%;max-width:${width}px;height:auto;border:0;border-radius:6px;background-color:${escapeHtml(bg)};" />`;
+      const imgTag = `<img class="ec-fluid-img" src="${escapeHtml(safeSrc)}" alt="${escapeHtml(altText)}" style="display:block;width:auto;max-width:${width}px;height:auto;object-fit:contain;border:0;border-radius:6px;background-color:transparent;" />`;
       const wrapped = safeLink
         ? `<a href="${escapeHtml(safeLink)}"${buildLinkTargetAttrs(safeLink, block.linkOpenInNewTab)} style="text-decoration:none;border:0;">${imgTag}</a>`
         : imgTag;
@@ -1029,7 +1029,7 @@ function renderSingleBlock(
         substituteVariablesRaw(block.logoAlt || "{{hotel_name}}", variables) || variables.hotel_name;
 
       const leftInner = safeLogo
-        ? `<img src="${escapeHtml(safeLogo)}" alt="${escapeHtml(logoAlt)}" width="${logoW}" style="display:block;max-width:${logoW}px;max-height:52px;height:auto;border:0;background-color:${escapeHtml(bg)};" />`
+        ? `<img src="${escapeHtml(safeLogo)}" alt="${escapeHtml(logoAlt)}" style="display:block;width:auto;height:auto;max-width:${logoW}px;max-height:${logoW}px;object-fit:contain;border:0;background-color:transparent;" />`
         : `<div style="font-size:18px;font-weight:700;letter-spacing:-0.01em;color:${escapeHtml(textCol)};font-family:${fontCss};">${escapeHtml(variables.hotel_name)}</div>`;
       const leftHtml = safeLogoLink
         ? `<a href="${escapeHtml(safeLogoLink)}"${buildLinkTargetAttrs(safeLogoLink, block.logoLinkOpenInNewTab)} style="text-decoration:none;border:0;color:inherit;">${leftInner}</a>`
@@ -1133,7 +1133,7 @@ function renderSingleBlock(
       const imgAlt = substituteVariablesRaw(block.imageAlt || "", variables) || variables.hotel_name;
 
       const imgTag = safeImg
-        ? `<img src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" width="48" height="48" style="display:block;width:48px;height:48px;object-fit:cover;border-radius:6px;border:0;" />`
+        ? `<img src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" style="display:block;width:auto;height:auto;max-width:64px;max-height:64px;object-fit:contain;border-radius:6px;border:0;background-color:transparent;" />`
         : "";
       const imgCell = safeImg
         ? `<td class="ec-hide-sm" width="56" valign="middle" style="padding-right:14px;">
@@ -1460,7 +1460,7 @@ function renderSingleBlock(
             })}</div>`
           : "";
 
-      const imgTag = `<img class="ec-stack-img" src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" width="275" style="display:block;width:100%;max-width:100%;height:auto;border:0;object-fit:cover;" />`;
+      const imgTag = `<img class="ec-stack-img" src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" style="display:block;width:auto;max-width:100%;height:auto;object-fit:contain;border:0;" />`;
       // Use dir="rtl" on the row when imagePosition === "right" so DOM order puts image first -> mobile ALWAYS stacks image on top!
       const imgTd = `<td class="ec-stack" dir="ltr" width="48%" valign="top" style="padding:0;line-height:0;font-size:0;">
           ${
@@ -1524,7 +1524,7 @@ function renderSingleBlock(
       const iconName = safeIcon(block.itemIcon, "check");
 
       const badgeImgTag = badgeImgUrl
-        ? `<img src="${escapeHtml(badgeImgUrl)}" alt="${escapeHtml(badgeImgAlt)}" width="96" style="display:block;max-width:120px;max-height:36px;height:auto;border:0;" />`
+        ? `<img src="${escapeHtml(badgeImgUrl)}" alt="${escapeHtml(badgeImgAlt)}" style="display:block;width:auto;height:auto;max-width:140px;max-height:80px;object-fit:contain;border:0;background-color:transparent;" />`
         : "";
       const badgeHtml = badgeImgUrl
         ? `<div style="margin:0 0 10px 0;">${
@@ -1738,7 +1738,7 @@ function renderSingleBlock(
           : "";
 
       const imgTag = safeImg
-        ? `<img class="ec-stack-img" src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" width="256" style="display:block;width:100%;max-width:100%;height:auto;border:0;border-radius:${radius}px;" />`
+        ? `<img class="ec-stack-img" src="${escapeHtml(safeImg)}" alt="${escapeHtml(imgAlt)}" style="display:block;width:auto;max-width:100%;height:auto;object-fit:contain;border:0;border-radius:${radius}px;" />`
         : "";
       const imgTd = safeImg
         ? `<td class="ec-stack" dir="ltr" width="46%" valign="middle" style="padding:0 0 12px 0;">
@@ -1897,7 +1897,7 @@ function renderSingleBlock(
         : "";
 
       const footerLogoImg = safeFooterLogo
-        ? `<img src="${escapeHtml(safeFooterLogo)}" alt="${escapeHtml(footerLogoAlt)}" width="${footerLogoW}" style="display:inline-block;max-width:${footerLogoW}px;max-height:44px;height:auto;border:0;background-color:${escapeHtml(bg)};" />`
+        ? `<img src="${escapeHtml(safeFooterLogo)}" alt="${escapeHtml(footerLogoAlt)}" style="display:inline-block;width:auto;height:auto;max-width:${footerLogoW}px;max-height:${footerLogoW}px;object-fit:contain;border:0;background-color:transparent;" />`
         : "";
       const logoHtml = safeFooterLogo
         ? `<div style="margin:18px 0 0 0;text-align:center;">${
@@ -2067,7 +2067,7 @@ function renderSingleBlock(
         ? `<div style="font-size:${fontSize}px;line-height:1.5;font-weight:600;color:${escapeHtml(fg)};font-family:${blockFont};">${copyRendered.html}</div>`
         : "";
       const footerLogoImg = safeFooterLogo
-        ? `<img src="${escapeHtml(safeFooterLogo)}" alt="${escapeHtml(footerLogoAlt)}" width="${footerLogoW}" style="display:inline-block;max-width:${footerLogoW}px;max-height:44px;height:auto;border:0;background-color:${escapeHtml(bg)};" />`
+        ? `<img src="${escapeHtml(safeFooterLogo)}" alt="${escapeHtml(footerLogoAlt)}" style="display:inline-block;width:auto;height:auto;max-width:${footerLogoW}px;max-height:${footerLogoW}px;object-fit:contain;border:0;background-color:transparent;" />`
         : "";
       const logoHtml = safeFooterLogo
         ? `<div style="margin:${copyRendered.text ? "14px" : "0"} 0 0 0;text-align:${align};">${

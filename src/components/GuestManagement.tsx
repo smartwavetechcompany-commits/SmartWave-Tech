@@ -815,6 +815,173 @@ export function GuestManagement() {
     toast.success("Guest report exported to Excel");
   };
 
+  // Export ALL guests that have ever booked on the PMS from time immemorial (no date filter)
+  const exportAllTimeBookedGuests = () => {
+    if (!hasPermission(profile, 'export_guests', customRoles) && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
+      toast.error('You do not have permission to export guest records');
+      return;
+    }
+
+    const guestById = new Map<string, Guest>();
+    const guestByEmail = new Map<string, Guest>();
+    guests.forEach((g) => {
+      guestById.set(g.id, g);
+      if (g.email && g.email.trim()) {
+        guestByEmail.set(g.email.trim().toLowerCase(), g);
+      }
+    });
+
+    const bookedGuestsMap = new Map<string, {
+      guest?: Guest;
+      name: string;
+      email: string;
+      phone: string;
+      totalBookings: number;
+      completedStays: number;
+      activeOrUpcoming: number;
+      cancelled: number;
+      noShows: number;
+      firstCheckIn: string;
+      lastCheckIn: string;
+      lastCheckOut: string;
+      rooms: Set<string>;
+      sources: Set<string>;
+      totalBookedAmount: number;
+      totalPaidFromRes: number;
+    }>();
+
+    allReservations.forEach((res) => {
+      const matchedGuest =
+        (res.guestId ? guestById.get(res.guestId) : undefined) ||
+        (res.guestEmail ? guestByEmail.get(res.guestEmail.trim().toLowerCase()) : undefined);
+
+      const email = (matchedGuest?.email || res.guestEmail || '').trim();
+      const phone = (matchedGuest?.phone || res.guestPhone || '').trim();
+      const name = (matchedGuest?.name || res.guestName || 'Unknown Guest').trim();
+      const key = matchedGuest?.id
+        ? `gid:${matchedGuest.id}`
+        : email
+          ? `email:${email.toLowerCase()}`
+          : `name:${name.toLowerCase()}|${phone.replace(/\s+/g, '')}`;
+
+      const entry = bookedGuestsMap.get(key) || {
+        guest: matchedGuest,
+        name,
+        email,
+        phone,
+        totalBookings: 0,
+        completedStays: 0,
+        activeOrUpcoming: 0,
+        cancelled: 0,
+        noShows: 0,
+        firstCheckIn: '',
+        lastCheckIn: '',
+        lastCheckOut: '',
+        rooms: new Set<string>(),
+        sources: new Set<string>(),
+        totalBookedAmount: 0,
+        totalPaidFromRes: 0,
+      };
+
+      entry.totalBookings += 1;
+      if (res.status === 'checked_out') entry.completedStays += 1;
+      else if (res.status === 'cancelled') entry.cancelled += 1;
+      else if (res.status === 'no_show') entry.noShows += 1;
+      else entry.activeOrUpcoming += 1;
+
+      if (res.roomNumber) entry.rooms.add(String(res.roomNumber));
+      if (res.bookingSource) entry.sources.add(String(res.bookingSource));
+      entry.totalBookedAmount += Number(res.totalAmount || 0);
+      entry.totalPaidFromRes += Number(res.paidAmount || 0);
+
+      const checkInStr = (res.checkIn || '').split('T')[0];
+      const checkOutStr = (res.checkOut || '').split('T')[0];
+      if (checkInStr) {
+        if (!entry.firstCheckIn || checkInStr < entry.firstCheckIn) {
+          entry.firstCheckIn = checkInStr;
+        }
+        if (!entry.lastCheckIn || checkInStr > entry.lastCheckIn) {
+          entry.lastCheckIn = checkInStr;
+        }
+      }
+      if (checkOutStr) {
+        if (!entry.lastCheckOut || checkOutStr > entry.lastCheckOut) {
+          entry.lastCheckOut = checkOutStr;
+        }
+      }
+
+      bookedGuestsMap.set(key, entry);
+    });
+
+    if (bookedGuestsMap.size === 0) {
+      toast.info("No historical guest bookings found on the PMS yet.");
+      return;
+    }
+
+    const summaryRows = Array.from(bookedGuestsMap.values())
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((entry) => {
+        const g = entry.guest;
+        const stats = g ? guestStatsMap[g.id] : undefined;
+        return {
+          'Guest Name': entry.name,
+          Email: entry.email || '-',
+          Phone: entry.phone || '-',
+          'Guest Type': g?.corporateId ? 'Corporate' : 'Individual',
+          'ID Type': g?.idType || 'N/A',
+          'ID Number': g?.idNumber || '-',
+          Address: g?.address || '-',
+          'Total Bookings (All-Time)': entry.totalBookings,
+          'Completed Stays': entry.completedStays,
+          'Active / Upcoming': entry.activeOrUpcoming,
+          Cancelled: entry.cancelled,
+          'No-Shows': entry.noShows,
+          'First Booking Check-In': entry.firstCheckIn || '-',
+          'Last Booking Check-In': entry.lastCheckIn || '-',
+          'Last Check-Out': entry.lastCheckOut || '-',
+          'Rooms Booked': Array.from(entry.rooms).join(', ') || '-',
+          'Booking Sources': Array.from(entry.sources).join(', ') || '-',
+          'Total Paid': stats ? stats.totalSpentVal : entry.totalPaidFromRes,
+          'Revenue Generated': stats ? stats.totalRevenueVal : entry.totalBookedAmount,
+          'Outstanding Debt': stats ? stats.outstandingDebtVal : 0,
+          Tags: (g?.tags || []).join(', '),
+          'Profile Created At': g?.createdAt ? safeDateFormat(g.createdAt, 'yyyy-MM-dd') : '-',
+        };
+      });
+
+    const historyRows = [...allReservations]
+      .sort((a, b) => (a.checkIn || '').localeCompare(b.checkIn || ''))
+      .map((res) => {
+        const matchedGuest =
+          (res.guestId ? guestById.get(res.guestId) : undefined) ||
+          (res.guestEmail ? guestByEmail.get(res.guestEmail.trim().toLowerCase()) : undefined);
+        return {
+          'Reservation ID': res.id,
+          'Guest Name': matchedGuest?.name || res.guestName || '-',
+          Email: matchedGuest?.email || res.guestEmail || '-',
+          Phone: matchedGuest?.phone || res.guestPhone || '-',
+          Room: res.roomNumber || '-',
+          'Check-In': (res.checkIn || '').split('T')[0] || '-',
+          'Check-Out': (res.checkOut || '').split('T')[0] || '-',
+          Status: res.status || '-',
+          'Payment Status': res.paymentStatus || '-',
+          'Total Amount': Number(res.totalAmount || 0),
+          'Paid Amount': Number(res.paidAmount || 0),
+          'Booking Source': res.bookingSource || '-',
+          'Created At': safeDateFormat(res.createdAt, 'yyyy-MM-dd'),
+        };
+      });
+
+    const wb = XLSX.utils.book_new();
+    const summaryWs = XLSX.utils.json_to_sheet(summaryRows);
+    const historyWs = XLSX.utils.json_to_sheet(historyRows);
+    XLSX.utils.book_append_sheet(wb, summaryWs, "All-Time Booked Guests");
+    XLSX.utils.book_append_sheet(wb, historyWs, "All-Time Booking History");
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    XLSX.writeFile(wb, `all_time_booked_guests_${todayStr}.xlsx`);
+    toast.success(`Exported ${summaryRows.length} all-time booked guests (${historyRows.length} bookings)`);
+  };
+
   const fuse = useMemo(() => new Fuse(guests, {
     keys: ['name', 'email', 'phone'],
     threshold: 0.3,
@@ -949,14 +1116,25 @@ export function GuestManagement() {
             </select>
           </div>
           {(hotel?.settings?.reporting?.allowExports ?? true) && (hasPermission(profile, 'export_guests', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
-            <button
-              onClick={exportGuests}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 text-zinc-100 px-3 py-2 rounded-xl text-xs font-bold hover:bg-zinc-700 transition-all active:scale-95 border border-zinc-700"
-            >
-              <Download size={14} />
-              <span className="hidden sm:inline">Export</span>
-              <span className="sm:hidden">Export</span>
-            </button>
+            <>
+              <button
+                onClick={exportGuests}
+                title="Export guests matching the selected date & type filter"
+                className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-zinc-800 text-zinc-100 px-3 py-2 rounded-xl text-xs font-bold hover:bg-zinc-700 transition-all active:scale-95 border border-zinc-700"
+              >
+                <Download size={14} />
+                <span className="hidden sm:inline">Export</span>
+                <span className="sm:hidden">Export</span>
+              </button>
+              <button
+                onClick={exportAllTimeBookedGuests}
+                title="Export every guest who has ever booked on the PMS (all-time, no date limit)"
+                className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-emerald-500/10 text-emerald-400 px-3 py-2 rounded-xl text-xs font-bold hover:bg-emerald-500/20 transition-all active:scale-95 border border-emerald-500/30 whitespace-nowrap"
+              >
+                <Download size={14} />
+                <span>Export All-Time Guests</span>
+              </button>
+            </>
           )}
           {(hasPermission(profile, 'add_guests', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
             <button

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -138,6 +138,20 @@ export function TemplateBlockEditor({
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   const directUploadTargetRef = useRef<{ blockId: string; field: string } | null>(null);
   const directFileInputRef = useRef<HTMLInputElement | null>(null);
+  const previewContainerRef = useRef<HTMLDivElement | null>(null);
+  const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const previewCleanupRef = useRef<(() => void) | null>(null);
+  const [hoveredPreviewLink, setHoveredPreviewLink] = useState<{
+    href: string;
+    label: string;
+    rawSource?: string;
+    blockId?: string;
+    blockLabel?: string;
+    location?: string;
+    protocol: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   const [saving, setSaving] = useState<"draft" | "publish" | null>(null);
   const [savingDefaultFooter, setSavingDefaultFooter] = useState(false);
@@ -221,8 +235,149 @@ export function TemplateBlockEditor({
     const warnings = all.filter(
       (i) => !i.hidden && (i.status === "invalid" || i.status === "empty_variable")
     ).length;
-    return { total: all.length, warnings };
+    return { total: all.length, warnings, items: all };
   }, [variant, effectiveSampleContext, settings, language]);
+
+  const templateLinksRef = useRef(templateLinksSummary.items);
+  templateLinksRef.current = templateLinksSummary.items;
+
+  const bindPreviewHoverListeners = useCallback(() => {
+    if (previewCleanupRef.current) {
+      previewCleanupRef.current();
+      previewCleanupRef.current = null;
+    }
+
+    const iframe = previewIframeRef.current;
+    if (!iframe) return;
+    let doc: Document | null = null;
+    try {
+      doc = iframe.contentDocument;
+    } catch {
+      return;
+    }
+    if (!doc) return;
+
+    const describeProtocol = (href: string): string => {
+      const lower = href.trim().toLowerCase();
+      if (lower.startsWith("https://")) return "HTTPS";
+      if (lower.startsWith("http://")) return "HTTP";
+      if (lower.startsWith("mailto:")) return "Email";
+      if (lower.startsWith("tel:")) return "Phone";
+      return "Link";
+    };
+
+    const normalizeForMatch = (u: string): string => u.trim().replace(/\/+$/, "");
+
+    const findAnchor = (target: EventTarget | null): HTMLAnchorElement | null => {
+      if (!target || !(target instanceof Element)) return null;
+      return target.closest("a[href]") as HTMLAnchorElement | null;
+    };
+
+    const updateHoveredFromEvent = (e: MouseEvent, anchor: HTMLAnchorElement) => {
+      const href = (anchor.getAttribute("href") || "").trim();
+      if (!href) {
+        setHoveredPreviewLink(null);
+        return;
+      }
+      const visibleText = (anchor.textContent || anchor.getAttribute("title") || "").trim();
+      const normHref = normalizeForMatch(href);
+      const allItems = templateLinksRef.current;
+      const matched =
+        allItems.find(
+          (it) =>
+            !it.hidden &&
+            it.resolvedUrl &&
+            normalizeForMatch(it.resolvedUrl) === normHref &&
+            (!visibleText || it.text.trim().toLowerCase() === visibleText.toLowerCase())
+        ) ||
+        allItems.find(
+          (it) => !it.hidden && it.resolvedUrl && normalizeForMatch(it.resolvedUrl) === normHref
+        );
+
+      const containerEl = previewContainerRef.current;
+      const iframeRect = iframe.getBoundingClientRect();
+      const containerRect = containerEl?.getBoundingClientRect();
+      const rawX = containerRect
+        ? iframeRect.left - containerRect.left + e.clientX
+        : e.clientX;
+      const rawY = containerRect
+        ? iframeRect.top - containerRect.top + e.clientY
+        : e.clientY;
+      const maxX = containerRect ? Math.max(180, containerRect.width - 20) : 500;
+      const clampedX = Math.max(16, Math.min(rawX, maxX));
+      const clampedY = Math.max(16, rawY);
+
+      setHoveredPreviewLink({
+        href,
+        label: visibleText || matched?.text || "Link",
+        rawSource: matched?.rawUrl,
+        blockId: matched?.blockId,
+        blockLabel: matched?.blockLabel,
+        location: matched?.location,
+        protocol: describeProtocol(href),
+        x: clampedX,
+        y: clampedY,
+      });
+    };
+
+    const handleMouseOver = (e: MouseEvent) => {
+      const anchor = findAnchor(e.target);
+      if (anchor) {
+        updateHoveredFromEvent(e, anchor);
+      }
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const anchor = findAnchor(e.target);
+      if (anchor) {
+        updateHoveredFromEvent(e, anchor);
+      } else {
+        setHoveredPreviewLink(null);
+      }
+    };
+
+    const handleMouseOut = (e: MouseEvent) => {
+      const related = findAnchor(e.relatedTarget);
+      if (!related) {
+        setHoveredPreviewLink(null);
+      }
+    };
+
+    const handleClick = (e: MouseEvent) => {
+      const anchor = findAnchor(e.target);
+      if (anchor) {
+        // Prevent preview iframe from navigating away; keep preview interactive & safe
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    doc.addEventListener("mouseover", handleMouseOver);
+    doc.addEventListener("mousemove", handleMouseMove);
+    doc.addEventListener("mouseout", handleMouseOut);
+    doc.addEventListener("click", handleClick);
+
+    previewCleanupRef.current = () => {
+      try {
+        doc?.removeEventListener("mouseover", handleMouseOver);
+        doc?.removeEventListener("mousemove", handleMouseMove);
+        doc?.removeEventListener("mouseout", handleMouseOut);
+        doc?.removeEventListener("click", handleClick);
+      } catch {
+        // Ignore cross-lifecycle teardown
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    setHoveredPreviewLink(null);
+    return () => {
+      if (previewCleanupRef.current) {
+        previewCleanupRef.current();
+        previewCleanupRef.current = null;
+      }
+    };
+  }, [liveRendered.html]);
 
   const resolvedPortalUrl = useMemo(() => {
     if (variant.portalUrlOverride?.trim()) {
@@ -1385,12 +1540,18 @@ export function TemplateBlockEditor({
               )}
             </div>
 
-            {/* Strictly Sandboxed iframe (no scripts, no same-origin access) */}
-            <div className="bg-zinc-950 p-4 flex justify-center overflow-x-auto">
+            {/* Script-free sandboxed iframe with live hover URL inspection */}
+            <div
+              ref={previewContainerRef}
+              onMouseLeave={() => setHoveredPreviewLink(null)}
+              className="relative bg-zinc-950 p-4 flex justify-center overflow-x-auto"
+            >
               <iframe
+                ref={previewIframeRef}
                 title="Live email template preview"
-                sandbox=""
+                sandbox="allow-same-origin"
                 srcDoc={liveRendered.html}
+                onLoad={bindPreviewHoverListeners}
                 className="bg-white rounded-lg border border-zinc-800 transition-all"
                 style={{
                   width: previewMode === "mobile" ? "375px" : "100%",
@@ -1398,6 +1559,75 @@ export function TemplateBlockEditor({
                   height: "660px",
                 }}
               />
+
+              {/* Floating Live Hover URL Tooltip */}
+              {hoveredPreviewLink && (
+                <div
+                  className="pointer-events-none absolute z-30 max-w-sm rounded-lg border border-emerald-500/40 bg-zinc-950/95 px-3 py-2 shadow-2xl backdrop-blur-sm text-[11px]"
+                  style={{
+                    left: `${Math.min(Math.max(12, hoveredPreviewLink.x - 120), 260)}px`,
+                    top: `${Math.max(12, hoveredPreviewLink.y > 120 ? hoveredPreviewLink.y - 96 : hoveredPreviewLink.y + 20)}px`,
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold text-[10px] shrink-0">
+                        {hoveredPreviewLink.protocol}
+                      </span>
+                      <span className="text-zinc-200 font-medium truncate">
+                        {hoveredPreviewLink.label}
+                      </span>
+                    </div>
+                    {hoveredPreviewLink.blockLabel && (
+                      <span className="text-[10px] text-zinc-500 shrink-0">
+                        {hoveredPreviewLink.blockLabel}
+                      </span>
+                    )}
+                  </div>
+                  {hoveredPreviewLink.rawSource &&
+                    hoveredPreviewLink.rawSource.includes("{{") && (
+                      <div className="text-[10px] text-zinc-400 mb-0.5">
+                        Placeholder:{" "}
+                        <span className="font-mono text-amber-300">
+                          {hoveredPreviewLink.rawSource}
+                        </span>
+                      </div>
+                    )}
+                  <div className="text-[10px] text-zinc-400">Resolved final URL:</div>
+                  <div className="font-mono text-[11px] text-emerald-400 break-all leading-snug">
+                    {hoveredPreviewLink.href}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Bottom Live Hover URL Inspector Bar */}
+            <div className="px-4 py-2 bg-zinc-950/90 border-t border-zinc-800 flex items-center justify-between gap-2 text-[11px] min-h-[34px]">
+              {hoveredPreviewLink ? (
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <Link2 size={12} className="text-emerald-400 shrink-0" />
+                  {hoveredPreviewLink.rawSource &&
+                    hoveredPreviewLink.rawSource.includes("{{") && (
+                      <span className="font-mono text-[10px] text-amber-300 shrink-0">
+                        {hoveredPreviewLink.rawSource} →
+                      </span>
+                    )}
+                  <span className="font-mono text-emerald-400 truncate">
+                    {hoveredPreviewLink.href}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-zinc-500 truncate">
+                  <Link2 size={12} className="shrink-0" />
+                  <span>
+                    Hover over any link in the preview to inspect its resolved final URL before
+                    sending
+                  </span>
+                </div>
+              )}
+              <span className="text-[10px] text-zinc-500 shrink-0 tabular-nums">
+                {templateLinksSummary.total} {templateLinksSummary.total === 1 ? "link" : "links"}
+              </span>
             </div>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { collection, query, doc, onSnapshot, writeBatch, increment, getDoc, setDoc, arrayUnion, where } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
@@ -267,6 +267,63 @@ export function Rooms() {
 
     return () => unsub();
   }, [hotel?.id, profile?.uid]);
+
+  const autoNoShowProcessedRef = useRef<Set<string>>(new Set());
+
+  // Move missed arrivals directly to 'no_show' so they never occupy calendar space
+  useEffect(() => {
+    if (!hotel?.id || reservations.length === 0) return;
+    const autoReleaseNoShowEnabled = hotel.settings?.reservations?.autoReleaseNoShow !== false;
+    if (!autoReleaseNoShowEnabled) return;
+
+    const now = new Date();
+    const todayStr = format(now, 'yyyy-MM-dd');
+    const updates: Promise<any>[] = [];
+
+    reservations.forEach((res) => {
+      if (autoNoShowProcessedRef.current.has(res.id)) return;
+      if (res.status !== 'pending' && res.status !== 'confirmed') return;
+      const resCheckInStr = (res.checkIn || '').split('T')[0];
+      if (!resCheckInStr || resCheckInStr >= todayStr) return;
+
+      autoNoShowProcessedRef.current.add(res.id);
+      const p = database.safeUpdate(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
+        status: 'no_show',
+        notes: (res.notes || '') + '\n[System Policy] Automatically marked as No-Show due to failure to check-in on scheduled arrival date.',
+        updatedAt: now.toISOString(),
+      }, {
+        hotelId: hotel.id,
+        module: 'Reservation Automation',
+        action: 'AUTO_NO_SHOW',
+        details: `Auto-marked reservation ${res.id} as No-Show from Rooms Calendar`,
+      }).then(async () => {
+        if (res.roomId) {
+          const targetRoom = rooms.find(r => r.id === res.roomId);
+          const hasActiveCheckIn = reservations.some(
+            other => other.id !== res.id && other.roomId === res.roomId && other.status === 'checked_in'
+          );
+          if (targetRoom && !hasActiveCheckIn && (targetRoom.status === 'occupied' || targetRoom.status === 'reserved')) {
+            await database.safeUpdate(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), {
+              status: 'clean',
+              updatedAt: now.toISOString(),
+            }, {
+              hotelId: hotel.id,
+              module: 'Reservation Automation',
+              action: 'RELEASE_NO_SHOW_ROOM',
+              details: `Released Room ${targetRoom.roomNumber} after No-Show for ${res.guestName}`,
+            });
+          }
+        }
+      });
+      updates.push(p);
+    });
+
+    if (updates.length > 0) {
+      Promise.all(updates).catch((err) => {
+        console.error('Failed Rooms Calendar auto no-show release:', err);
+      });
+    }
+  }, [hotel?.id, reservations, rooms, hotel?.settings?.reservations?.autoReleaseNoShow]);
 
   useEffect(() => {
     if (!hotel?.id || !profile) return;

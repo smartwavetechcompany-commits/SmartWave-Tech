@@ -332,7 +332,8 @@ export function FrontDesk() {
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [staffFilter, setStaffFilter] = useState('all');
   const [staffMembers, setStaffMembers] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'all' | 'arrivals' | 'departures' | 'checked_in' | 'overstay' | 'checkin_history' | 'checkout_history'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'arrivals' | 'departures' | 'checked_in' | 'overstay' | 'no_show' | 'checkin_history' | 'checkout_history'>('all');
+  const autoNoShowProcessedRef = useRef<Set<string>>(new Set());
   const [checkInHistory, setCheckInHistory] = useState<any[]>([]);
   const [checkOutHistory, setCheckOutHistory] = useState<any[]>([]);
   const [historyPeriod, setHistoryPeriod] = useState<'all' | 'daily' | 'weekly' | 'monthly' | 'custom'>('all');
@@ -653,9 +654,17 @@ export function FrontDesk() {
         return res.status === 'checked_in' && (res.checkOut < today || (res.checkOut === today && now > checkOutDateTime));
       }
 
-      // Automatically hide settled or overpaid/credit (balance <= 0) checkout reservations from 'All' tab ONLY when statusFilter is 'all'
-      // Checked-out reservations with actual unpaid debt (> 0.01) remain visible.
+      if (activeTab === 'no_show') {
+        return res.status === 'no_show';
+      }
+
+      // Automatically hide settled or overpaid/credit (balance <= 0) checkout reservations
+      // and no-show reservations from 'All' tab ONLY when statusFilter is 'all'.
+      // No-show guests remain accessible via the dedicated No-Show tab or Status filter.
       if (activeTab === 'all' && statusFilter === 'all') {
+        if (res.status === 'no_show') {
+          return false;
+        }
         if (res.status === 'checked_out') {
           const resLedger = ledgerEntries.filter(e => e.reservationId === res.id);
           const liveBal = resLedger.length > 0
@@ -815,14 +824,18 @@ export function FrontDesk() {
     };
   }, [hotel?.id, profile?.uid]);
 
-  // Evaluate Live Automated Policies (auto-release, auto-cancel)
+  // Evaluate Live Automated Policies (auto-release no-shows, auto-cancel unpaid buffer)
   useEffect(() => {
-    if (!hotel || !hotel.id || !hotel.settings?.reservations || reservations.length === 0) return;
-    const rules = hotel.settings.reservations;
+    if (!hotel || !hotel.id || reservations.length === 0) return;
+    const rules = hotel.settings?.reservations || ({} as any);
+    const autoReleaseNoShowEnabled = rules.autoReleaseNoShow !== false;
     const now = new Date();
+    const todayStr = format(now, 'yyyy-MM-dd');
     const batchUpdates: Promise<any>[] = [];
 
     reservations.forEach((res) => {
+      if (autoNoShowProcessedRef.current.has(res.id)) return;
+
       // 1. Auto Cancel Unpaid Buffer
       if (
         (res.status === 'pending' || res.status === 'confirmed') &&
@@ -833,6 +846,7 @@ export function FrontDesk() {
         const createdDate = new Date(res.createdAt);
         const minutesDiff = (now.getTime() - createdDate.getTime()) / (1000 * 60);
         if (minutesDiff > rules.autoCancelUnpaidTimeMinutes) {
+          autoNoShowProcessedRef.current.add(res.id);
           const p = database.safeUpdate(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
             status: 'cancelled',
             notes: (res.notes || '') + `\n[System Policy] Automatically cancelled due to unpaid buffer timeout of ${rules.autoCancelUnpaidTimeMinutes} mins.`,
@@ -844,17 +858,18 @@ export function FrontDesk() {
             details: `Auto-cancelled unpaid reservation ${res.id} after buffer expiry`
           });
           batchUpdates.push(p);
+          return;
         }
       }
 
-      // 2. Auto Release No-Shows
+      // 2. Auto Release No-Shows (guests who did not show up on scheduled arrival date)
       if (
         (res.status === 'pending' || res.status === 'confirmed') &&
-        rules.autoReleaseNoShow
+        autoReleaseNoShowEnabled
       ) {
-        const resCheckInStr = res.checkIn.split('T')[0];
-        const todayStr = now.toISOString().split('T')[0];
-        if (resCheckInStr < todayStr) {
+        const resCheckInStr = (res.checkIn || '').split('T')[0];
+        if (resCheckInStr && resCheckInStr < todayStr) {
+          autoNoShowProcessedRef.current.add(res.id);
           const p = database.safeUpdate(doc(db, 'hotels', hotel.id, 'reservations', res.id), {
             status: 'no_show',
             notes: (res.notes || '') + '\n[System Policy] Automatically marked as No-Show due to failure to check-in on scheduled arrival date.',
@@ -864,6 +879,25 @@ export function FrontDesk() {
             module: 'Reservation Automation',
             action: 'AUTO_NO_SHOW',
             details: `Auto-marked reservation ${res.id} as No-Show`
+          }).then(async () => {
+            // Release held room space if no other checked-in stay occupies the room
+            if (res.roomId) {
+              const targetRoom = rooms.find(r => r.id === res.roomId);
+              const hasActiveCheckIn = reservations.some(
+                other => other.id !== res.id && other.roomId === res.roomId && other.status === 'checked_in'
+              );
+              if (targetRoom && !hasActiveCheckIn && (targetRoom.status === 'occupied' || targetRoom.status === 'reserved')) {
+                await database.safeUpdate(doc(db, 'hotels', hotel.id, 'rooms', res.roomId), {
+                  status: 'clean',
+                  updatedAt: now.toISOString()
+                }, {
+                  hotelId: hotel.id,
+                  module: 'Reservation Automation',
+                  action: 'RELEASE_NO_SHOW_ROOM',
+                  details: `Released Room ${targetRoom.roomNumber} after No-Show for ${res.guestName}`
+                });
+              }
+            }
           });
           batchUpdates.push(p);
         }
@@ -873,13 +907,13 @@ export function FrontDesk() {
     if (batchUpdates.length > 0) {
       Promise.all(batchUpdates)
         .then(() => {
-          toast.success(`[System Policy] Executed automation for ${batchUpdates.length} bookings.`);
+          toast.success(`[System Policy] Moved ${batchUpdates.length} missed arrival(s) to No-Show and freed calendar space.`);
         })
         .catch(err => {
           console.error("Failed automated policies execution:", err);
         });
     }
-  }, [hotel?.id, reservations, hotel?.settings?.reservations]);
+  }, [hotel?.id, reservations, rooms, hotel?.settings?.reservations]);
 
   // Fetch rates when corporate account is selected
   useEffect(() => {
@@ -3368,7 +3402,7 @@ export function FrontDesk() {
     }
   };
 
-  const handleExport = (type: 'rooms' | 'arrivals' | 'checkins' | 'checkouts' | 'inhouse') => {
+  const handleExport = (type: 'rooms' | 'arrivals' | 'checkins' | 'checkouts' | 'inhouse' | 'all_time_booked_guests') => {
     if (!hasPermission(profile, 'export_reports', customRoles) && profile?.role !== 'hotelAdmin' && profile?.role !== 'superAdmin') {
       toast.error('Permission denied: You do not have permission to export reports.');
       return;
@@ -3440,6 +3474,99 @@ export function FrontDesk() {
           }));
         filename = `inhouse_${todayStr}.csv`;
         break;
+      case 'all_time_booked_guests': {
+        const guestById = new Map(guests.map(g => [g.id, g]));
+        const guestByEmail = new Map(
+          guests
+            .filter(g => g.email && g.email.trim())
+            .map(g => [g.email.trim().toLowerCase(), g])
+        );
+        const aggregated = new Map<string, {
+          name: string;
+          email: string;
+          phone: string;
+          totalBookings: number;
+          completedStays: number;
+          cancelled: number;
+          noShows: number;
+          firstCheckIn: string;
+          lastCheckIn: string;
+          rooms: Set<string>;
+          sources: Set<string>;
+          totalBookedAmount: number;
+          totalPaidAmount: number;
+        }>();
+
+        reservations.forEach((res) => {
+          const matchedGuest =
+            (res.guestId ? guestById.get(res.guestId) : undefined) ||
+            (res.guestEmail ? guestByEmail.get(res.guestEmail.trim().toLowerCase()) : undefined);
+          const email = (matchedGuest?.email || res.guestEmail || '').trim();
+          const phone = (matchedGuest?.phone || res.guestPhone || '').trim();
+          const name = (matchedGuest?.name || res.guestName || 'Unknown Guest').trim();
+          const key = matchedGuest?.id
+            ? `gid:${matchedGuest.id}`
+            : email
+              ? `email:${email.toLowerCase()}`
+              : `name:${name.toLowerCase()}|${phone.replace(/\s+/g, '')}`;
+
+          const existing = aggregated.get(key) || {
+            name,
+            email,
+            phone,
+            totalBookings: 0,
+            completedStays: 0,
+            cancelled: 0,
+            noShows: 0,
+            firstCheckIn: '',
+            lastCheckIn: '',
+            rooms: new Set<string>(),
+            sources: new Set<string>(),
+            totalBookedAmount: 0,
+            totalPaidAmount: 0,
+          };
+
+          existing.totalBookings += 1;
+          if (res.status === 'checked_out') existing.completedStays += 1;
+          if (res.status === 'cancelled') existing.cancelled += 1;
+          if (res.status === 'no_show') existing.noShows += 1;
+          if (res.roomNumber) existing.rooms.add(String(res.roomNumber));
+          if (res.bookingSource) existing.sources.add(String(res.bookingSource));
+          existing.totalBookedAmount += Number(res.totalAmount || 0);
+          existing.totalPaidAmount += Number(res.paidAmount || 0);
+
+          const checkInStr = (res.checkIn || '').split('T')[0];
+          if (checkInStr) {
+            if (!existing.firstCheckIn || checkInStr < existing.firstCheckIn) {
+              existing.firstCheckIn = checkInStr;
+            }
+            if (!existing.lastCheckIn || checkInStr > existing.lastCheckIn) {
+              existing.lastCheckIn = checkInStr;
+            }
+          }
+          aggregated.set(key, existing);
+        });
+
+        dataToExport = Array.from(aggregated.values())
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(item => ({
+            'Guest Name': item.name,
+            Email: item.email || '-',
+            Phone: item.phone || '-',
+            'Total Bookings (All-Time)': item.totalBookings,
+            'Completed Stays': item.completedStays,
+            Cancelled: item.cancelled,
+            'No-Shows': item.noShows,
+            'First Check-In': item.firstCheckIn || '-',
+            'Last Check-In': item.lastCheckIn || '-',
+            'Rooms Booked': Array.from(item.rooms).join(', ') || '-',
+            'Booking Sources': Array.from(item.sources).join(', ') || '-',
+            'Total Booked Amount': item.totalBookedAmount,
+            'Total Paid': item.totalPaidAmount,
+          }));
+        filename = `all_time_booked_guests_${todayStr}.csv`;
+        break;
+      }
     }
 
     if (dataToExport.length === 0) {
@@ -3448,7 +3575,11 @@ export function FrontDesk() {
     }
 
     exportToCSV(dataToExport, filename);
-    toast.success(`${type.charAt(0).toUpperCase() + type.slice(1)} exported successfully`);
+    toast.success(
+      type === 'all_time_booked_guests'
+        ? `Exported ${dataToExport.length} all-time booked guests`
+        : `${type.charAt(0).toUpperCase() + type.slice(1)} exported successfully`
+    );
   };
 
   const getCheckoutPreviewData = (res: Reservation) => {
@@ -3502,6 +3633,8 @@ export function FrontDesk() {
                 <button onClick={() => handleExport('checkins')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Today's Check-ins</button>
                 <button onClick={() => handleExport('checkouts')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">Today's Check-outs</button>
                 <button onClick={() => handleExport('inhouse')} className="w-full text-left px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-50 transition-colors">In-House Guests</button>
+                <div className="border-t border-zinc-800 my-1" />
+                <button onClick={() => handleExport('all_time_booked_guests')} className="w-full text-left px-4 py-2 text-sm text-emerald-400 hover:bg-zinc-800 hover:text-emerald-300 font-medium transition-colors">All-Time Booked Guests</button>
               </div>
             </div>
           )}
@@ -5232,23 +5365,36 @@ export function FrontDesk() {
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 max-w-full">
               <h3 className="font-bold text-zinc-50 text-sm shrink-0">{selectedReservations.length > 0 ? `Selected: ${selectedReservations.length}` : 'Reservations'}</h3>
               <div className="flex items-center bg-zinc-950 p-1 rounded-lg border border-zinc-800 overflow-x-auto no-scrollbar max-w-full flex-nowrap gap-1">
-                {(['all', 'arrivals', 'departures', 'checked_in', 'overstay', 'checkin_history', 'checkout_history'] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => {
-                      setActiveTab(tab);
-                      setSelectedReservations([]);
-                    }}
-                    className={cn(
-                      "px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-md transition-all whitespace-nowrap shrink-0 cursor-pointer",
-                      activeTab === tab 
-                        ? "bg-emerald-500 text-black shadow-lg" 
-                        : "text-zinc-500 hover:text-zinc-300"
-                    )}
-                  >
-                    {tab === 'checked_in' ? 'In-House' : tab === 'departures' ? 'Due Check-Out' : tab === 'checkin_history' ? 'Check-In History' : tab === 'checkout_history' ? 'Check-Out History' : tab}
-                  </button>
-                ))}
+                {(['all', 'arrivals', 'departures', 'checked_in', 'overstay', 'no_show', 'checkin_history', 'checkout_history'] as const).map((tab) => {
+                  const noShowCount = tab === 'no_show' ? reservations.filter(r => r.status === 'no_show').length : 0;
+                  return (
+                    <button
+                      key={tab}
+                      onClick={() => {
+                        setActiveTab(tab);
+                        setSelectedReservations([]);
+                      }}
+                      className={cn(
+                        "px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-md transition-all whitespace-nowrap shrink-0 cursor-pointer",
+                        activeTab === tab 
+                          ? "bg-emerald-500 text-black shadow-lg" 
+                          : "text-zinc-500 hover:text-zinc-300"
+                      )}
+                    >
+                      {tab === 'checked_in'
+                        ? 'In-House'
+                        : tab === 'departures'
+                        ? 'Due Check-Out'
+                        : tab === 'no_show'
+                        ? `No-Show${noShowCount > 0 ? ` (${noShowCount})` : ''}`
+                        : tab === 'checkin_history'
+                        ? 'Check-In History'
+                        : tab === 'checkout_history'
+                        ? 'Check-Out History'
+                        : tab}
+                    </button>
+                  );
+                })}
               </div>
             </div>
             
