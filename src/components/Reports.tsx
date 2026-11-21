@@ -616,7 +616,7 @@ export function Reports() {
             'Expected Revenue': expectedRevenue,
             'Paid Revenue': paidRevenue,
             'Outstanding Balance': outstanding,
-            'Occupancy Count': roomRes.filter(r => r.status !== 'cancelled').length
+            'Occupancy Count': roomRes.filter(r => r.status !== 'cancelled' && r.status !== 'no_show').length
           };
         });
       }
@@ -632,10 +632,7 @@ export function Reports() {
           const pos = calculateGuestFinancialPosition(guest, guestRes, hotel, validLedgerEntries);
           const totalSpent = Math.max(0, pos.totalPayments - pos.totalRefunds);
           const revenueGenerated = pos.totalCharges;
-          const nonCancelledGuestRes = guestRes.filter(r => r.status !== 'cancelled');
-          const outstandingDebt = nonCancelledGuestRes.length > 0
-            ? nonCancelledGuestRes.reduce((sum, r) => sum + Math.max(0, getReservationLiveBalance(r, hotel, validLedgerEntries)), 0)
-            : pos.netAmountDue;
+          const outstandingDebt = pos.netAmountDue;
 
           return {
             'Guest Name': guest.name,

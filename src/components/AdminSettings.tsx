@@ -465,6 +465,157 @@ export function AdminSettings() {
                 {renderInput('reservations', 'autoCancelUnpaidTimeMinutes', 'Unpaid Auto-cancel Buffer (Mins)', 'Time after which an unpaid reservation is automatically cancelled.')}
                 {renderToggle('reservations', 'allowWalkIn', 'Allow Walk-in Bookings', 'Enable instant same-day bookings via the front desk.')}
 
+                {/* No-Show & Cancellation Financial Policy Controls (Single Source of Truth) */}
+                <div className="pt-6 border-t border-zinc-800 space-y-4">
+                  <header className="flex items-center gap-2">
+                    <div className="p-2 bg-amber-500/10 rounded-lg text-amber-400">
+                      <ShieldAlert size={18} />
+                    </div>
+                    <div>
+                      <h4 className="text-base font-bold text-zinc-100">No-Show &amp; Cancellation Financial Policy</h4>
+                      <p className="text-xs text-zinc-500">
+                        Control whether No-Show or Cancelled reservations can incur explicit penalties. Changes apply forward-only and never retroactively modify historical reservations or posted ledger entries.
+                      </p>
+                    </div>
+                  </header>
+
+                  {/* No-Show Penalty Policy */}
+                  <div className="p-4 bg-zinc-950/70 border border-zinc-800 rounded-xl space-y-3">
+                    {renderToggle(
+                      'reservations',
+                      'enableNoShowPenalty',
+                      'Enable No-Show Penalty',
+                      'When disabled, No-Show reservations carry zero automatic financial liability. When enabled, only explicitly posted penalties count as guest debt.'
+                    )}
+
+                    <div className={cn(
+                      "grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 transition-opacity",
+                      !(localSettings.reservations?.enableNoShowPenalty ?? false) && "opacity-50"
+                    )}>
+                      <div className="p-3.5 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1.5">
+                        <label className="text-xs font-semibold text-zinc-300 block">No-Show Penalty Type</label>
+                        <select
+                          disabled={!canEdit || !(localSettings.reservations?.enableNoShowPenalty ?? false)}
+                          value={localSettings.reservations?.noShowPenaltyType || 'fixed'}
+                          onChange={(e) => {
+                            const nextType = e.target.value as 'fixed' | 'percentage';
+                            const updated: HotelSettings = {
+                              ...localSettings,
+                              reservations: {
+                                ...localSettings.reservations,
+                                noShowPenaltyType: nextType,
+                                noShowPenaltyAmount:
+                                  nextType === 'percentage'
+                                    ? Math.min(100, Math.max(0, Number(localSettings.reservations?.noShowPenaltyAmount ?? 0)))
+                                    : Math.max(0, Number(localSettings.reservations?.noShowPenaltyAmount ?? 0))
+                              }
+                            };
+                            setLocalSettings(updated);
+                            saveSettings(updated, 'reservations', 'noShowPenaltyType');
+                          }}
+                          className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <option value="fixed">Fixed Amount</option>
+                          <option value="percentage">Percentage of Booking (%)</option>
+                        </select>
+                      </div>
+
+                      <div className="p-3.5 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1.5">
+                        <label className="text-xs font-semibold text-zinc-300 block">
+                          {(localSettings.reservations?.noShowPenaltyType || 'fixed') === 'percentage'
+                            ? 'No-Show Penalty Percentage (%)'
+                            : 'No-Show Penalty Amount'}
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={(localSettings.reservations?.noShowPenaltyType || 'fixed') === 'percentage' ? 100 : undefined}
+                          step="any"
+                          disabled={!canEdit || !(localSettings.reservations?.enableNoShowPenalty ?? false)}
+                          value={localSettings.reservations?.noShowPenaltyAmount ?? 0}
+                          onChange={(e) => {
+                            const parsed = Math.max(0, Number(e.target.value) || 0);
+                            const clamped = (localSettings.reservations?.noShowPenaltyType || 'fixed') === 'percentage'
+                              ? Math.min(100, parsed)
+                              : parsed;
+                            handleInputChange('reservations', 'noShowPenaltyAmount', clamped);
+                          }}
+                          onBlur={() => handleInputBlur('reservations', 'noShowPenaltyAmount')}
+                          className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Cancellation Fee Policy */}
+                  <div className="p-4 bg-zinc-950/70 border border-zinc-800 rounded-xl space-y-3">
+                    {renderToggle(
+                      'reservations',
+                      'enableCancellationFee',
+                      'Enable Cancellation Fee',
+                      'When disabled, Cancelled reservations carry zero automatic financial liability. When enabled, only explicitly posted cancellation fees count as guest debt.'
+                    )}
+
+                    <div className={cn(
+                      "grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 transition-opacity",
+                      !(localSettings.reservations?.enableCancellationFee ?? false) && "opacity-50"
+                    )}>
+                      <div className="p-3.5 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1.5">
+                        <label className="text-xs font-semibold text-zinc-300 block">Cancellation Fee Type</label>
+                        <select
+                          disabled={!canEdit || !(localSettings.reservations?.enableCancellationFee ?? false)}
+                          value={localSettings.reservations?.cancellationFeeType || 'fixed'}
+                          onChange={(e) => {
+                            const nextType = e.target.value as 'fixed' | 'percentage';
+                            const updated: HotelSettings = {
+                              ...localSettings,
+                              reservations: {
+                                ...localSettings.reservations,
+                                cancellationFeeType: nextType,
+                                cancellationFeeAmount:
+                                  nextType === 'percentage'
+                                    ? Math.min(100, Math.max(0, Number(localSettings.reservations?.cancellationFeeAmount ?? 0)))
+                                    : Math.max(0, Number(localSettings.reservations?.cancellationFeeAmount ?? 0))
+                              }
+                            };
+                            setLocalSettings(updated);
+                            saveSettings(updated, 'reservations', 'cancellationFeeType');
+                          }}
+                          className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <option value="fixed">Fixed Amount</option>
+                          <option value="percentage">Percentage of Booking (%)</option>
+                        </select>
+                      </div>
+
+                      <div className="p-3.5 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1.5">
+                        <label className="text-xs font-semibold text-zinc-300 block">
+                          {(localSettings.reservations?.cancellationFeeType || 'fixed') === 'percentage'
+                            ? 'Cancellation Fee Percentage (%)'
+                            : 'Cancellation Fee Amount'}
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={(localSettings.reservations?.cancellationFeeType || 'fixed') === 'percentage' ? 100 : undefined}
+                          step="any"
+                          disabled={!canEdit || !(localSettings.reservations?.enableCancellationFee ?? false)}
+                          value={localSettings.reservations?.cancellationFeeAmount ?? 0}
+                          onChange={(e) => {
+                            const parsed = Math.max(0, Number(e.target.value) || 0);
+                            const clamped = (localSettings.reservations?.cancellationFeeType || 'fixed') === 'percentage'
+                              ? Math.min(100, parsed)
+                              : parsed;
+                            handleInputChange('reservations', 'cancellationFeeAmount', clamped);
+                          }}
+                          onBlur={() => handleInputBlur('reservations', 'cancellationFeeAmount')}
+                          className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Dedicated Booking Sources Configuration */}
                 <div className="pt-6 border-t border-zinc-800 space-y-4">
                   <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

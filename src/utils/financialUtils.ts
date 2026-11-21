@@ -2,6 +2,7 @@ import { Reservation, Hotel, LedgerEntry, Guest } from '../types';
 import { BillingEngine } from './billingEngine';
 import { calculateStayDuration } from './dateUtils';
 import { calculateBookedRoomTotal } from './rateSnapshot';
+import { isPostedPenaltyLedgerEntry } from './policyUtils';
 
 export interface GuestAccountSummary {
   totalCharges: number;
@@ -39,12 +40,109 @@ export function calculateReservationAccount(
   options?: { currentTime?: Date }
 ): GuestAccountSummary {
   const currentTime = options?.currentTime || new Date();
-  const duration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status, { hotel, res, currentTime });
-  const totalNights = duration.totalNights;
-  const totalDays = duration.totalDays;
 
   // Filter ledger entries specifically for this reservation
   const resLedger = ledgerEntries ? ledgerEntries.filter(e => e.reservationId === res.id) : undefined;
+
+  // Authoritative financial classification for No-Show & Cancelled reservations:
+  // - Never count booked/stayed/chargeable nights (guest did not stay).
+  // - Never automatically turn unpaid booking totals or pre-posted room charges into guest debt.
+  // - Only explicitly posted No-Show penalties or Cancellation fees create financial liability.
+  // - Preserve all actual payments, deposits, discounts, transfers, and refunds from existing ledger records.
+  if (res.status === 'no_show' || res.status === 'cancelled') {
+    let totalCharges = 0;
+    let totalServiceCharges = 0;
+    let totalPayments = 0;
+    let totalDiscounts = 0;
+    let totalCredits = 0;
+    let totalRefunds = 0;
+    let totalTransfers = 0;
+
+    if (resLedger && resLedger.length > 0) {
+      resLedger.forEach(e => {
+        if (e.type === 'debit') {
+          const cat = (e.category || '').toLowerCase();
+          if (cat === 'refund') {
+            totalRefunds += e.amount;
+          } else if (isPostedPenaltyLedgerEntry(e, res.status)) {
+            totalCharges += e.amount;
+            totalServiceCharges += e.amount;
+          }
+        } else if (e.type === 'credit') {
+          const cat = (e.category || '').toLowerCase();
+          const desc = (e.description || '').toLowerCase();
+          const isDiscount = cat === 'discount' || desc.includes('discount') || desc.includes('promo');
+
+          totalCredits += e.amount;
+
+          if (cat === 'payment' && !isDiscount) {
+            totalPayments += e.amount;
+          } else if (isDiscount) {
+            totalDiscounts += e.amount;
+          } else if (cat === 'transfer' || cat === 'city_ledger') {
+            totalTransfers += e.amount;
+          } else {
+            totalPayments += e.amount;
+          }
+        }
+      });
+    } else if (!ledgerEntries && (res.paidAmount || 0) > 0) {
+      // Only when caller did not supply ledger entries, preserve recorded payments without inventing debt
+      totalPayments = res.paidAmount || 0;
+      totalCredits = totalPayments;
+    }
+
+    totalCharges = Number(totalCharges.toFixed(2));
+    totalServiceCharges = Number(totalServiceCharges.toFixed(2));
+    totalPayments = Number(totalPayments.toFixed(2));
+    totalDiscounts = Number(totalDiscounts.toFixed(2));
+    totalCredits = Number(totalCredits.toFixed(2));
+    totalRefunds = Number(totalRefunds.toFixed(2));
+    totalTransfers = Number(totalTransfers.toFixed(2));
+
+    const netCredits = Math.max(0, totalCredits - totalRefunds);
+    const rawBalance = totalCharges - netCredits;
+    const outstandingBalance = Number(rawBalance.toFixed(2));
+    const netAmountDue = Math.max(0, outstandingBalance);
+    const creditBalance = Math.max(0, -outstandingBalance);
+
+    let accountStatus: GuestAccountSummary['accountStatus'] = 'ZERO_BALANCE';
+    if (outstandingBalance > 0.01) {
+      accountStatus = 'OUTSTANDING';
+    } else if (outstandingBalance < -0.01) {
+      accountStatus = 'OVERPAID';
+    } else {
+      accountStatus = 'SETTLED';
+    }
+
+    return {
+      totalCharges,
+      totalRoomCharges: 0,
+      totalOverstayCharges: 0,
+      totalServiceCharges,
+      totalPayments,
+      totalDiscounts,
+      totalCredits,
+      totalRefunds,
+      totalTransfers,
+      outstandingBalance,
+      netAmountDue,
+      creditBalance,
+      accountStatus,
+      totalDays: 0,
+      totalNights: 0,
+      bookingNights: 0,
+      overstayNights: 0,
+      actualStayedNights: 0,
+      chargeableNights: 0,
+      totalSpent: Number(Math.max(0, totalPayments - totalRefunds).toFixed(2)),
+      revenueGenerated: totalCharges
+    };
+  }
+
+  const duration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status, { hotel, res, currentTime });
+  const totalNights = duration.totalNights;
+  const totalDays = duration.totalDays;
 
   let totalCharges = 0;
   let totalRoomCharges = 0;
@@ -445,7 +543,6 @@ export function calculateGuestAccount(
   const guestEmail = typeof guestOrId === 'object' && guestOrId !== null ? guestOrId.email : undefined;
 
   const matchingRes = reservations.filter(r => {
-    if (r.status === 'cancelled') return false;
     if (guestId && r.guestId === guestId) return true;
     if (guestEmail && r.guestEmail && r.guestEmail.toLowerCase().trim() === guestEmail.toLowerCase().trim()) return true;
     return false;

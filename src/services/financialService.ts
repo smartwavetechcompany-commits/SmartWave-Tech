@@ -132,7 +132,6 @@ export function calculateGuestFinancialPosition(
   const guestEmail = typeof guestOrId === 'object' && guestOrId !== null ? guestOrId.email : undefined;
 
   const matchingRes = reservations.filter(r => {
-    if (r.status === 'cancelled') return false;
     if (guestId && r.guestId === guestId) return true;
     if (guestEmail && r.guestEmail && r.guestEmail.toLowerCase().trim() === guestEmail.toLowerCase().trim()) return true;
     return false;
@@ -168,8 +167,9 @@ export function calculateGuestFinancialPosition(
   let totalActualStayedNights = 0;
   let totalChargeableNights = 0;
 
-  // Compute duration stats from matching reservations
+  // Compute duration stats from actual/active chargeable stays only (never No-Show or Cancelled)
   matchingRes.forEach(res => {
+    if (res.status === 'cancelled' || res.status === 'no_show') return;
     const duration = calculateStayDuration(res.checkIn, res.checkOut, res.overstayNights, res.status, { hotel, res });
     totalDays += duration.totalDays;
     totalNights += duration.totalNights;

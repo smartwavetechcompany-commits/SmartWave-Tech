@@ -215,10 +215,8 @@ export function GuestManagement() {
     const balanceMap: Record<string, number> = {};
     if (!guests.length) return balanceMap;
 
-    const nonCancelledReservations = allReservations.filter(r => r.status !== 'cancelled');
-
     guests.forEach(guest => {
-      const guestResList = nonCancelledReservations.filter(r =>
+      const guestResList = allReservations.filter(r =>
         r.guestId === guest.id ||
         (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim())
       );
@@ -227,7 +225,7 @@ export function GuestManagement() {
         const position = calculateGuestFinancialPosition(guest, guestResList, hotel, allLedgerEntries);
         balanceMap[guest.id] = position.outstandingBalance;
       } else {
-        balanceMap[guest.id] = Number((guest.ledgerBalance ?? 0).toFixed(2));
+        balanceMap[guest.id] = calculateGuestFinancialPosition(guest, [], hotel, allLedgerEntries).outstandingBalance;
       }
     });
 
@@ -238,8 +236,7 @@ export function GuestManagement() {
     if (guestLiveBalances[guest.id] !== undefined) {
       return guestLiveBalances[guest.id];
     }
-    const activeRes = allReservations.filter(r => r.status !== 'cancelled');
-    return calculateGuestFinancialPosition(guest, activeRes, hotel, allLedgerEntries).outstandingBalance;
+    return calculateGuestFinancialPosition(guest, allReservations, hotel, allLedgerEntries).outstandingBalance;
   }, [guestLiveBalances, allReservations, hotel, allLedgerEntries]);
 
   // Precompute stats map for each guest to avoid complex O(M * N) calculations during rendering and sorting
@@ -891,7 +888,9 @@ export function GuestManagement() {
 
       if (res.roomNumber) entry.rooms.add(String(res.roomNumber));
       if (res.bookingSource) entry.sources.add(String(res.bookingSource));
-      entry.totalBookedAmount += Number(res.totalAmount || 0);
+      if (res.status !== 'cancelled' && res.status !== 'no_show') {
+        entry.totalBookedAmount += Number(res.totalAmount || 0);
+      }
       entry.totalPaidFromRes += Number(res.paidAmount || 0);
 
       const checkInStr = (res.checkIn || '').split('T')[0];
@@ -1225,11 +1224,11 @@ export function GuestManagement() {
               <Star size={14} />
             </div>
             <div className="text-emerald-500 text-[7px] font-black uppercase tracking-tight">
-              {Math.round((guests.filter(g => (g.totalStays || 0) > 1).length / (guests.length || 1)) * 100)}% Retention
+              {Math.round((guests.filter(g => (guestStatsMap[g.id]?.visitsCount ?? g.totalStays ?? 0) > 1).length / (guests.length || 1)) * 100)}% Retention
             </div>
           </div>
           <div className="text-zinc-400 text-[8px] font-bold uppercase tracking-widest mb-0.5">Repeat Guests</div>
-          <div className="text-lg sm:text-xl font-bold text-emerald-500 font-mono tracking-tight">{guests.filter(g => (g.totalStays || 0) > 1).length}</div>
+          <div className="text-lg sm:text-xl font-bold text-emerald-500 font-mono tracking-tight">{guests.filter(g => (guestStatsMap[g.id]?.visitsCount ?? g.totalStays ?? 0) > 1).length}</div>
         </div>
 
         <div className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl group hover:border-blue-500/30 transition-all shadow-md">
@@ -1654,7 +1653,7 @@ export function GuestManagement() {
                       <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
                         <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Stay Nights</div>
                         <div className="text-sm font-bold text-amber-500 flex items-baseline gap-1">
-                          <span>{stats.actualStayedNights || (guest as any).totalNights || 0}</span>
+                          <span>{guestStatsMap[guest.id] ? stats.actualStayedNights : ((guest as any).totalNights || 0)}</span>
                           <span className="text-[9px] font-normal text-zinc-500">nights</span>
                         </div>
                         {stats.overstayNights > 0 ? (
@@ -1670,7 +1669,7 @@ export function GuestManagement() {
                           </div>
                         ) : (
                           <div className="text-[7px] text-zinc-500 font-medium truncate mt-0.5" title="Total Chargeable Nights">
-                            {stats.chargeableNights || stats.actualStayedNights || (guest as any).totalNights || 0} chargeable
+                            {guestStatsMap[guest.id] ? (stats.chargeableNights || stats.actualStayedNights) : ((guest as any).totalNights || 0)} chargeable
                           </div>
                         )}
                       </div>
@@ -2162,6 +2161,7 @@ export function GuestManagement() {
                                   res.status === 'checked_in' ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
                                   res.status === 'checked_out' ? "bg-zinc-800 text-zinc-400" :
                                   res.status === 'cancelled' ? "bg-red-500/10 text-red-400 border border-red-500/20" :
+                                  res.status === 'no_show' ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
                                   "bg-blue-500/10 text-blue-400 border border-blue-500/20"
                                   )}>
                                   {res.status ? res.status.replace('_', ' ') : 'confirmed'}

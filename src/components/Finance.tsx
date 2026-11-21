@@ -178,10 +178,8 @@ export function Finance() {
     const balanceMap: Record<string, number> = {};
     if (!guests.length) return balanceMap;
 
-    const nonCancelledReservations = reservations.filter(r => r.status !== 'cancelled');
-
     guests.forEach(guest => {
-      const guestAllRes = nonCancelledReservations.filter(r =>
+      const guestAllRes = reservations.filter(r =>
         r.guestId === guest.id ||
         (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim())
       );
@@ -202,8 +200,7 @@ export function Finance() {
       return guestLiveBalances[guest.id];
     }
     const guestRes = reservations.filter(r =>
-      r.status !== 'cancelled' &&
-      (r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim()))
+      r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim())
     );
     if (guestRes.length > 0) {
       return calculateGuestFinancialPosition(guest, guestRes, hotel, validLedgerEntries).outstandingBalance;
@@ -215,8 +212,7 @@ export function Finance() {
   // so corporate-linked stays are not double-counted in City Ledger aggregate totals
   const getGuestNonCorporateLiveBalance = useCallback((guest: Guest) => {
     const guestRes = reservations.filter(r =>
-      r.status !== 'cancelled' &&
-      (r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim()))
+      r.guestId === guest.id || (Boolean(guest.email) && Boolean(r.guestEmail) && r.guestEmail?.toLowerCase().trim() === guest.email?.toLowerCase().trim())
     );
     const individualRes = guestRes.filter(r => !r.corporateId);
     if (individualRes.length > 0) {

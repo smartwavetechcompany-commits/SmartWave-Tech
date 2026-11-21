@@ -843,8 +843,11 @@ export const syncOutstandingDebtWithReservation = async (
     .filter(e => validateLedgerTransaction(e).isValid);
 
   const liveBalance = getReservationLiveBalance(res, hotel, validEntries);
-  const isInactiveStatus = res.status === 'cancelled' || res.status === 'no_show' || res.status !== 'checked_out';
-  const isSettled = liveBalance <= 0.01 || (validEntries.length === 0 && (res.paymentStatus === 'paid' || res.financialStatus === 'SETTLED'));
+  const isNoShowOrCancelled = res.status === 'cancelled' || res.status === 'no_show';
+  const isInactiveStatus = isNoShowOrCancelled
+    ? liveBalance <= 0.01
+    : res.status !== 'checked_out';
+  const isSettled = liveBalance <= 0.01 || (!isNoShowOrCancelled && validEntries.length === 0 && (res.paymentStatus === 'paid' || res.financialStatus === 'SETTLED'));
 
   if (isInactiveStatus || isSettled) {
     const resolvedStatus: OutstandingDebt['status'] =

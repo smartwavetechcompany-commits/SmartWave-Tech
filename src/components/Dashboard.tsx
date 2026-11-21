@@ -431,7 +431,7 @@ export function Dashboard() {
       const bal = getReservationLiveBalance(r, hotel, validLedgerEntries);
       if (bal <= 0.01) return acc;
       if (r.guestId) {
-        const guestRes = reservations.filter(x => x.status !== 'cancelled' && x.guestId === r.guestId);
+        const guestRes = reservations.filter(x => x.guestId === r.guestId);
         const guestPos = calculateGuestFinancialPosition({ id: r.guestId, email: r.guestEmail }, guestRes, hotel, validLedgerEntries);
         if (guestPos.netAmountDue <= 0.01) return acc;
       }

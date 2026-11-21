@@ -260,6 +260,215 @@ export const canMarkNoShow = (
   return { allowed: true };
 };
 
+export type PenaltyFeeType = 'fixed' | 'percentage';
+
+export interface PenaltyPolicyConfig {
+  enabled: boolean;
+  feeType: PenaltyFeeType;
+  amount: number;
+}
+
+/**
+ * Single source of truth for No-Show financial penalty policy from hotel Admin Control Policy.
+ * Safe default: disabled (₦0 automatic liability).
+ */
+export const getNoShowPenaltyPolicy = (hotel?: Hotel | null): PenaltyPolicyConfig => {
+  const resSettings = hotel?.settings?.reservations;
+  const enabled = resSettings?.enableNoShowPenalty === true;
+  const feeType: PenaltyFeeType = resSettings?.noShowPenaltyType === 'percentage' ? 'percentage' : 'fixed';
+  const rawAmount = Number(resSettings?.noShowPenaltyAmount ?? 0);
+  const amount = Number.isFinite(rawAmount) && rawAmount > 0 ? rawAmount : 0;
+  return { enabled, feeType, amount };
+};
+
+/**
+ * Single source of truth for Cancellation financial fee policy from hotel Admin Control Policy.
+ * Safe default: disabled (₦0 automatic liability).
+ */
+export const getCancellationFeePolicy = (hotel?: Hotel | null): PenaltyPolicyConfig => {
+  const resSettings = hotel?.settings?.reservations;
+  const enabled = resSettings?.enableCancellationFee === true;
+  const feeType: PenaltyFeeType = resSettings?.cancellationFeeType === 'percentage' ? 'percentage' : 'fixed';
+  const rawAmount = Number(resSettings?.cancellationFeeAmount ?? 0);
+  const amount = Number.isFinite(rawAmount) && rawAmount > 0 ? rawAmount : 0;
+  return { enabled, feeType, amount };
+};
+
+/**
+ * Computes the monetary penalty for a given Admin Control Policy configuration.
+ * Returns 0 when policy is disabled or amount is <= 0.
+ */
+export const calculatePolicyPenaltyAmount = (
+  policy: PenaltyPolicyConfig,
+  bookingTotal: number = 0
+): number => {
+  if (!policy.enabled || !Number.isFinite(policy.amount) || policy.amount <= 0) {
+    return 0;
+  }
+  if (policy.feeType === 'percentage') {
+    const clampedPct = Math.min(100, Math.max(0, policy.amount));
+    const base = Math.max(0, Number(bookingTotal) || 0);
+    return Number(((base * clampedPct) / 100).toFixed(2));
+  }
+  return Number(policy.amount.toFixed(2));
+};
+
+/**
+ * Returns true if a ledger entry is an explicitly posted No-Show penalty debit.
+ * Never classifies regular room, overstay, or tax charges as No-Show penalties.
+ */
+export const isPostedNoShowPenaltyEntry = (entry: Partial<LedgerEntry>): boolean => {
+  if (!entry || entry.type !== 'debit') return false;
+  const cat = (entry.category || '').toLowerCase();
+  if (cat === 'refund' || cat === 'room' || cat === 'tax') return false;
+
+  const chargeType = (entry.chargeType || '').toLowerCase();
+  if (chargeType === 'room_rate' || chargeType === 'overstay') return false;
+  if (chargeType === 'no_show_penalty' || cat === 'no_show_penalty') return true;
+
+  const desc = (entry.description || '').toLowerCase();
+  if (
+    desc.includes('no-show penalty') ||
+    desc.includes('no show penalty') ||
+    desc.includes('noshow penalty') ||
+    desc.includes('no-show fee') ||
+    desc.includes('no show fee') ||
+    desc.includes('noshow fee') ||
+    desc.includes('no-show charge') ||
+    desc.includes('no show charge')
+  ) {
+    return true;
+  }
+
+  if (cat === 'penalty' && !desc.includes('cancel')) {
+    return true;
+  }
+
+  return false;
+};
+
+/**
+ * Returns true if a ledger entry is an explicitly posted Cancellation fee debit.
+ * Never classifies regular room, overstay, or tax charges as Cancellation fees.
+ */
+export const isPostedCancellationFeeEntry = (entry: Partial<LedgerEntry>): boolean => {
+  if (!entry || entry.type !== 'debit') return false;
+  const cat = (entry.category || '').toLowerCase();
+  if (cat === 'refund' || cat === 'room' || cat === 'tax') return false;
+
+  const chargeType = (entry.chargeType || '').toLowerCase();
+  if (chargeType === 'room_rate' || chargeType === 'overstay') return false;
+  if (chargeType === 'cancellation_fee' || cat === 'cancellation_fee') return true;
+
+  const desc = (entry.description || '').toLowerCase();
+  if (
+    desc.includes('cancellation fee') ||
+    desc.includes('cancellation penalty') ||
+    desc.includes('cancellation charge') ||
+    desc.includes('cancel fee') ||
+    desc.includes('cancel penalty') ||
+    desc.includes('deposit forfeiture') ||
+    desc.includes('forfeited deposit')
+  ) {
+    return true;
+  }
+
+  if (cat === 'penalty' && desc.includes('cancel')) {
+    return true;
+  }
+
+  return false;
+};
+
+/**
+ * Determines whether a ledger debit represents a legitimately posted financial penalty/fee
+ * for a No-Show or Cancelled reservation.
+ */
+export const isPostedPenaltyLedgerEntry = (
+  entry: Partial<LedgerEntry>,
+  reservationStatus?: Reservation['status']
+): boolean => {
+  if (!entry || entry.type !== 'debit') return false;
+  if (reservationStatus === 'no_show') {
+    return isPostedNoShowPenaltyEntry(entry);
+  }
+  if (reservationStatus === 'cancelled') {
+    return isPostedCancellationFeeEntry(entry);
+  }
+  return isPostedNoShowPenaltyEntry(entry) || isPostedCancellationFeeEntry(entry);
+};
+
+/**
+ * Duplicate-prevention guard: returns true if a penalty of the specified type
+ * has already been posted to the ledger for the given reservation.
+ */
+export const hasExistingPostedPenalty = (
+  ledgerEntries: LedgerEntry[] = [],
+  reservationId: string,
+  penaltyType: 'no_show_penalty' | 'cancellation_fee'
+): boolean => {
+  if (!reservationId || !ledgerEntries.length) return false;
+  const expectedKey = `${penaltyType}:${reservationId}`;
+  return ledgerEntries.some((entry) => {
+    if (entry.idempotencyKey && entry.idempotencyKey === expectedKey) return true;
+    if (entry.reservationId !== reservationId) return false;
+    return penaltyType === 'no_show_penalty'
+      ? isPostedNoShowPenaltyEntry(entry)
+      : isPostedCancellationFeeEntry(entry);
+  });
+};
+
+/**
+ * Builds a deterministic, duplicate-safe penalty ledger entry strictly governed by
+ * the hotel's active Admin Control Policy. Returns null if the policy is disabled,
+ * the calculated amount is <= 0, or a penalty has already been posted.
+ */
+export const buildPolicyPenaltyLedgerEntry = (
+  res: Reservation,
+  hotel: Hotel | null,
+  penaltyType: 'no_show_penalty' | 'cancellation_fee',
+  postedBy: string,
+  existingLedgerEntries: LedgerEntry[] = []
+): Omit<LedgerEntry, 'id'> | null => {
+  if (!res?.id || !hotel?.id) return null;
+
+  const policy =
+    penaltyType === 'no_show_penalty'
+      ? getNoShowPenaltyPolicy(hotel)
+      : getCancellationFeePolicy(hotel);
+
+  if (!policy.enabled) return null;
+
+  const amount = calculatePolicyPenaltyAmount(policy, res.totalAmount || 0);
+  if (amount <= 0) return null;
+
+  if (hasExistingPostedPenalty(existingLedgerEntries, res.id, penaltyType)) {
+    return null;
+  }
+
+  const label = penaltyType === 'no_show_penalty' ? 'No-Show Penalty' : 'Cancellation Fee';
+  const basisNote =
+    policy.feeType === 'percentage'
+      ? ` (${policy.amount}% of booking value)`
+      : ' (Fixed policy fee)';
+
+  return {
+    guestId: res.guestId || '',
+    hotelId: hotel.id,
+    reservationId: res.id,
+    referenceId: res.id,
+    type: 'debit',
+    amount,
+    category: penaltyType,
+    chargeType: penaltyType,
+    description: `${label} - Room ${res.roomNumber || 'N/A'}${basisNote}`,
+    timestamp: new Date().toISOString(),
+    postedBy,
+    idempotencyKey: `${penaltyType}:${res.id}`,
+    skipAutomaticTax: true,
+  };
+};
+
 export const canUpdateRoomStatus = (
   hotel: Hotel | null,
   profile: UserProfile | null,

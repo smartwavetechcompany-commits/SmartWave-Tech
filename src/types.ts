@@ -267,6 +267,12 @@ export interface HotelSettings {
     autoReleaseNoShow: boolean;
     autoCancelUnpaidTimeMinutes: number;
     allowWalkIn: boolean;
+    enableNoShowPenalty?: boolean;
+    noShowPenaltyType?: 'fixed' | 'percentage';
+    noShowPenaltyAmount?: number;
+    enableCancellationFee?: boolean;
+    cancellationFeeType?: 'fixed' | 'percentage';
+    cancellationFeeAmount?: number;
     bookingSources?: BookingSource[];
     defaultBookingSourceId?: string;
   };
@@ -1166,7 +1172,7 @@ export interface LedgerEntry {
   timestamp: string;
   reservationId?: string; // Link to Reservation
   referenceId?: string; // e.g. Reservation ID, Kitchen Order ID
-  category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer' | 'corporate' | 'refund' | 'discount' | 'F & B' | 'city_ledger' | 'laundry' | 'tax' | 'other';
+  category: 'room' | 'restaurant' | 'service' | 'payment' | 'transfer' | 'corporate' | 'refund' | 'discount' | 'F & B' | 'city_ledger' | 'laundry' | 'tax' | 'penalty' | 'no_show_penalty' | 'cancellation_fee' | 'other';
   postedBy: string;
   paymentMethod?: 'cash' | 'card' | 'transfer' | 'deposit';
   fromGuestDeposit?: boolean;
@@ -1177,7 +1183,7 @@ export interface LedgerEntry {
   proofUrl?: string;
   chargePeriodStart?: string; // Metadata for duplicate charge prevention
   chargePeriodEnd?: string; // Metadata for duplicate charge prevention
-  chargeType?: 'room_rate' | 'overstay' | string; // Metadata for duplicate charge prevention
+  chargeType?: 'room_rate' | 'overstay' | 'no_show_penalty' | 'cancellation_fee' | string; // Metadata for duplicate charge prevention
   sourceRoomNumber?: string; // Room that originated this charge (e.g. Room 213, Room 214)
   sourceReservationId?: string;
   isLinkedRoomCharge?: boolean;

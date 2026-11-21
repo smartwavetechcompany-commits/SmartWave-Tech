@@ -264,15 +264,21 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
       }
 
       if (res) {
-        if (res.status === 'cancelled' || res.status === 'no_show' || res.status !== 'checked_out') {
+        const isNoShowOrCancelled = res.status === 'cancelled' || res.status === 'no_show';
+        const liveBalance = getReservationLiveBalance(res, hotel, validLedgerEntries);
+
+        if (isNoShowOrCancelled) {
+          if (liveBalance <= 0.01) {
+            return { ...debt, outstandingAmount: 0, status: 'paid' as const };
+          }
+        } else if (res.status !== 'checked_out') {
           return { ...debt, outstandingAmount: 0, status: 'paid' as const };
         }
 
-        const liveBalance = getReservationLiveBalance(res, hotel, validLedgerEntries);
         const isSettled =
           liveBalance <= 0.01 ||
-          (!ledgerLoaded && (res.paymentStatus === 'paid' || res.financialStatus === 'SETTLED')) ||
-          (validLedgerEntries.length === 0 && (res.paymentStatus === 'paid' || res.financialStatus === 'SETTLED'));
+          (!isNoShowOrCancelled && !ledgerLoaded && (res.paymentStatus === 'paid' || res.financialStatus === 'SETTLED')) ||
+          (!isNoShowOrCancelled && validLedgerEntries.length === 0 && (res.paymentStatus === 'paid' || res.financialStatus === 'SETTLED'));
 
         if (isSettled) {
           return {

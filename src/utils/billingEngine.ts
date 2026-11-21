@@ -716,6 +716,12 @@ export function getReservationLiveBalance(
   ledgerEntries?: LedgerEntry[]
 ): number {
   const account = calculateReservationAccount(res, hotel, ledgerEntries);
+
+  // No-Show and Cancelled reservations must strictly reflect explicitly posted penalties minus credits,
+  // never falling back to stale reservation ledgerBalance or unpaid booking totalAmount.
+  if (res.status === 'no_show' || res.status === 'cancelled') {
+    return account.outstandingBalance;
+  }
   
   // 1. If explicit ledger entries are provided, account.outstandingBalance is the exact live source of truth
   if (ledgerEntries && ledgerEntries.length > 0) {
