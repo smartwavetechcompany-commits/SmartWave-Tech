@@ -905,22 +905,6 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
             </div>
           )}
 
-          {isLogin && (
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsResetting(true);
-                  setError('');
-                  setSuccess('');
-                }}
-                className="text-xs text-emerald-500 hover:text-emerald-400 transition-colors font-medium"
-              >
-                Forgot Password?
-              </button>
-            </div>
-          )}
-
           {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
 
           <button
