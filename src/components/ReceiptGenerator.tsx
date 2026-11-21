@@ -445,6 +445,11 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   let exclusiveTaxTotal = 0;
   const taxBreakdown = activeTaxes.map(tax => {
     let amount = 0;
+
+    // For No-Show / Cancelled reservations, do not project or inherit original stay taxes
+    if (isNoShowOrCancelledRes) {
+      return { ...tax, amount: 0 };
+    }
     
     // If we have taxes in ledger, use them for accurate reporting
     if (totalTaxDebits > 0) {
@@ -495,7 +500,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   });
 
   // Handle other taxes in ledger
-  if (totalTaxDebits > 0) {
+  if (totalTaxDebits > 0 && !isNoShowOrCancelledRes) {
     const matchedExclusiveTaxTotal = taxBreakdown.filter(t => !t.isInclusive).reduce((acc, t) => acc + t.amount, 0);
     otherTaxAmount = totalExclusiveTaxDebits > matchedExclusiveTaxTotal ? totalExclusiveTaxDebits - matchedExclusiveTaxTotal : 0;
     if (otherTaxAmount > 0.01) {
@@ -504,7 +509,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   }
 
   let grandTotal = subtotal + exclusiveTaxTotal;
-  if (reservation && type !== 'corporate' && type !== 'restaurant' && totalDebits === 0 && (reservation.totalAmount || 0) > grandTotal) {
+  if (reservation && type !== 'corporate' && type !== 'restaurant' && !isNoShowOrCancelledRes && totalDebits === 0 && (reservation.totalAmount || 0) > grandTotal) {
     grandTotal = reservation.totalAmount;
   }
 
@@ -516,7 +521,11 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   // Authoritative fallback cross-check with getReservationLiveBalance
   if (reservation && type !== 'corporate' && type !== 'restaurant') {
     const liveBal = getReservationLiveBalance(reservation, hotel, activeLedger);
-    if (balance <= 0.005 && liveBal > 0.005) {
+    if (isNoShowOrCancelledRes) {
+      // Strictly mirror authoritative No-Show / Cancelled liability (0 unless a penalty was posted)
+      grandTotal = Math.max(0, Number(totalChargeDebits.toFixed(2)));
+      balance = Number((grandTotal - netPaid).toFixed(2));
+    } else if (balance <= 0.005 && liveBal > 0.005) {
       balance = liveBal;
       if (grandTotal < netPaid + liveBal) {
         grandTotal = netPaid + liveBal;
@@ -694,6 +703,13 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               </div>
               <div className="pl-3 space-y-2.5">
                 {(() => {
+                  if (isNoShowOrCancelledRes) {
+                    return (
+                      <p className="text-xs text-zinc-500 italic pl-1">
+                        No accommodation charges — reservation marked {reservation?.status === 'no_show' ? 'No-Show' : 'Cancelled'} (0 chargeable nights).
+                      </p>
+                    );
+                  }
                   const roomDebits = debits.filter(e => e.category?.toLowerCase() === 'room');
                   const renderedNights: React.ReactNode[] = [];
                   
@@ -836,13 +852,22 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               <div className="pl-3 space-y-3">
                 {(() => {
                   const incidentalDebits = debits.filter(e => {
+                    if (isNoShowOrCancelledRes) {
+                      return isPostedPenaltyLedgerEntry(e, reservation?.status);
+                    }
                     const cat = getSafeStr(e.category).toLowerCase();
                     const desc = getSafeStr(e.description).toLowerCase();
                     return cat !== 'room' && cat !== 'tax' && cat !== 'refund' && e.chargeType !== 'room_rate' && e.chargeType !== 'overstay' && !desc.startsWith('reversal');
                   });
                   
                   if (incidentalDebits.length === 0) {
-                    return <p className="text-xs text-zinc-400 italic pl-1">No additional services or incidental charges recorded.</p>;
+                    return (
+                      <p className="text-xs text-zinc-400 italic pl-1">
+                        {isNoShowOrCancelledRes
+                          ? 'No policy penalty or fee posted for this reservation.'
+                          : 'No additional services or incidental charges recorded.'}
+                      </p>
+                    );
                   }
 
                   return (
@@ -1134,20 +1159,24 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
               <span 
                 className={cn(
                   "text-xs font-black uppercase tracking-tighter",
-                  balance < -0.005 ? "text-emerald-600" : "text-red-600 font-black"
+                  balance <= 0.005 ? "text-emerald-600" : "text-red-600 font-black"
                 )}
-                style={{ color: balance < -0.005 ? '#059669' : '#dc2626' }}
+                style={{ color: balance <= 0.005 ? '#059669' : '#dc2626' }}
               >
-                {balance < -0.005 ? 'Credit Balance' : 'Balance Due'}
+                {balance < -0.005
+                  ? 'Credit Balance'
+                  : balance <= 0.005
+                    ? (isNoShowOrCancelledRes && grandTotal <= 0.005 ? 'No Penalty Applied (Settled)' : 'Settled / Balance Due')
+                    : 'Balance Due'}
               </span>
               <span 
                 className={cn(
                   "text-lg font-black",
-                  balance < -0.005 ? "text-emerald-600" : "text-red-600 font-black"
+                  balance <= 0.005 ? "text-emerald-600" : "text-red-600 font-black"
                 )}
-                style={{ color: balance < -0.005 ? '#059669' : '#dc2626' }}
+                style={{ color: balance <= 0.005 ? '#059669' : '#dc2626' }}
               >
-                {formatCurrency(Math.abs(balance), currency, exchangeRate)}
+                {formatCurrency(Math.abs(balance <= 0.005 && balance >= -0.005 ? 0 : balance), currency, exchangeRate)}
               </span>
             </div>
           </>

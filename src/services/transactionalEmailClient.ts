@@ -38,6 +38,12 @@ export type PlatformNotificationEventType =
   | 'subscription.renewed'
   | 'subscription.expiring_or_expired'
   | 'tracking_code.request_status_updated'
+  | 'loyalty.account_activated'
+  | 'loyalty.points_awarded'
+  | 'loyalty.points_deducted'
+  | 'loyalty.points_redeemed'
+  | 'loyalty.tier_upgraded'
+  | 'loyalty.points_expiring'
   | 'system.daily_revenue_deficit'
   | 'system.operational_alert';
 

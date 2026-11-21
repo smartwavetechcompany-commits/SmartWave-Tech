@@ -181,6 +181,80 @@ service cloud.firestore {
       );
     }
 
+    function canManageLoyalty(hotelId) {
+      let data = getUserData();
+      let roleId = data != null ? data.get('customRoleId', '') : '';
+      let hasCustomRoleDoc = roleId is string && roleId != '' && exists(/databases/$(database)/documents/hotels/$(hotelId)/customRoles/$(roleId));
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        (exists(/databases/$(database)/documents/hotels/$(hotelId)) &&
+         get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs != null &&
+         get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs is list &&
+         get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid])) ||
+        (sameHotel(hotelId) && data != null &&
+         data.role != "guest" && data.role != "corporate" &&
+         data.get('status', 'active') != "suspended" &&
+         data.get('status', 'active') != "inactive" && (
+          data.role == "hotelAdmin" ||
+          data.role == "admin" ||
+          data.role == "hotel_admin" ||
+          (hasCustomRoleDoc
+            ? customRoleHasPermission(hotelId, roleId, 'manage_loyalty')
+            : (data.get('permissions', []) is list && data.get('permissions', []).hasAny(['manage_loyalty', 'all'])))
+        ))
+      );
+    }
+
+    function canViewLoyalty(hotelId) {
+      let data = getUserData();
+      let roleId = data != null ? data.get('customRoleId', '') : '';
+      let hasCustomRoleDoc = roleId is string && roleId != '' && exists(/databases/$(database)/documents/hotels/$(hotelId)/customRoles/$(roleId));
+      return canManageLoyalty(hotelId) || (
+        isAuthenticated() &&
+        sameHotel(hotelId) &&
+        data != null &&
+        data.role != "guest" &&
+        data.role != "corporate" &&
+        data.get('status', 'active') != "suspended" &&
+        data.get('status', 'active') != "inactive" &&
+        (hasCustomRoleDoc
+          ? (customRoleHasPermission(hotelId, roleId, 'view_loyalty') || customRoleHasPermission(hotelId, roleId, 'view_guests'))
+          : (data.get('permissions', []) is list && data.get('permissions', []).hasAny(['view_loyalty', 'manage_loyalty', 'view_guests', 'all'])))
+      );
+    }
+
+    function isValidLoyaltyId(idVal) {
+      return idVal is string && idVal.size() >= 1 && idVal.size() <= 160 && idVal.matches('^[a-zA-Z0-9_\\-:.]+$');
+    }
+
+    function isValidLoyaltyAccount(data, hotelId, guestId) {
+      return data.hotelId == hotelId &&
+        data.guestId == guestId &&
+        data.guestName is string && data.guestName.size() >= 1 && data.guestName.size() <= 200 &&
+        data.availablePoints is number && data.availablePoints >= 0 &&
+        data.lifetimePointsEarned is number && data.lifetimePointsEarned >= 0 &&
+        data.totalPointsRedeemed is number && data.totalPointsRedeemed >= 0 &&
+        data.totalPointsExpired is number && data.totalPointsExpired >= 0 &&
+        data.membershipLevelId is string && data.membershipLevelId.size() >= 1 && data.membershipLevelId.size() <= 100 &&
+        data.membershipLevelName is string && data.membershipLevelName.size() >= 1 && data.membershipLevelName.size() <= 100 &&
+        data.isActive is bool;
+    }
+
+    function isValidLoyaltyTransaction(data, hotelId) {
+      return data.hotelId == hotelId &&
+        isValidLoyaltyId(data.guestId) &&
+        data.guestName is string && data.guestName.size() >= 1 && data.guestName.size() <= 200 &&
+        data.transactionType in ['account_activation', 'earn_auto', 'manual_award', 'manual_deduct', 'redemption', 'expiry', 'reversal', 'tier_change'] &&
+        data.points is number && data.points >= 0 &&
+        data.pointsDelta is number &&
+        data.previousBalance is number && data.previousBalance >= 0 &&
+        data.updatedBalance is number && data.updatedBalance >= 0 &&
+        data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 500 &&
+        data.adminId is string && data.adminId.size() >= 1 && data.adminId.size() <= 160 &&
+        isValidLoyaltyId(data.idempotencyKey) &&
+        data.timestamp is string;
+    }
+
     function roomHasPostingBlocked(hotelId, roomId) {
       return roomId is string &&
         roomId != '' &&
@@ -512,18 +586,44 @@ service cloud.firestore {
         allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin() || isStaffOf(hotelId))) || isAuthenticated();
       }
 
-      // Recursive subcollections (Reservations, Housekeeping, Staff, etc.)
-      match /{allSubcollections=**} {
-        allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
+      // Guest Loyalty Accounts (Strict multi-tenant isolation & admin-only write control)
+      match /loyaltyAccounts/{guestId} {
+        allow get: if isValidLoyaltyId(guestId) && canViewLoyalty(hotelId);
+        allow list: if canViewLoyalty(hotelId);
+        allow create, update: if isValidLoyaltyId(guestId) &&
+                                 canManageLoyalty(hotelId) &&
+                                 isValidLoyaltyAccount(request.resource.data, hotelId, guestId);
+        allow delete: if isSuperAdmin();
+      }
+
+      // Guest Loyalty Transactions (Strictly immutable append-only ledger — no edits or deletions)
+      match /loyaltyTransactions/{txId} {
+        allow get: if isValidLoyaltyId(txId) && canViewLoyalty(hotelId);
+        allow list: if canViewLoyalty(hotelId);
+        allow create: if isValidLoyaltyId(txId) &&
+                         canManageLoyalty(hotelId) &&
+                         isValidLoyaltyTransaction(request.resource.data, hotelId);
+        allow update, delete: if false;
+      }
+
+      // Recursive subcollections (Reservations, Housekeeping, Staff, etc. — excludes hardened loyalty collections)
+      match /{subcol}/{docPath=**} {
+        allow read: if !(subcol in ['loyaltyAccounts', 'loyaltyTransactions']) && (
+                       isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
                        isAuthenticated() ||
-                       (resource != null && resource.data.hotelId == hotelId);
-        allow create, update: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
+                       (resource != null && resource.data.hotelId == hotelId)
+                     );
+        allow create, update: if !(subcol in ['loyaltyAccounts', 'loyaltyTransactions']) && (
+                                 isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
                                  isAuthenticated() ||
                                  (exists(/databases/$(database)/documents/hotels/$(hotelId)) &&
                                   get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs != null &&
                                   get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs is list &&
-                                  get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid]));
-        allow delete: if isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin() || isStaffOf(hotelId))) || isAuthenticated();
+                                  get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid]))
+                               );
+        allow delete: if !(subcol in ['loyaltyAccounts', 'loyaltyTransactions']) && (
+                         isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin() || isStaffOf(hotelId))) || isAuthenticated()
+                       );
       }
     }
 

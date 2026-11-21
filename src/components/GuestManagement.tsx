@@ -4,7 +4,7 @@ import { collection, getDocs, query, orderBy, addDoc, updateDoc, doc, deleteDoc,
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
-import { Guest, OperationType, Reservation, CorporateAccount, LedgerEntry, GuestFeedbackNote } from '../types';
+import { Guest, OperationType, Reservation, CorporateAccount, LedgerEntry, GuestFeedbackNote, LoyaltyAccount, LoyaltyTransaction } from '../types';
 import { calculateBilling, getReservationLiveBalance } from '../utils/billingEngine';
 import { calculateStayDuration, formatStayDuration, StayDurationDisplay, safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
 import { calculateGuestAccount, calculateReservationAccount } from '../utils/financialUtils';
@@ -41,7 +41,8 @@ import {
   Send,
   ThumbsUp,
   Sparkles,
-  Wallet
+  Wallet,
+  Award
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
@@ -66,6 +67,10 @@ import { transferToCityLedger } from '../services/ledgerService';
 import { Pagination } from './Pagination';
 import { DateFilterControl, DateFilterValue, getDefaultDateFilter, matchesDateFilter } from './DateFilterControl';
 import { useBookingSources } from '../hooks/useSettings';
+import { canManageLoyalty, canViewLoyalty, getLoyaltyPolicy } from '../services/loyaltyService';
+import { ManageLoyaltyPointsModal } from './ManageLoyaltyPointsModal';
+import { GuestLoyaltyPanel } from './GuestLoyaltyPanel';
+import { LoyaltyHistoryView } from './LoyaltyHistoryView';
 
 export function GuestManagement() {
   const { hotel, profile, currency, exchangeRate, customRoles } = useAuth();
@@ -124,6 +129,77 @@ export function GuestManagement() {
     });
     return () => unsub();
   }, [hotel?.id, profile?.uid]);
+
+  // Additive Loyalty & Rewards real-time state (tenant-scoped, permission-gated)
+  const [loyaltyAccounts, setLoyaltyAccounts] = useState<LoyaltyAccount[]>([]);
+  const [loyaltyTransactions, setLoyaltyTransactions] = useState<LoyaltyTransaction[]>([]);
+  const [manageLoyaltyModal, setManageLoyaltyModal] = useState<{
+    isOpen: boolean;
+    guest: Guest | null;
+    action: 'manual_award' | 'manual_deduct' | 'reversal';
+  }>({ isOpen: false, guest: null, action: 'manual_award' });
+
+  const userCanViewLoyalty = useMemo(
+    () => canViewLoyalty(profile, customRoles),
+    [profile, customRoles]
+  );
+  const userCanManageLoyalty = useMemo(
+    () => canManageLoyalty(profile, customRoles),
+    [profile, customRoles]
+  );
+  const loyaltyPolicy = useMemo(() => getLoyaltyPolicy(hotel), [hotel]);
+
+  const loyaltyAccountsMap = useMemo(() => {
+    const map: Record<string, LoyaltyAccount> = {};
+    loyaltyAccounts.forEach((acc) => {
+      map[acc.guestId || acc.id] = acc;
+    });
+    return map;
+  }, [loyaltyAccounts]);
+
+  useEffect(() => {
+    if (!hotel?.id || !profile || !userCanViewLoyalty) {
+      setLoyaltyAccounts([]);
+      return;
+    }
+    const q = query(collection(db, 'hotels', hotel.id, 'loyaltyAccounts'));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setLoyaltyAccounts(snap.docs.map((d) => ({ id: d.id, ...d.data() } as LoyaltyAccount)));
+      },
+      (err) => {
+        console.warn('Loyalty accounts listener notice:', err);
+      }
+    );
+    return () => unsub();
+  }, [hotel?.id, profile?.uid, userCanViewLoyalty]);
+
+  useEffect(() => {
+    if (!hotel?.id || !profile || !userCanViewLoyalty) {
+      setLoyaltyTransactions([]);
+      return;
+    }
+    const q = query(collection(db, 'hotels', hotel.id, 'loyaltyTransactions'));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setLoyaltyTransactions(
+          snap.docs
+            .map((d) => ({ id: d.id, ...d.data() } as LoyaltyTransaction))
+            .sort(
+              (a, b) =>
+                new Date(b.timestamp || b.createdAt).getTime() -
+                new Date(a.timestamp || a.createdAt).getTime()
+            )
+        );
+      },
+      (err) => {
+        console.warn('Loyalty transactions listener notice:', err);
+      }
+    );
+    return () => unsub();
+  }, [hotel?.id, profile?.uid, userCanViewLoyalty]);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingGuest, setEditingGuest] = useState<Guest | null>(null);
@@ -187,8 +263,8 @@ export function GuestManagement() {
   const [prefInput, setPrefInput] = useState('');
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
 
-  // Guest History tab state
-  const [mainTab, setMainTab] = useState<'profiles' | 'history'>('profiles');
+  // Guest History & Loyalty tab state
+  const [mainTab, setMainTab] = useState<'profiles' | 'history' | 'loyalty'>('profiles');
   const [historyLookupQuery, setHistoryLookupQuery] = useState('');
   const [selectedHistoryGuestId, setSelectedHistoryGuestId] = useState<string | null>(null);
   const [feedbackNoteText, setFeedbackNoteText] = useState('');
@@ -1135,6 +1211,22 @@ export function GuestManagement() {
               </button>
             </>
           )}
+          {userCanManageLoyalty && loyaltyPolicy.enabled && loyaltyPolicy.allowManualAllocation && (
+            <button
+              type="button"
+              onClick={() =>
+                setManageLoyaltyModal({
+                  isOpen: true,
+                  guest: null,
+                  action: 'manual_award',
+                })
+              }
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-amber-500/15 text-amber-300 px-3 py-2 rounded-xl text-xs font-bold hover:bg-amber-500/25 transition-all active:scale-95 border border-amber-500/30 whitespace-nowrap"
+            >
+              <Award size={14} />
+              <span>Manage Loyalty Points</span>
+            </button>
+          )}
           {(hasPermission(profile, 'add_guests', customRoles) || profile?.role === 'hotelAdmin' || profile?.role === 'superAdmin') && (
             <button
               onClick={() => {
@@ -1202,6 +1294,24 @@ export function GuestManagement() {
           </span>
         )}
       </button>
+      {userCanViewLoyalty && (
+        <button
+          type="button"
+          onClick={() => setMainTab('loyalty')}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all",
+            mainTab === 'loyalty'
+              ? "bg-amber-500/10 text-amber-400 border border-amber-500/30 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
+          )}
+        >
+          <Award size={14} />
+          <span>Loyalty &amp; Rewards</span>
+          <span className="ml-1 text-[10px] bg-zinc-900 text-amber-400 px-1.5 py-0.5 rounded-full border border-zinc-800">
+            {loyaltyAccounts.length}
+          </span>
+        </button>
+      )}
     </div>
 
     {mainTab === 'profiles' && (
@@ -2095,6 +2205,27 @@ export function GuestManagement() {
               );
             })()}
 
+            {/* Additive Guest Loyalty & Rewards Panel */}
+            {hotel && userCanViewLoyalty && (
+              <GuestLoyaltyPanel
+                hotel={hotel}
+                profile={profile}
+                customRoles={customRoles}
+                guest={selectedHistoryGuest}
+                account={loyaltyAccountsMap[selectedHistoryGuest.id] || null}
+                guestTransactions={loyaltyTransactions.filter(
+                  (tx) => tx.guestId === selectedHistoryGuest.id
+                )}
+                guestReservations={selectedGuestReservations}
+                allLedgerEntries={allLedgerEntries}
+                currency={currency}
+                exchangeRate={exchangeRate}
+                onOpenManageModal={(g, action = 'manual_award') =>
+                  setManageLoyaltyModal({ isOpen: true, guest: g, action })
+                }
+              />
+            )}
+
             {/* Previous Bookings & Feedback Notes Sections */}
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
               {/* Previous Bookings Table (2 Columns) */}
@@ -2369,6 +2500,28 @@ export function GuestManagement() {
           </div>
         )}
       </div>
+    )}
+
+    {mainTab === 'loyalty' && hotel && userCanViewLoyalty && (
+      <LoyaltyHistoryView
+        hotel={hotel}
+        profile={profile}
+        customRoles={customRoles}
+        guests={guests}
+        loyaltyAccounts={loyaltyAccounts}
+        loyaltyTransactions={loyaltyTransactions}
+        allReservations={allReservations}
+        allLedgerEntries={allLedgerEntries}
+        currency={currency}
+        exchangeRate={exchangeRate}
+        onOpenManageModal={(g = null, action = 'manual_award') =>
+          setManageLoyaltyModal({ isOpen: true, guest: g, action })
+        }
+        onSelectGuest={(g) => {
+          setSelectedHistoryGuestId(g.id);
+          setMainTab('history');
+        }}
+      />
     )}
 
       {/* History Modal */}
@@ -3113,6 +3266,29 @@ export function GuestManagement() {
           <GuestDepositModal
             guest={guests.find(g => g.id === depositModalGuest.id) || depositModalGuest}
             onClose={() => setDepositModalGuest(null)}
+          />
+        </SafeModalBoundary>
+      )}
+
+      {hotel && profile && manageLoyaltyModal.isOpen && (
+        <SafeModalBoundary
+          onClose={() =>
+            setManageLoyaltyModal({ isOpen: false, guest: null, action: 'manual_award' })
+          }
+        >
+          <ManageLoyaltyPointsModal
+            isOpen={manageLoyaltyModal.isOpen}
+            onClose={() =>
+              setManageLoyaltyModal({ isOpen: false, guest: null, action: 'manual_award' })
+            }
+            hotel={hotel}
+            profile={profile}
+            guests={guests}
+            loyaltyAccountsMap={loyaltyAccountsMap}
+            initialGuest={manageLoyaltyModal.guest}
+            initialAction={manageLoyaltyModal.action}
+            currency={currency}
+            exchangeRate={exchangeRate}
           />
         </SafeModalBoundary>
       )}

@@ -385,6 +385,33 @@ export interface HotelSettings {
     lockAccountAfterFailedAttempts: number;
     requireApprovalForSensitiveActions: boolean;
   };
+  loyalty?: LoyaltySettings;
+}
+
+export interface LoyaltyMembershipLevel {
+  id: string;
+  name: string;
+  minPoints: number;
+  benefits: string[];
+  color?: string;
+  order?: number;
+}
+
+export interface LoyaltySettings {
+  enabled: boolean;
+  allowManualAllocation: boolean;
+  enableAutoEarning: boolean;
+  enableRedemption: boolean;
+  earningRateAmount: number;
+  earningRatePoints: number;
+  redemptionPointValue: number;
+  minimumRedemptionPoints: number;
+  maximumRedemptionPointsPerBooking: number;
+  pointsExpiryEnabled: boolean;
+  pointsExpiryDays: number;
+  expiryReminderDays: number;
+  notifyGuestsByEmail: boolean;
+  membershipLevels: LoyaltyMembershipLevel[];
 }
 
 export interface Hotel {
@@ -1563,3 +1590,60 @@ export interface HousekeepingDailyLog {
   supervisorName: string;
   timestamp: string;
 }
+
+export type LoyaltyTransactionType =
+  | 'account_activation'
+  | 'earn_auto'
+  | 'manual_award'
+  | 'manual_deduct'
+  | 'redemption'
+  | 'expiry'
+  | 'reversal'
+  | 'tier_change';
+
+export interface LoyaltyAccount {
+  id: string; // matches existing guest.id (1:1 per hotel)
+  hotelId: string;
+  guestId: string;
+  guestName: string;
+  guestEmail?: string;
+  guestPhone?: string;
+  availablePoints: number;
+  lifetimePointsEarned: number;
+  totalPointsRedeemed: number;
+  totalPointsManuallyAdjusted: number;
+  totalPointsExpired: number;
+  membershipLevelId: string;
+  membershipLevelName: string;
+  isActive: boolean;
+  activatedAt: string;
+  lastActivityAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LoyaltyTransaction {
+  id: string;
+  hotelId: string;
+  guestId: string;
+  guestName: string;
+  guestEmail?: string;
+  transactionType: LoyaltyTransactionType;
+  points: number; // absolute magnitude (>= 0)
+  pointsDelta: number; // signed change (+, -, or 0 for tier_change/activation)
+  previousBalance: number;
+  updatedBalance: number;
+  reason: string;
+  adminId: string;
+  adminName?: string;
+  adminEmail?: string;
+  reservationId?: string;
+  monetaryValue?: number;
+  previousTierName?: string;
+  newTierName?: string;
+  expiresAt?: string | null;
+  idempotencyKey: string;
+  timestamp: string;
+  createdAt: string;
+}
+

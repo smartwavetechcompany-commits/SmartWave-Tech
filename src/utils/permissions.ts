@@ -20,6 +20,8 @@ export type Permission =
   | 'delete_guests'
   | 'export_guests'
   | 'deposit_guest_account'
+  | 'view_loyalty'
+  | 'manage_loyalty'
 
   // --- ROOM MANAGEMENT ---
   | 'view_rooms'
@@ -194,6 +196,8 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { id: 'delete_guests', label: 'Delete Guests', description: 'Remove guest CRM records' },
       { id: 'export_guests', label: 'Export Guest Data', description: 'Export customer list' },
       { id: 'deposit_guest_account', label: 'Deposit Money to Guest Account', description: 'Authorize staff to deposit money into an individual guest account wallet' },
+      { id: 'view_loyalty', label: 'View Guest Loyalty & Rewards', description: 'View guest loyalty balances, membership tiers, and loyalty transaction history' },
+      { id: 'manage_loyalty', label: 'Manage Guest Loyalty Points & Programme', description: 'Award, deduct, redeem loyalty points, and manage loyalty programme operations' },
     ]
   },
   {
@@ -445,21 +449,21 @@ export const SYSTEM_ROLE_TEMPLATES: Record<string, { name: string; description: 
     name: 'Hotel Manager',
     description: 'Comprehensive property supervision across operations, staff, and finance',
     permissions: [
-      ...ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected', 'view_email_templates', 'manage_email_templates'].includes(p))
+      ...ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected', 'view_email_templates', 'manage_email_templates', 'view_loyalty', 'manage_loyalty'].includes(p))
     ]
   },
   generalManager: {
     name: 'General Manager',
     description: 'Full operational, administrative, and strategic authority over the hotel property',
     permissions: [
-      ...ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected', 'view_email_templates', 'manage_email_templates'].includes(p))
+      ...ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected', 'view_email_templates', 'manage_email_templates', 'view_loyalty', 'manage_loyalty'].includes(p))
     ]
   },
   hotelOwner: {
     name: 'Hotel Owner',
     description: 'Executive ownership role with complete configuration and financial authority',
     permissions: [
-      ...ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected', 'view_email_templates', 'manage_email_templates'].includes(p))
+      ...ALL_PERMISSIONS.filter(p => !['access_super_admin', 'view_total_revenue_collected', 'view_email_templates', 'manage_email_templates', 'view_loyalty', 'manage_loyalty'].includes(p))
     ]
   }
 };
@@ -550,6 +554,8 @@ const PERMISSION_FIELD_PATH_MAP: Record<string, { modules: string[]; actions: st
   delete_guests: { modules: ['guests'], actions: ['delete', 'deleteGuests'] },
   export_guests: { modules: ['guests'], actions: ['export', 'exportGuests'] },
   deposit_guest_account: { modules: ['guests', 'finance', 'reservations', 'frontDesk'], actions: ['depositGuestAccount', 'deposit_guest_account'] },
+  view_loyalty: { modules: ['guests', 'loyalty'], actions: ['viewLoyalty', 'view_loyalty', 'read'] },
+  manage_loyalty: { modules: ['guests', 'loyalty'], actions: ['manageLoyalty', 'manage_loyalty', 'adjustPoints'] },
 
   // Housekeeping
   view_housekeeping: { modules: ['housekeeping'], actions: ['view', 'viewHousekeeping', 'read'] },
@@ -792,7 +798,9 @@ const MODULE_ACTION_PERMISSIONS: Record<string, Permission[]> = {
     'edit_guests', 
     'delete_guests', 
     'export_guests',
-    'deposit_guest_account'
+    'deposit_guest_account',
+    'view_loyalty',
+    'manage_loyalty'
   ],
   rooms: [
     'view_rooms', 

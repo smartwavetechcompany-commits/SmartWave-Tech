@@ -478,6 +478,62 @@
         "createdBy": { "type": "string" }
       },
       "required": ["hotelId", "code", "name", "discountType", "value", "startDate", "expiryDate", "status", "usedCount", "appliesTo", "createdAt", "createdBy"]
+    },
+    "LoyaltyAccount": {
+      "title": "Loyalty Account",
+      "description": "Tenant-isolated guest loyalty balance and membership tier keyed by existing guestId",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 160 },
+        "hotelId": { "type": "string", "maxLength": 160 },
+        "guestId": { "type": "string", "maxLength": 160 },
+        "guestName": { "type": "string", "maxLength": 200 },
+        "guestEmail": { "type": "string", "maxLength": 200 },
+        "guestPhone": { "type": "string", "maxLength": 60 },
+        "availablePoints": { "type": "number" },
+        "lifetimePointsEarned": { "type": "number" },
+        "totalPointsRedeemed": { "type": "number" },
+        "totalPointsManuallyAdjusted": { "type": "number" },
+        "totalPointsExpired": { "type": "number" },
+        "membershipLevelId": { "type": "string", "maxLength": 100 },
+        "membershipLevelName": { "type": "string", "maxLength": 100 },
+        "isActive": { "type": "boolean" },
+        "activatedAt": { "type": "string", "format": "date-time" },
+        "lastActivityAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["hotelId", "guestId", "guestName", "availablePoints", "lifetimePointsEarned", "totalPointsRedeemed", "totalPointsExpired", "membershipLevelId", "membershipLevelName", "isActive"]
+    },
+    "LoyaltyTransaction": {
+      "title": "Loyalty Transaction",
+      "description": "Immutable append-only audit record of guest loyalty point awards, deductions, redemptions, expiries, and tier upgrades",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 160 },
+        "hotelId": { "type": "string", "maxLength": 160 },
+        "guestId": { "type": "string", "maxLength": 160 },
+        "guestName": { "type": "string", "maxLength": 200 },
+        "guestEmail": { "type": "string", "maxLength": 200 },
+        "transactionType": { "type": "string", "enum": ["account_activation", "earn_auto", "manual_award", "manual_deduct", "redemption", "expiry", "reversal", "tier_change"] },
+        "points": { "type": "number" },
+        "pointsDelta": { "type": "number" },
+        "previousBalance": { "type": "number" },
+        "updatedBalance": { "type": "number" },
+        "reason": { "type": "string", "maxLength": 500 },
+        "adminId": { "type": "string", "maxLength": 160 },
+        "adminName": { "type": "string", "maxLength": 200 },
+        "adminEmail": { "type": "string", "maxLength": 200 },
+        "reservationId": { "type": "string", "maxLength": 160 },
+        "monetaryValue": { "type": "number" },
+        "previousTierName": { "type": "string", "maxLength": 100 },
+        "newTierName": { "type": "string", "maxLength": 100 },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "idempotencyKey": { "type": "string", "maxLength": 160 },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["hotelId", "guestId", "guestName", "transactionType", "points", "pointsDelta", "previousBalance", "updatedBalance", "reason", "adminId", "idempotencyKey", "timestamp"]
     }
   },
   "firestore": {
@@ -600,6 +656,14 @@
     "/hotels/{hotelId}/promotions/{promoId}": {
       "schema": "Promotion",
       "description": "Hotel promotional campaigns and discount codes"
+    },
+    "/hotels/{hotelId}/loyaltyAccounts/{guestId}": {
+      "schema": "LoyaltyAccount",
+      "description": "Tenant-isolated guest loyalty accounts keyed by existing guestId"
+    },
+    "/hotels/{hotelId}/loyaltyTransactions/{txId}": {
+      "schema": "LoyaltyTransaction",
+      "description": "Immutable tenant-isolated loyalty point transactions ledger"
     }
   }
 }

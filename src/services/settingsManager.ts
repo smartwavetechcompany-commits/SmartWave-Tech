@@ -544,6 +544,7 @@ class CentralSettingsManager {
   getReportingSettings() { return this.currentSettings.reporting; }
   getNotificationsSettings() { return this.currentSettings.notifications; }
   getSecuritySettings() { return this.currentSettings.security; }
+  getLoyaltySettings() { return this.currentSettings.loyalty || DEFAULT_SETTINGS.loyalty; }
 
   subscribe(callback: SettingsSubscriber): () => void {
     this.subscribers.add(callback);

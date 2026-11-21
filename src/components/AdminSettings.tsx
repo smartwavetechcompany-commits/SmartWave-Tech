@@ -3,8 +3,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { database } from '../utils/database';
-import { HotelSettings, BookingSource } from '../types';
-import { DEFAULT_SETTINGS, DEFAULT_BOOKING_SOURCES } from '../constants';
+import { HotelSettings, BookingSource, LoyaltyMembershipLevel } from '../types';
+import { DEFAULT_SETTINGS, DEFAULT_BOOKING_SOURCES, DEFAULT_LOYALTY_LEVELS } from '../constants';
 import { 
   ShieldCheck, 
   CreditCard, 
@@ -36,7 +36,8 @@ import {
   TrendingUp,
   Star,
   Globe,
-  Tag
+  Tag,
+  Award
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { cn, safeStringify } from '../utils';
@@ -64,6 +65,19 @@ export function AdminSettings() {
   const [newSourceName, setNewSourceName] = useState('');
   const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
   const [editingSourceName, setEditingSourceName] = useState('');
+
+  // Loyalty membership levels editor state
+  const [newLevelName, setNewLevelName] = useState('');
+  const [newLevelMinPoints, setNewLevelMinPoints] = useState('1000');
+  const [newLevelColor, setNewLevelColor] = useState('#f59e0b');
+  const [newLevelBenefits, setNewLevelBenefits] = useState('');
+  const [editingLevelId, setEditingLevelId] = useState<string | null>(null);
+  const [editingLevelDraft, setEditingLevelDraft] = useState<{
+    name: string;
+    minPoints: string;
+    color: string;
+    benefits: string;
+  }>({ name: '', minPoints: '0', color: '#f59e0b', benefits: '' });
 
   // Sync with remote settings from real-time hook when no pending local edits
   useEffect(() => {
@@ -118,11 +132,15 @@ export function AdminSettings() {
       return;
     }
     const isSpecialLock = key === 'lockInvoicesAfterCheckout';
-    const nextVal = !(localSettings[group] as any)[key];
+    const currentGroup = {
+      ...((DEFAULT_SETTINGS_LOCAL[group] as any) || {}),
+      ...((localSettings[group] as any) || {}),
+    };
+    const nextVal = !currentGroup[key];
     const updated = {
       ...localSettings,
       [group]: {
-        ...(localSettings[group] as any),
+        ...currentGroup,
         [key]: nextVal
       }
     };
@@ -271,11 +289,100 @@ export function AdminSettings() {
     setLocalSettings((prev) => ({
       ...prev,
       [group]: {
-        ...(prev[group] as any),
+        ...((DEFAULT_SETTINGS_LOCAL[group] as any) || {}),
+        ...((prev[group] as any) || {}),
         [key]: value
       }
     }));
     setHasChanges(true); // Inputs wait for manual save or blur
+  };
+
+  const currentLoyaltyLevels: LoyaltyMembershipLevel[] = (
+    localSettings.loyalty?.membershipLevels && localSettings.loyalty.membershipLevels.length > 0
+      ? localSettings.loyalty.membershipLevels
+      : DEFAULT_LOYALTY_LEVELS
+  );
+
+  const saveLoyaltyLevels = async (levels: LoyaltyMembershipLevel[]) => {
+    if (!canEdit) {
+      toast.error('Permission denied: Modifying loyalty policy requires edit_settings permission.');
+      return;
+    }
+    const sorted = [...levels].sort((a, b) => (a.minPoints || 0) - (b.minPoints || 0));
+    const updated: HotelSettings = {
+      ...localSettings,
+      loyalty: {
+        ...(DEFAULT_SETTINGS_LOCAL.loyalty!),
+        ...(localSettings.loyalty || {}),
+        membershipLevels: sorted,
+      },
+    };
+    setLocalSettings(updated);
+    await saveSettings(updated, 'loyalty', 'membershipLevels');
+  };
+
+  const handleAddLoyaltyLevel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canEdit) return;
+    const trimmedName = newLevelName.trim();
+    const minPts = Math.max(0, Math.floor(Number(newLevelMinPoints) || 0));
+    if (!trimmedName) {
+      toast.error('Please enter a membership level name.');
+      return;
+    }
+    if (currentLoyaltyLevels.some((l) => l.name.toLowerCase() === trimmedName.toLowerCase())) {
+      toast.error(`A membership level named "${trimmedName}" already exists.`);
+      return;
+    }
+    const benefits = newLevelBenefits
+      .split(',')
+      .map((b) => b.trim())
+      .filter(Boolean);
+    const nextLevel: LoyaltyMembershipLevel = {
+      id: `tier-${Date.now()}`,
+      name: trimmedName,
+      minPoints: minPts,
+      color: newLevelColor || '#f59e0b',
+      benefits,
+    };
+    await saveLoyaltyLevels([...currentLoyaltyLevels, nextLevel]);
+    setNewLevelName('');
+    setNewLevelMinPoints('1000');
+    setNewLevelBenefits('');
+    toast.success(`Membership level "${trimmedName}" added.`);
+  };
+
+  const handleSaveEditedLoyaltyLevel = async (levelId: string) => {
+    if (!canEdit) return;
+    const trimmedName = editingLevelDraft.name.trim();
+    if (!trimmedName) {
+      toast.error('Level name cannot be empty.');
+      return;
+    }
+    const minPts = Math.max(0, Math.floor(Number(editingLevelDraft.minPoints) || 0));
+    const benefits = editingLevelDraft.benefits
+      .split(',')
+      .map((b) => b.trim())
+      .filter(Boolean);
+    const updated = currentLoyaltyLevels.map((lvl) =>
+      lvl.id === levelId
+        ? { ...lvl, name: trimmedName, minPoints: minPts, color: editingLevelDraft.color || lvl.color, benefits }
+        : lvl
+    );
+    await saveLoyaltyLevels(updated);
+    setEditingLevelId(null);
+    toast.success(`Membership level "${trimmedName}" updated.`);
+  };
+
+  const handleDeleteLoyaltyLevel = async (levelId: string, name: string) => {
+    if (!canEdit) return;
+    if (currentLoyaltyLevels.length <= 1) {
+      toast.error('At least one membership level must remain configured.');
+      return;
+    }
+    const updated = currentLoyaltyLevels.filter((l) => l.id !== levelId);
+    await saveLoyaltyLevels(updated);
+    toast.success(`Membership level "${name}" removed.`);
   };
 
   const handleInputBlur = (group: keyof HotelSettings, key: string) => {
@@ -293,6 +400,7 @@ export function AdminSettings() {
     { id: 'financial', label: 'Financial', icon: DollarSign, color: 'text-emerald-600' },
     { id: 'payments', icon: CreditCard, label: 'Payments', color: 'text-purple-500' },
     { id: 'guests', label: 'Guest Management', icon: UserCog, color: 'text-orange-500' },
+    { id: 'loyalty', label: 'Loyalty & Rewards', icon: Award, color: 'text-amber-400' },
     { id: 'housekeeping', label: 'Housekeeping', icon: Warehouse, color: 'text-zinc-400' },
     { id: 'staff', label: 'Staff Perms', icon: Briefcase, color: 'text-indigo-500' },
     { id: 'auditLogs', label: 'Audit & Activity', icon: Activity, color: 'text-red-500' },
@@ -1101,6 +1209,314 @@ export function AdminSettings() {
                 </div>
                 {renderToggle('notifications', 'enableDailyRevenueAlert', 'Daily Revenue Deficit Alerts', 'Trigger proactive alerts on the Dashboard when today\'s collected revenue falls below your minimum target threshold.')}
                 {renderInput('notifications', 'dailyRevenueThreshold', `Daily Revenue Target Threshold (${hotel?.defaultCurrency || 'NGN'})`, 'Minimum expected revenue per day. When daily collections are below this amount, a proactive alert and shortfall indicator will be highlighted on the Dashboard.')}
+              </div>
+            )}
+
+            {activeTab === 'loyalty' && (
+              <div className="space-y-4">
+                <header className="mb-6 flex items-center gap-3">
+                  <div className="p-2 bg-amber-500/10 rounded-lg">
+                    <Award className="text-amber-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-zinc-50">Guest Loyalty &amp; Rewards Policy</h3>
+                    <p className="text-sm text-zinc-500">
+                      Configure independent guest loyalty rules, point values, expiry, email alerts, and membership tiers
+                    </p>
+                  </div>
+                </header>
+
+                {renderToggle(
+                  'loyalty',
+                  'enabled',
+                  'Enable Guest Loyalty Programme',
+                  'Master switch for the hotel loyalty programme. Disabled by default; disabling preserves all historical records read-only.'
+                )}
+                {renderToggle(
+                  'loyalty',
+                  'allowManualAllocation',
+                  'Allow Manual Points Allocation',
+                  'Permit authorized administrators to manually award, deduct, or post corrective adjustments for existing guests.'
+                )}
+                {renderToggle(
+                  'loyalty',
+                  'enableAutoEarning',
+                  'Enable Automatic Points Earning',
+                  'Allow completed (checked-out) and fully settled stays to earn points automatically. No-Show, Cancelled, and unpaid stays are always excluded.'
+                )}
+                {renderToggle(
+                  'loyalty',
+                  'enableRedemption',
+                  'Enable Points Redemption',
+                  'Allow authorized administrators to redeem available guest loyalty points within configured min/max limits.'
+                )}
+                {renderToggle(
+                  'loyalty',
+                  'notifyGuestsByEmail',
+                  'Send Branded Guest Loyalty Emails',
+                  'Automatically notify guests via the existing hotel email service when points are awarded, deducted, redeemed, upgraded, or approaching expiry.'
+                )}
+
+                <div className="h-px bg-zinc-800 my-4" />
+                <h4 className="text-sm font-bold text-zinc-100">Earning &amp; Redemption Rates</h4>
+
+                {renderInput(
+                  'loyalty',
+                  'earningRatePoints',
+                  'Points Earned per Spend Unit',
+                  'Number of loyalty points awarded for each spend unit defined below (e.g. 1 point per 1,000).'
+                )}
+                {renderInput(
+                  'loyalty',
+                  'earningRateAmount',
+                  `Qualifying Spend Unit (${hotel?.defaultCurrency || 'NGN'})`,
+                  'Settled stay spend amount required to earn the configured points above.'
+                )}
+                {renderInput(
+                  'loyalty',
+                  'redemptionPointValue',
+                  `Monetary Value per Point (${hotel?.defaultCurrency || 'NGN'})`,
+                  'Currency value represented by 1 redeemed loyalty point.'
+                )}
+                {renderInput(
+                  'loyalty',
+                  'minimumRedemptionPoints',
+                  'Minimum Points Required for Redemption',
+                  'Guests must redeem at least this many points per redemption transaction.'
+                )}
+                {renderInput(
+                  'loyalty',
+                  'maximumRedemptionPointsPerBooking',
+                  'Maximum Redeemable Points per Booking',
+                  'Upper cap per redemption transaction. Set to 0 for no cap.'
+                )}
+
+                <div className="h-px bg-zinc-800 my-4" />
+                <h4 className="text-sm font-bold text-zinc-100">Points Expiry Rules</h4>
+
+                {renderToggle(
+                  'loyalty',
+                  'pointsExpiryEnabled',
+                  'Enable Points Expiry',
+                  'Assign an automatic expiry date to newly awarded loyalty points.'
+                )}
+                {renderInput(
+                  'loyalty',
+                  'pointsExpiryDays',
+                  'Default Points Validity (Days)',
+                  'Number of days before newly awarded points expire (when expiry is enabled).'
+                )}
+                {renderInput(
+                  'loyalty',
+                  'expiryReminderDays',
+                  'Expiry Reminder Window (Days)',
+                  'Flag points approaching expiry within this many days so reminder emails can be sent.'
+                )}
+
+                <div className="h-px bg-zinc-800 my-4" />
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-sm font-bold text-zinc-100">Membership Levels (Dynamic Tiers)</h4>
+                      <p className="text-xs text-zinc-500">
+                        Guests are dynamically assigned to the highest level whose lifetime points threshold they meet.
+                      </p>
+                    </div>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => saveLoyaltyLevels([...DEFAULT_LOYALTY_LEVELS])}
+                        className="text-[11px] font-bold text-zinc-400 hover:text-zinc-200 px-2.5 py-1 rounded-lg bg-zinc-950 border border-zinc-800"
+                      >
+                        Reset Defaults
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    {[...currentLoyaltyLevels]
+                      .sort((a, b) => (a.minPoints || 0) - (b.minPoints || 0))
+                      .map((level) => {
+                        const isEditing = editingLevelId === level.id;
+                        return (
+                          <div
+                            key={level.id}
+                            className="p-3.5 bg-zinc-950 border border-zinc-800 rounded-xl space-y-2.5"
+                          >
+                            {isEditing ? (
+                              <div className="space-y-2.5">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                  <input
+                                    type="text"
+                                    value={editingLevelDraft.name}
+                                    onChange={(e) =>
+                                      setEditingLevelDraft((d) => ({ ...d, name: e.target.value }))
+                                    }
+                                    placeholder="Level Name"
+                                    className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-100"
+                                  />
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={editingLevelDraft.minPoints}
+                                    onChange={(e) =>
+                                      setEditingLevelDraft((d) => ({ ...d, minPoints: e.target.value }))
+                                    }
+                                    placeholder="Min Points"
+                                    className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs font-mono text-zinc-100"
+                                  />
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="color"
+                                      value={editingLevelDraft.color}
+                                      onChange={(e) =>
+                                        setEditingLevelDraft((d) => ({ ...d, color: e.target.value }))
+                                      }
+                                      className="h-8 w-10 rounded bg-zinc-900 border border-zinc-700 cursor-pointer"
+                                    />
+                                    <span className="text-[10px] text-zinc-400 font-mono">
+                                      {editingLevelDraft.color}
+                                    </span>
+                                  </div>
+                                </div>
+                                <input
+                                  type="text"
+                                  value={editingLevelDraft.benefits}
+                                  onChange={(e) =>
+                                    setEditingLevelDraft((d) => ({ ...d, benefits: e.target.value }))
+                                  }
+                                  placeholder="Benefits (comma separated, e.g. Late checkout, Welcome drink)"
+                                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-100"
+                                />
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingLevelId(null)}
+                                    className="px-3 py-1 rounded-lg bg-zinc-800 text-zinc-300 text-xs font-bold"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveEditedLoyaltyLevel(level.id)}
+                                    className="px-3 py-1 rounded-lg bg-emerald-500 text-black text-xs font-bold flex items-center gap-1"
+                                  >
+                                    <Check size={12} /> Save Level
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className="w-2.5 h-2.5 rounded-full inline-block"
+                                      style={{ backgroundColor: level.color || '#f59e0b' }}
+                                    />
+                                    <span className="text-sm font-bold text-zinc-100">{level.name}</span>
+                                    <span className="text-[11px] font-mono text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
+                                      {Number(level.minPoints || 0).toLocaleString()}+ pts
+                                    </span>
+                                  </div>
+                                  {level.benefits && level.benefits.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                      {level.benefits.map((b, i) => (
+                                        <span
+                                          key={i}
+                                          className="text-[10px] text-zinc-400 bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded"
+                                        >
+                                          {b}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                                {canEdit && (
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingLevelId(level.id);
+                                        setEditingLevelDraft({
+                                          name: level.name,
+                                          minPoints: String(level.minPoints || 0),
+                                          color: level.color || '#f59e0b',
+                                          benefits: (level.benefits || []).join(', '),
+                                        });
+                                      }}
+                                      className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100"
+                                      title="Edit membership level"
+                                    >
+                                      <Edit2 size={13} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteLoyaltyLevel(level.id, level.name)}
+                                      className="p-1.5 rounded-lg bg-zinc-900 hover:bg-rose-500/15 text-zinc-400 hover:text-rose-400"
+                                      title="Delete membership level"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+
+                  {canEdit && (
+                    <form
+                      onSubmit={handleAddLoyaltyLevel}
+                      className="p-4 bg-zinc-950/70 border border-dashed border-zinc-800 rounded-xl space-y-3"
+                    >
+                      <div className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
+                        <Plus size={14} className="text-amber-400" /> Add Custom Membership Level
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <input
+                          type="text"
+                          value={newLevelName}
+                          onChange={(e) => setNewLevelName(e.target.value)}
+                          placeholder="Tier name (e.g. Diamond)"
+                          className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500"
+                        />
+                        <input
+                          type="number"
+                          min={0}
+                          value={newLevelMinPoints}
+                          onChange={(e) => setNewLevelMinPoints(e.target.value)}
+                          placeholder="Min lifetime points"
+                          className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs font-mono text-zinc-100"
+                        />
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={newLevelColor}
+                            onChange={(e) => setNewLevelColor(e.target.value)}
+                            className="h-9 w-11 rounded bg-zinc-900 border border-zinc-700 cursor-pointer"
+                          />
+                          <input
+                            type="text"
+                            value={newLevelBenefits}
+                            onChange={(e) => setNewLevelBenefits(e.target.value)}
+                            placeholder="Benefits (comma separated)"
+                            className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          type="submit"
+                          className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold flex items-center gap-1.5"
+                        >
+                          <Plus size={13} /> Add Level
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
               </div>
             )}
 

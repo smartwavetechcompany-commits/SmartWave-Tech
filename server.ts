@@ -4613,6 +4613,12 @@ async function startServer() {
       "subscription.renewed",
       "subscription.expiring_or_expired",
       "tracking_code.request_status_updated",
+      "loyalty.account_activated",
+      "loyalty.points_awarded",
+      "loyalty.points_deducted",
+      "loyalty.points_redeemed",
+      "loyalty.tier_upgraded",
+      "loyalty.points_expiring",
       "system.daily_revenue_deficit",
       "system.operational_alert",
     ]);
@@ -5123,6 +5129,69 @@ async function startServer() {
               } - ${hotelBrand.hotelName}`,
               rows,
               keySuffix: "platform",
+            });
+          }
+          break;
+        }
+
+        case "loyalty.account_activated":
+        case "loyalty.points_awarded":
+        case "loyalty.points_deducted":
+        case "loyalty.points_redeemed":
+        case "loyalty.tier_upgraded":
+        case "loyalty.points_expiring": {
+          const rows: EmailSummaryRow[] = [
+            { label: "Hotel", value: hotelBrand.hotelName },
+            { label: "Guest", value: resolvedGuestName },
+            ...(cleanMetaStr("transactionType")
+              ? [{ label: "Transaction Type", value: cleanMetaStr("transactionType")! }]
+              : []),
+            ...(cleanMetaStr("pointsFormatted")
+              ? [
+                  {
+                    label:
+                      typedEvent === "loyalty.points_deducted"
+                        ? "Points Adjusted"
+                        : typedEvent === "loyalty.points_redeemed"
+                          ? "Points Redeemed"
+                          : typedEvent === "loyalty.points_expiring"
+                            ? "Expiring Points"
+                            : "Points",
+                    value: cleanMetaStr("pointsFormatted")!,
+                  },
+                ]
+              : []),
+            ...(cleanMetaStr("monetaryValueFormatted")
+              ? [{ label: "Redemption Value", value: cleanMetaStr("monetaryValueFormatted")! }]
+              : []),
+            ...(cleanMetaStr("previousTier")
+              ? [{ label: "Previous Level", value: cleanMetaStr("previousTier")! }]
+              : []),
+            ...(cleanMetaStr("membershipLevel")
+              ? [{ label: "Membership Level", value: cleanMetaStr("membershipLevel")! }]
+              : []),
+            ...(cleanMetaStr("updatedBalanceFormatted")
+              ? [{ label: "Available Points Balance", value: cleanMetaStr("updatedBalanceFormatted")! }]
+              : []),
+            ...(cleanMetaStr("transactionDate")
+              ? [{ label: "Date", value: cleanMetaStr("transactionDate")! }]
+              : []),
+            ...(cleanMetaStr("expiryDate")
+              ? [{ label: "Expiry Date", value: cleanMetaStr("expiryDate")! }]
+              : []),
+            ...(cleanMetaStr("reason", 240)
+              ? [{ label: "Reason", value: cleanMetaStr("reason", 240)! }]
+              : []),
+          ];
+
+          if (resolvedGuestEmail) {
+            plans.push({
+              audience: "guest",
+              recipients: [resolvedGuestEmail],
+              brand: hotelBrand,
+              recipientName: resolvedGuestName,
+              rows,
+              keySuffix: "guest",
             });
           }
           break;

@@ -1,4 +1,39 @@
-import { HotelSettings, BookingSource } from './types';
+import { HotelSettings, BookingSource, LoyaltyMembershipLevel } from './types';
+
+export const DEFAULT_LOYALTY_LEVELS: LoyaltyMembershipLevel[] = [
+  {
+    id: 'standard',
+    name: 'Standard',
+    minPoints: 0,
+    benefits: ['Earn points on eligible settled stays', 'Member-only seasonal updates'],
+    color: '#71717a',
+    order: 0,
+  },
+  {
+    id: 'silver',
+    name: 'Silver',
+    minPoints: 500,
+    benefits: ['Priority check-in assistance', 'Complimentary welcome drink'],
+    color: '#94a3b8',
+    order: 1,
+  },
+  {
+    id: 'gold',
+    name: 'Gold',
+    minPoints: 2000,
+    benefits: ['Late check-out subject to availability', 'Room upgrade priority', 'Welcome amenity'],
+    color: '#f59e0b',
+    order: 2,
+  },
+  {
+    id: 'platinum',
+    name: 'Platinum',
+    minPoints: 5000,
+    benefits: ['Guaranteed priority upgrade request', 'Dedicated concierge support', 'Complimentary breakfast perk'],
+    color: '#38bdf8',
+    order: 3,
+  },
+];
 
 export const DEFAULT_BOOKING_SOURCES: BookingSource[] = [
   { id: 'walk-in', name: 'Walk-in', isActive: true, isDefault: true, order: 0 },
@@ -154,5 +189,21 @@ export const DEFAULT_SETTINGS: HotelSettings = {
     restrictMultipleLogins: false,
     lockAccountAfterFailedAttempts: 5,
     requireApprovalForSensitiveActions: true,
-  }
+  },
+  loyalty: {
+    enabled: false,
+    allowManualAllocation: false,
+    enableAutoEarning: false,
+    enableRedemption: false,
+    earningRateAmount: 1000,
+    earningRatePoints: 1,
+    redemptionPointValue: 10,
+    minimumRedemptionPoints: 100,
+    maximumRedemptionPointsPerBooking: 5000,
+    pointsExpiryEnabled: false,
+    pointsExpiryDays: 365,
+    expiryReminderDays: 30,
+    notifyGuestsByEmail: true,
+    membershipLevels: DEFAULT_LOYALTY_LEVELS,
+  },
 };

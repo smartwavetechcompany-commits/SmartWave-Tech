@@ -48,6 +48,13 @@ export type MultiTenantEmailEventType =
   // Tracking Code Requests
   | "tracking_code.request_submitted"
   | "tracking_code.request_status_updated"
+  // Guest Loyalty & Rewards
+  | "loyalty.account_activated"
+  | "loyalty.points_awarded"
+  | "loyalty.points_deducted"
+  | "loyalty.points_redeemed"
+  | "loyalty.tier_upgraded"
+  | "loyalty.points_expiring"
   // Important System Events
   | "system.daily_revenue_deficit"
   | "system.operational_alert";
@@ -394,6 +401,20 @@ export function isHotelEmailEventEnabled(
         return { enabled: false, reason: "Hotel disabled daily revenue deficit alerts." };
       }
       break;
+    case "loyalty.account_activated":
+    case "loyalty.points_awarded":
+    case "loyalty.points_deducted":
+    case "loyalty.points_redeemed":
+    case "loyalty.tier_upgraded":
+    case "loyalty.points_expiring": {
+      const loyaltyCfg = (hotelDoc.settings?.loyalty && typeof hotelDoc.settings.loyalty === "object"
+        ? hotelDoc.settings.loyalty
+        : {}) as Record<string, any>;
+      if (loyaltyCfg.notifyGuestsByEmail === false) {
+        return { enabled: false, reason: "Hotel disabled guest loyalty email notifications." };
+      }
+      break;
+    }
     default:
       break;
   }
@@ -717,6 +738,42 @@ function getDefaultMetaForEvent(
         subjectPrefix: `Tracking Code Request Update`,
         heading: "Tracking Code Request Status Update",
         defaultIntro: `There has been an update to your tracking code request.`,
+      };
+    case "loyalty.account_activated":
+      return {
+        subjectPrefix: `Welcome to ${name} Loyalty & Rewards`,
+        heading: "Your Loyalty Account Is Now Active",
+        defaultIntro: `Welcome to the ${name} Loyalty & Rewards programme. You can now earn rewards, track your points balance, and enjoy exclusive membership benefits.`,
+      };
+    case "loyalty.points_awarded":
+      return {
+        subjectPrefix: `Loyalty Points Awarded - ${name}`,
+        heading: "Loyalty Points Awarded",
+        defaultIntro: `Great news! Loyalty points have been credited to your rewards account at ${name}. Your updated transaction summary is shown below.`,
+      };
+    case "loyalty.points_deducted":
+      return {
+        subjectPrefix: `Loyalty Points Adjustment Notice - ${name}`,
+        heading: "Loyalty Points Adjusted",
+        defaultIntro: `A loyalty points adjustment has been recorded on your rewards account at ${name}. Please review the updated balance details below.`,
+      };
+    case "loyalty.points_redeemed":
+      return {
+        subjectPrefix: `Loyalty Points Redeemed - ${name}`,
+        heading: "Loyalty Points Redemption Confirmation",
+        defaultIntro: `Your loyalty points redemption at ${name} has been confirmed. Please review your redemption summary and remaining balance below.`,
+      };
+    case "loyalty.tier_upgraded":
+      return {
+        subjectPrefix: `Congratulations on Your Membership Upgrade - ${name}`,
+        heading: "Membership Level Upgraded",
+        defaultIntro: `Congratulations! You have reached a new loyalty membership level at ${name}. Review your upgraded tier details and rewards summary below.`,
+      };
+    case "loyalty.points_expiring":
+      return {
+        subjectPrefix: `Reminder: Your Loyalty Points Are Approaching Expiry - ${name}`,
+        heading: "Loyalty Points Approaching Expiry",
+        defaultIntro: `Some of your loyalty points at ${name} are approaching their expiry date. Review your points summary below so you don't miss out on your rewards.`,
       };
     case "system.daily_revenue_deficit":
       return {
