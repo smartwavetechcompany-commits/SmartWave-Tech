@@ -13,7 +13,9 @@ import {
 import { 
   createUserWithEmailAndPassword, 
   sendPasswordResetEmail, 
-  confirmPasswordReset 
+  confirmPasswordReset,
+  signInWithEmailAndPassword,
+  updatePassword
 } from 'firebase/auth';
 import { db, auth } from '../firebase';
 import { UserProfile, PasswordResetToken } from '../types';
@@ -360,7 +362,14 @@ export async function generatePasswordResetToken(options: GenerateTokenOptions):
     await sendPasswordResetEmail(auth, targetUser.email, actionCodeSettings);
     emailSent = true;
   } catch (fbEmailErr: any) {
-    console.log('Firebase Auth sendPasswordResetEmail status:', fbEmailErr?.code || fbEmailErr?.message);
+    console.log('Firebase Auth sendPasswordResetEmail with continueUrl status:', fbEmailErr?.code || fbEmailErr?.message);
+    // Fallback without custom actionCodeSettings if the preview/app domain is not in Firebase Authorized Domains
+    try {
+      await sendPasswordResetEmail(auth, targetUser.email);
+      emailSent = true;
+    } catch (fbFallbackErr: any) {
+      console.log('Firebase Auth fallback sendPasswordResetEmail status:', fbFallbackErr?.code || fbFallbackErr?.message);
+    }
   }
 
   return {
@@ -564,12 +573,22 @@ export async function validatePasswordResetToken(tokenId: string, emailHint?: st
  * Completes the password reset process:
  * Updates the user's password via authoritative server endpoint, marks the token as used, syncs Firebase Auth and Firestore, and logs to the audit trail.
  */
+export interface CompletePasswordResetResult {
+  success: boolean;
+  message: string;
+  requiresFirebaseVerification?: boolean;
+  firebaseEmailSent?: boolean;
+  requiresRecentLogin?: boolean;
+  targetEmail?: string;
+}
+
 export async function completePasswordResetWithToken(
   tokenId: string,
   newPassword: string,
   oobCode?: string,
-  emailHint?: string
-): Promise<{ success: boolean; message: string }> {
+  emailHint?: string,
+  currentPassword?: string
+): Promise<CompletePasswordResetResult> {
   // 1. Re-validate token strictly
   const val = await validatePasswordResetToken(tokenId, emailHint);
   if (!val.valid || !val.tokenData) {
@@ -581,20 +600,67 @@ export async function completePasswordResetWithToken(
   const isActivation = tokenData.type === 'activation';
   const targetEmail = (tokenData.targetEmail || emailHint || '').trim().toLowerCase();
   let targetUid = tokenData.targetUid || '';
+  let clientPasswordUpdated = false;
+  let callerIdToken: string | null = null;
 
-  // 2. If an oobCode is available from the email link, confirm Firebase Auth reset directly
+  // 2a. If an oobCode is available from the email link or pasted verification link, confirm Firebase Auth reset directly
   if (oobCode) {
     try {
       await confirmPasswordReset(auth, oobCode, newPassword);
+      clientPasswordUpdated = true;
     } catch (fbResetErr: any) {
-      console.warn('Firebase Auth confirmPasswordReset notice:', fbResetErr?.code || fbResetErr?.message);
+      const code = fbResetErr?.code || '';
+      if (code === 'auth/expired-action-code' || code === 'auth/invalid-action-code') {
+        throw new Error('The Firebase verification code or link is invalid or has expired. Please request a fresh verification email and try again.');
+      }
+      console.warn('Firebase Auth confirmPasswordReset notice:', code || fbResetErr?.message);
     }
   }
 
-  // Try creating the Firebase Auth account if the staff was provisioned without one
-  if (targetEmail) {
+  // 2b. If the user provided their current password for immediate re-authentication (e.g. Hotel Admin resetting own password)
+  if (!clientPasswordUpdated && currentPassword && targetEmail) {
     try {
-      await createUserWithEmailAndPassword(auth, targetEmail, newPassword);
+      const cred = await signInWithEmailAndPassword(auth, targetEmail, currentPassword);
+      await updatePassword(cred.user, newPassword);
+      callerIdToken = await cred.user.getIdToken(true).catch(() => null);
+      clientPasswordUpdated = true;
+    } catch (reauthErr: any) {
+      const code = reauthErr?.code || '';
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/invalid-login-credentials') {
+        throw new Error('The current password you entered is incorrect. Use the Firebase verification email option if you forgot your password.');
+      }
+      if (code === 'auth/too-many-requests') {
+        throw new Error('Too many failed password attempts. Please use the Firebase verification email link instead.');
+      }
+      console.warn('Current password re-auth notice:', code || reauthErr?.message);
+    }
+  }
+
+  // 2c. If the user is already signed in as the target account (e.g. Hotel Admin resetting their own password while logged in)
+  const signedInMatchesTarget = Boolean(
+    auth.currentUser &&
+    ((targetEmail && auth.currentUser.email?.toLowerCase() === targetEmail) ||
+      (targetUid && auth.currentUser.uid === targetUid))
+  );
+  if (!clientPasswordUpdated && signedInMatchesTarget && auth.currentUser) {
+    try {
+      await updatePassword(auth.currentUser, newPassword);
+      callerIdToken = await auth.currentUser.getIdToken(true).catch(() => null);
+      clientPasswordUpdated = true;
+    } catch (selfUpdateErr: any) {
+      console.warn('Signed-in self updatePassword notice:', selfUpdateErr?.code || selfUpdateErr?.message);
+      callerIdToken = await auth.currentUser.getIdToken().catch(() => null);
+    }
+  } else if (signedInMatchesTarget && auth.currentUser && !callerIdToken) {
+    callerIdToken = await auth.currentUser.getIdToken().catch(() => null);
+  }
+
+  // 2d. Try creating the Firebase Auth account if the staff was provisioned without one (only when not signed in as another user)
+  if (!clientPasswordUpdated && targetEmail && !auth.currentUser) {
+    try {
+      const created = await createUserWithEmailAndPassword(auth, targetEmail, newPassword);
+      callerIdToken = await created.user.getIdToken().catch(() => null);
+      clientPasswordUpdated = true;
     } catch (authCreateErr: any) {
       if (authCreateErr?.code !== 'auth/email-already-in-use') {
         console.log('Firebase Auth account creation status:', authCreateErr?.code || authCreateErr?.message);
@@ -605,7 +671,10 @@ export async function completePasswordResetWithToken(
   // 3. Call authoritative server endpoint to update Firebase Auth password, mark token used, and restore status to active
   const srvResp = await fetch('/api/auth/complete-password-reset', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(callerIdToken ? { Authorization: `Bearer ${callerIdToken}` } : {})
+    },
     body: JSON.stringify({
       tokenId,
       hotelId: tokenData.hotelId,
@@ -619,6 +688,20 @@ export async function completePasswordResetWithToken(
   const srvJson = await srvResp.json().catch(() => ({}));
   if (!srvResp.ok) {
     throw new Error(srvJson?.error || 'Failed to update password. Please try again or request a fresh reset link.');
+  }
+
+  // If server indicates Firebase email verification is required before password can be changed, return cleanly without consuming token
+  if (srvJson?.requiresFirebaseVerification) {
+    return {
+      success: false,
+      requiresFirebaseVerification: true,
+      firebaseEmailSent: Boolean(srvJson.firebaseEmailSent),
+      requiresRecentLogin: Boolean(srvJson.requiresRecentLogin),
+      targetEmail: srvJson.targetEmail || targetEmail,
+      message:
+        srvJson.message ||
+        `A Firebase security verification email has been sent to ${targetEmail}.`
+    };
   }
 
   // 4. Best-effort client-side Firestore sync (server already performed authoritative updates)

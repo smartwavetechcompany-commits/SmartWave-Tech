@@ -135,19 +135,20 @@ function AppContent() {
     return <LandingLoadingScreen />;
   }
 
-  // If user is already active and verified, redirect away from activation routes to main application immediately
+  // If user is already active and verified, redirect away from bare activation routes to main application immediately
   const isUserActive = Boolean(user && profile && profile.status === 'active' && !profile.forcePasswordChange);
+  const hasExplicitPasswordReset = Boolean(resetTokenParam || oobCodeParam || modeParam === 'resetPassword');
 
-  if (isUserActive && (isSetPasswordRoute || location.pathname === '/reset-password')) {
+  if (isUserActive && (isSetPasswordRoute || location.pathname === '/reset-password') && !hasExplicitPasswordReset) {
     return <Navigate to="/" replace />;
   }
 
-  // Intercept password reset/activation link only if user is NOT yet active and verified
-  if (isResetFlow && !isUserActive) {
+  // Intercept password reset/activation link (always allow explicit password reset links, including Hotel Admin self-reset)
+  if (isResetFlow && (!isUserActive || hasExplicitPasswordReset)) {
     return (
       <>
         <Toaster position="top-right" theme={theme} richColors />
-        {oobCodeParam || isSetPasswordRoute ? (
+        {(oobCodeParam || isSetPasswordRoute) && !resetTokenParam ? (
           <SetPasswordPage
             onNavigateToLogin={(prefilledEmail, msg) => {
               setResetCompletedInfo({ email: prefilledEmail, message: msg });

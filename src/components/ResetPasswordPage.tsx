@@ -12,13 +12,47 @@ import {
   ArrowLeft,
   Lock,
   Sparkles,
-  UserCheck
+  UserCheck,
+  Mail,
+  RefreshCw
 } from 'lucide-react';
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { auth } from '../firebase';
 import { 
   validatePasswordResetToken, 
   completePasswordResetWithToken 
 } from '../utils/passwordResetService';
 import { PasswordResetToken } from '../types';
+
+function extractOobCode(rawInput: string): string {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return '';
+  try {
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      const parsed = new URL(trimmed);
+      const direct = parsed.searchParams.get('oobCode');
+      if (direct) return direct.trim();
+      const nestedContinue = parsed.searchParams.get('continueUrl');
+      if (nestedContinue) {
+        const nested = new URL(nestedContinue);
+        const nestedCode = nested.searchParams.get('oobCode');
+        if (nestedCode) return nestedCode.trim();
+      }
+    }
+  } catch {
+    // Fall through to query/regex extraction
+  }
+  const match = trimmed.match(/[?&]oobCode=([^&\s]+)/i);
+  if (match && match[1]) {
+    try {
+      return decodeURIComponent(match[1]).trim();
+    } catch {
+      return match[1].trim();
+    }
+  }
+  // Treat plain non-URL string as raw oobCode
+  return trimmed.replace(/\s+/g, '');
+}
 
 interface Props {
   tokenParam?: string;
@@ -40,6 +74,21 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Guided Firebase verification fallback state (for accounts without Admin SDK / stored credential)
+  const [verificationStep, setVerificationStep] = useState<{
+    active: boolean;
+    firebaseEmailSent: boolean;
+    requiresRecentLogin: boolean;
+    targetEmail: string;
+    message: string;
+  } | null>(null);
+  const [verificationLinkOrCode, setVerificationLinkOrCode] = useState('');
+  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [isResendingFirebaseEmail, setIsResendingFirebaseEmail] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [resendNotice, setResendNotice] = useState<string | null>(null);
 
   // Live countdown timer state
   const [timeLeft, setTimeLeft] = useState<{ minutes: number; seconds: number } | null>(null);
@@ -121,6 +170,15 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
   const isPasswordValid = Object.values(rules).every(Boolean);
   const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword;
 
+  // Resend cooldown timer
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setInterval(() => {
+      setResendCooldown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [resendCooldown]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const activeToken = tokenData?.token || (tokenData as any)?.tokenId || tokenInput;
@@ -147,12 +205,100 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
       const oobCode = params.get('oobCode') || undefined;
       const resolvedEmail = tokenData?.targetEmail || emailParam || params.get('email') || undefined;
 
-      await completePasswordResetWithToken(activeToken, newPassword, oobCode, resolvedEmail);
+      const result = await completePasswordResetWithToken(activeToken, newPassword, oobCode, resolvedEmail);
+      if (result.requiresFirebaseVerification) {
+        setVerificationStep({
+          active: true,
+          firebaseEmailSent: Boolean(result.firebaseEmailSent),
+          requiresRecentLogin: Boolean(result.requiresRecentLogin),
+          targetEmail: result.targetEmail || resolvedEmail || '',
+          message: result.message
+        });
+        if (result.firebaseEmailSent) {
+          setResendCooldown(60);
+        }
+        return;
+      }
+      setVerificationStep(null);
       setSubmitSuccess(true);
     } catch (err: any) {
       setSubmitError(err.message || 'Failed to update password. Please try again or contact your administrator.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleCompleteWithVerificationCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const activeToken = tokenData?.token || (tokenData as any)?.tokenId || tokenInput;
+    const extractedCode = extractOobCode(verificationLinkOrCode);
+    if (!extractedCode) {
+      setSubmitError('Please paste the Firebase password reset link or verification code from your email.');
+      return;
+    }
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      const resolvedEmail = verificationStep?.targetEmail || tokenData?.targetEmail || emailParam || undefined;
+      const result = await completePasswordResetWithToken(activeToken, newPassword, extractedCode, resolvedEmail);
+      if (result.requiresFirebaseVerification) {
+        setSubmitError('That verification code could not be applied. Please request a fresh Firebase verification email and paste the latest link.');
+        return;
+      }
+      setVerificationStep(null);
+      setSubmitSuccess(true);
+    } catch (err: any) {
+      setSubmitError(err.message || 'Verification failed. Please check the link or request a fresh email.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCompleteWithCurrentPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const activeToken = tokenData?.token || (tokenData as any)?.tokenId || tokenInput;
+    if (!currentPasswordInput) {
+      setSubmitError('Please enter your current password to confirm.');
+      return;
+    }
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      const resolvedEmail = verificationStep?.targetEmail || tokenData?.targetEmail || emailParam || undefined;
+      const result = await completePasswordResetWithToken(
+        activeToken,
+        newPassword,
+        undefined,
+        resolvedEmail,
+        currentPasswordInput
+      );
+      if (result.requiresFirebaseVerification) {
+        setSubmitError('Unable to verify with current password. Please use the Firebase verification email option above.');
+        return;
+      }
+      setVerificationStep(null);
+      setSubmitSuccess(true);
+    } catch (err: any) {
+      setSubmitError(err.message || 'Could not confirm current password.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleResendFirebaseVerificationEmail = async () => {
+    const emailToReset = (verificationStep?.targetEmail || tokenData?.targetEmail || emailParam || '').trim();
+    if (!emailToReset || resendCooldown > 0 || isResendingFirebaseEmail) return;
+    setIsResendingFirebaseEmail(true);
+    setSubmitError(null);
+    setResendNotice(null);
+    try {
+      await sendPasswordResetEmail(auth, emailToReset);
+      setResendNotice(`A fresh Firebase verification email has been sent to ${emailToReset}. Check your Inbox and Spam folder.`);
+      setResendCooldown(60);
+    } catch (err: any) {
+      setSubmitError(err.message || 'Failed to resend verification email. Please try again shortly.');
+    } finally {
+      setIsResendingFirebaseEmail(false);
     }
   };
 
@@ -283,8 +429,141 @@ export function ResetPasswordPage({ tokenParam, emailParam, onNavigateToLogin }:
             </div>
           )}
 
+          {/* Step 2 (When Needed): Guided Firebase Security Verification */}
+          {!isValidating && !validationError && !submitSuccess && tokenData && verificationStep?.active && (
+            <div className="space-y-5">
+              <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl space-y-2">
+                <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
+                  <Mail size={17} className="shrink-0" />
+                  <span>Final Security Verification</span>
+                </div>
+                <p className="text-xs text-zinc-200 leading-relaxed">
+                  {verificationStep.firebaseEmailSent ? (
+                    <>
+                      We sent an official Firebase password verification email to{' '}
+                      <strong className="text-emerald-300">{verificationStep.targetEmail}</strong>.
+                    </>
+                  ) : (
+                    <>
+                      Please check <strong className="text-emerald-300">{verificationStep.targetEmail}</strong> for your official Firebase password verification email (or resend it below).
+                    </>
+                  )}
+                </p>
+                <p className="text-[11px] text-zinc-400 leading-relaxed">
+                  You can either click the link directly inside that email to set your password and sign in, <strong>or</strong> copy &amp; paste that link below to apply your new password right here.
+                </p>
+              </div>
+
+              {resendNotice && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/25 rounded-xl text-xs text-emerald-300">
+                  {resendNotice}
+                </div>
+              )}
+
+              {submitError && (
+                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-400 font-medium">
+                  {submitError}
+                </div>
+              )}
+
+              {/* Option 1: Paste Firebase verification link or code */}
+              <form onSubmit={handleCompleteWithVerificationCode} className="space-y-3 p-4 bg-zinc-950/60 border border-zinc-800 rounded-xl">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-semibold text-zinc-200">
+                    Option 1: Paste Firebase Reset Link or Code
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleResendFirebaseVerificationEmail}
+                    disabled={resendCooldown > 0 || isResendingFirebaseEmail}
+                    className="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 disabled:text-zinc-500 inline-flex items-center gap-1 transition-colors"
+                  >
+                    <RefreshCw size={11} className={isResendingFirebaseEmail ? 'animate-spin' : ''} />
+                    <span>{resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend Email'}</span>
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={verificationLinkOrCode}
+                  onChange={(e) => setVerificationLinkOrCode(e.target.value)}
+                  placeholder="Paste full reset link from Firebase email..."
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 font-mono"
+                />
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !verificationLinkOrCode.trim()}
+                  className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:bg-zinc-800 disabled:text-zinc-500 text-zinc-950 text-xs font-bold transition-all flex items-center justify-center gap-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-zinc-950 border-t-transparent rounded-full animate-spin" />
+                      <span>Verifying &amp; Updating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck size={14} />
+                      <span>Verify Link &amp; Set New Password</span>
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* Option 2: Instant confirmation with current password */}
+              <form onSubmit={handleCompleteWithCurrentPassword} className="space-y-3 p-4 bg-zinc-950/40 border border-zinc-800/80 rounded-xl">
+                <label className="block text-xs font-semibold text-zinc-300">
+                  Option 2: Remember Your Current Password? (Instant)
+                </label>
+                <div className="relative">
+                  <input
+                    type={showCurrentPassword ? 'text' : 'password'}
+                    value={currentPasswordInput}
+                    onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                    placeholder="Enter current password to confirm immediately"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 pr-10 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                  >
+                    {showCurrentPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !currentPasswordInput}
+                  className="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-100 text-xs font-semibold transition-all flex items-center justify-center gap-2"
+                >
+                  <Lock size={13} />
+                  <span>Confirm Current Password &amp; Update</span>
+                </button>
+              </form>
+
+              <div className="flex items-center justify-between pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVerificationStep(null);
+                    setSubmitError(null);
+                  }}
+                  className="text-xs text-zinc-400 hover:text-zinc-200 inline-flex items-center gap-1"
+                >
+                  <ArrowLeft size={13} />
+                  <span>Change New Password</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBackToLogin(false)}
+                  className="text-xs text-emerald-400 hover:text-emerald-300 font-medium"
+                >
+                  Already reset via email? Sign In →
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Active Reset / Activation Form */}
-          {!isValidating && !validationError && !submitSuccess && tokenData && (
+          {!isValidating && !validationError && !submitSuccess && tokenData && !verificationStep?.active && (
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* Account Context Badge */}
               <div className="p-3.5 bg-zinc-950/60 border border-zinc-800 rounded-xl space-y-2">

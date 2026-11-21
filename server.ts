@@ -2924,6 +2924,25 @@ async function startServer() {
     }
 
     try {
+      // If Firebase Admin SDK is configured, embed a live Firebase oobCode into the reset link
+      let effectiveResetUrl = resetUrl;
+      if (adminAuth && targetEmail) {
+        try {
+          const generatedLink = await adminAuth.generatePasswordResetLink(targetEmail.trim().toLowerCase());
+          const parsedGenerated = new URL(generatedLink);
+          const embeddedOob = parsedGenerated.searchParams.get('oobCode');
+          if (embeddedOob) {
+            const parsedReset = new URL(effectiveResetUrl);
+            if (!parsedReset.searchParams.get('oobCode')) {
+              parsedReset.searchParams.set('oobCode', embeddedOob);
+              effectiveResetUrl = parsedReset.toString();
+            }
+          }
+        } catch (oobGenErr) {
+          console.warn("[PASSWORD RESET EMAIL] Optional Admin oobCode embed notice:", oobGenErr);
+        }
+      }
+
       const formattedExpiry = new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const durationHours = durationMinutes >= 60 ? `${Math.round(durationMinutes / 60)} hour(s)` : `${durationMinutes} minutes`;
       const effectiveAdminEmail = caller.email || adminEmail || "Hotel Administrator";
@@ -2934,7 +2953,7 @@ async function startServer() {
       const safeTargetEmail = escapeHtml(targetEmail);
       const safeAdminLabel = escapeHtml(effectiveAdminName);
       const safeNote = note ? escapeHtml(note) : '';
-      const safeResetUrl = escapeHtml(resetUrl);
+      const safeResetUrl = escapeHtml(effectiveResetUrl);
       const safeDurationHours = escapeHtml(durationHours);
       const safeFormattedExpiry = escapeHtml(formattedExpiry);
 
@@ -3397,7 +3416,34 @@ async function startServer() {
           }
         }
 
-        // Method 4: Verify if client-side confirmPasswordReset / createUser already applied newPassword
+        // Method 3b: Authenticated self-reset via caller's Firebase ID token
+        let requiresRecentLogin = false;
+        const callerMatchesTarget = Boolean(
+          caller &&
+          ((boundTargetUid && caller.uid === boundTargetUid) ||
+            (boundTargetEmail && caller.email?.toLowerCase() === boundTargetEmail))
+        );
+        if (!passwordUpdatedInAuth && callerMatchesTarget && caller?.idToken && firebaseConfig?.apiKey) {
+          try {
+            const selfUpdateRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:update?key=${firebaseConfig.apiKey}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ idToken: caller.idToken, password: newPassword, returnSecureToken: true })
+            });
+            const selfUpdateData = await selfUpdateRes.json();
+            if (selfUpdateRes.ok) {
+              passwordUpdatedInAuth = true;
+              if (selfUpdateData?.idToken) updatedUserToken = selfUpdateData.idToken;
+              if (selfUpdateData?.localId) resolvedAuthUid = selfUpdateData.localId;
+            } else if (selfUpdateData?.error?.message?.includes('CREDENTIAL_TOO_OLD_LOGIN_AGAIN')) {
+              requiresRecentLogin = true;
+            }
+          } catch (selfErr) {
+            console.warn("[PASSWORD RESET REST] Self idToken update notice:", selfErr);
+          }
+        }
+
+        // Method 4: Verify if client-side updatePassword / confirmPasswordReset / createUser already applied newPassword
         if (!passwordUpdatedInAuth && boundTargetEmail && firebaseConfig?.apiKey) {
           try {
             const verifyRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`, {
@@ -3414,9 +3460,36 @@ async function startServer() {
           } catch {}
         }
 
+        // Method 5: Fallback to official Firebase Auth password reset verification email (never dead-end!)
         if (!passwordUpdatedInAuth) {
-          return res.status(500).json({
-            error: "Unable to update authentication password automatically. Please ask your Hotel Administrator to resend a fresh password reset link."
+          let firebaseEmailSent = false;
+          if (boundTargetEmail && firebaseConfig?.apiKey && req.body?.skipFirebaseEmail !== true) {
+            try {
+              const sendOobRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${firebaseConfig.apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  requestType: 'PASSWORD_RESET',
+                  email: boundTargetEmail
+                })
+              });
+              if (sendOobRes.ok) {
+                firebaseEmailSent = true;
+              }
+            } catch (oobDispatchErr) {
+              console.warn("[PASSWORD RESET REST] Official Firebase sendOobCode notice:", oobDispatchErr);
+            }
+          }
+
+          return res.status(200).json({
+            success: false,
+            requiresFirebaseVerification: true,
+            firebaseEmailSent,
+            requiresRecentLogin,
+            targetEmail: boundTargetEmail,
+            message: firebaseEmailSent
+              ? `A Firebase security verification email has been sent to ${boundTargetEmail}. Click that link to finish resetting your password, or paste the verification link/code below to apply your new password right here.`
+              : `Please verify this password reset using the Firebase password reset email sent to ${boundTargetEmail}, or confirm your current password below.`
           });
         }
       }
@@ -3492,7 +3565,7 @@ async function startServer() {
             await saveUserProfileToFirestore(boundTargetUid, {
               ...(userDocData || {}),
               ...userUpdatePayload
-            }, updatedUserToken || undefined);
+            }, updatedUserToken || caller?.idToken || undefined);
           } catch (restErr) {
             console.warn("Failed to update user status via REST:", restErr);
           }

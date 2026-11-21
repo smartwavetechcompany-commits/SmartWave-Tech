@@ -302,8 +302,9 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
             }
           } else if (profileSnap.exists()) {
             const profileData = profileSnap.data() as UserProfile;
-            if (profileData.status === 'pending_activation') {
-              console.log("Staff member successfully signed in. Transitioning status to 'active'.");
+            if (profileData.status === 'pending_activation' || profileData.status === 'password_reset_pending') {
+              console.log(`User successfully signed in from '${profileData.status}'. Transitioning status to 'active'.`);
+              const nowIso = new Date().toISOString();
               await updateDoc(profileDocRef, {
                 status: 'active',
                 isVerified: true,
@@ -311,8 +312,28 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
                 forcePasswordChange: false,
                 temporaryPassword: null,
                 initialTempPass: null,
-                updatedAt: new Date().toISOString()
+                passwordResetTokenId: null,
+                passwordResetExpiresAt: null,
+                updatedAt: nowIso
               }).catch(() => {});
+
+              if (profileData.passwordResetTokenId) {
+                const tokenIdToClose = profileData.passwordResetTokenId;
+                updateDoc(doc(db, 'passwordResetTokens', tokenIdToClose), {
+                  isUsed: true,
+                  status: 'used',
+                  usedAt: nowIso,
+                  updatedAt: nowIso
+                }).catch(() => {});
+                if (profileData.hotelId) {
+                  updateDoc(doc(db, 'hotels', profileData.hotelId, 'passwordResetTokens', tokenIdToClose), {
+                    isUsed: true,
+                    status: 'used',
+                    usedAt: nowIso,
+                    updatedAt: nowIso
+                  }).catch(() => {});
+                }
+              }
             }
             if (profileData.status === 'suspended') {
               await auth.signOut();
