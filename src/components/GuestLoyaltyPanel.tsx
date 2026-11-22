@@ -123,6 +123,7 @@ export function GuestLoyaltyPanel({
   const [redeemReason, setRedeemReason] = useState('');
   const [redeemReservationId, setRedeemReservationId] = useState('');
   const [isRedeeming, setIsRedeeming] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'redemption'>('all');
 
   const availablePoints = account?.availablePoints ?? 0;
   const lifetimeEarned = account?.lifetimePointsEarned ?? 0;
@@ -179,6 +180,16 @@ export function GuestLoyaltyPanel({
   const redeemValidation = useMemo(
     () => validatePointsRedemption(redeemPtsNumber, policy, availablePoints),
     [redeemPtsNumber, policy, availablePoints]
+  );
+
+  const redemptionTransactions = useMemo(
+    () => guestTransactions.filter((tx) => tx.transactionType === 'redemption'),
+    [guestTransactions]
+  );
+
+  const displayedTransactions = useMemo(
+    () => (historyFilter === 'redemption' ? redemptionTransactions : guestTransactions),
+    [historyFilter, redemptionTransactions, guestTransactions]
   );
 
   const handleActivate = async () => {
@@ -701,22 +712,54 @@ export function GuestLoyaltyPanel({
         </form>
       )}
 
-      {/* Immutable Per-Guest Loyalty Transaction History */}
+      {/* Immutable Per-Guest Loyalty & Redemption History */}
       <div className="space-y-2.5">
-        <div className="flex items-center justify-between">
-          <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
-            <History size={13} className="text-amber-400" />
-            Guest Loyalty Transaction History (Immutable)
-          </h4>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+              <History size={13} className="text-amber-400" />
+              {historyFilter === 'redemption'
+                ? 'Redemption History'
+                : 'Guest Loyalty Transaction History (Immutable)'}
+            </h4>
+            <div className="inline-flex items-center rounded-lg bg-zinc-950 border border-zinc-800 p-0.5 text-[10px]">
+              <button
+                type="button"
+                onClick={() => setHistoryFilter('all')}
+                className={cn(
+                  'px-2 py-0.5 rounded-md font-bold transition-colors',
+                  historyFilter === 'all'
+                    ? 'bg-zinc-800 text-zinc-100'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                )}
+              >
+                All ({guestTransactions.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryFilter('redemption')}
+                className={cn(
+                  'px-2 py-0.5 rounded-md font-bold transition-colors',
+                  historyFilter === 'redemption'
+                    ? 'bg-purple-500/20 text-purple-300'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                )}
+              >
+                Redemption History ({redemptionTransactions.length})
+              </button>
+            </div>
+          </div>
           <span className="text-[10px] text-zinc-500 flex items-center gap-1">
             <ShieldCheck size={12} className="text-emerald-500" />
-            {guestTransactions.length} record{guestTransactions.length === 1 ? '' : 's'}
+            {displayedTransactions.length} record{displayedTransactions.length === 1 ? '' : 's'}
           </span>
         </div>
 
-        {guestTransactions.length === 0 ? (
+        {displayedTransactions.length === 0 ? (
           <div className="py-8 text-center text-zinc-500 bg-zinc-950/40 rounded-xl border border-dashed border-zinc-800 text-xs">
-            No loyalty point transactions recorded for this guest yet.
+            {historyFilter === 'redemption'
+              ? 'No loyalty point redemptions recorded for this guest yet.'
+              : 'No loyalty point transactions recorded for this guest yet.'}
           </div>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-950/60">
@@ -732,7 +775,7 @@ export function GuestLoyaltyPanel({
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/60">
-                {guestTransactions.slice(0, 15).map((tx) => {
+                {displayedTransactions.slice(0, 15).map((tx) => {
                   const badge = TX_BADGE_MAP[tx.transactionType] || {
                     label: tx.transactionType,
                     className: 'bg-zinc-800 text-zinc-300 border-zinc-700',

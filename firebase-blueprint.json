@@ -534,6 +534,55 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["hotelId", "guestId", "guestName", "transactionType", "points", "pointsDelta", "previousBalance", "updatedBalance", "reason", "adminId", "idempotencyKey", "timestamp"]
+    },
+    "DailyOpsReportConfig": {
+      "title": "Daily Operations Report Configuration",
+      "description": "Tenant-isolated schedule, timezone, section toggles, and external email recipients for automated Daily Hotel Operations Reports",
+      "type": "object",
+      "properties": {
+        "hotelId": { "type": "string", "maxLength": 160 },
+        "enabled": { "type": "boolean" },
+        "scheduledTime": { "type": "string", "maxLength": 10 },
+        "timezone": { "type": "string", "maxLength": 80 },
+        "recipients": { "type": "array", "items": { "type": "object" } },
+        "sections": { "type": "object" },
+        "lastSuccessfulDeliveryAt": { "type": "string", "format": "date-time" },
+        "lastDeliveryStatus": { "type": "string", "enum": ["pending", "sent", "partial", "failed"] },
+        "lastReportDate": { "type": "string", "format": "date" },
+        "lastError": { "type": "string", "maxLength": 1000 },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string", "maxLength": 200 }
+      },
+      "required": ["hotelId", "enabled", "scheduledTime", "timezone", "recipients", "updatedAt"]
+    },
+    "DailyOpsReportRun": {
+      "title": "Daily Operations Report Execution Run",
+      "description": "Per-hotel idempotent execution, delivery audit log, and preserved HTML snapshot for a reporting calendar day",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 160 },
+        "hotelId": { "type": "string", "maxLength": 160 },
+        "reportDate": { "type": "string", "format": "date" },
+        "periodLabel": { "type": "string", "maxLength": 200 },
+        "triggerType": { "type": "string", "enum": ["scheduled", "manual_resend", "test"] },
+        "scheduledTime": { "type": "string", "maxLength": 10 },
+        "timezone": { "type": "string", "maxLength": 80 },
+        "recipients": { "type": "array", "items": { "type": "string" } },
+        "generationStatus": { "type": "string", "enum": ["generated", "failed"] },
+        "deliveryStatus": { "type": "string", "enum": ["pending", "sent", "partial", "failed"] },
+        "scheduledForIso": { "type": "string", "format": "date-time" },
+        "generatedAt": { "type": "string", "format": "date-time" },
+        "deliveredAt": { "type": "string", "format": "date-time" },
+        "errorMessage": { "type": "string", "maxLength": 1000 },
+        "recipientResults": { "type": "array", "items": { "type": "object" } },
+        "subject": { "type": "string", "maxLength": 250 },
+        "htmlSnapshot": { "type": "string" },
+        "summarySnapshot": { "type": "object" },
+        "retryCount": { "type": "integer" },
+        "manualResends": { "type": "array", "items": { "type": "object" } },
+        "idempotencyKey": { "type": "string", "maxLength": 160 }
+      },
+      "required": ["hotelId", "reportDate", "triggerType", "generationStatus", "deliveryStatus", "generatedAt", "idempotencyKey"]
     }
   },
   "firestore": {
@@ -664,6 +713,14 @@
     "/hotels/{hotelId}/loyaltyTransactions/{txId}": {
       "schema": "LoyaltyTransaction",
       "description": "Immutable tenant-isolated loyalty point transactions ledger"
+    },
+    "/hotels/{hotelId}/dailyOpsReportConfig/{docId}": {
+      "schema": "DailyOpsReportConfig",
+      "description": "Tenant-isolated Daily Hotel Operations Report schedule, timezone, and external email recipients"
+    },
+    "/hotels/{hotelId}/dailyOpsReportRuns/{runId}": {
+      "schema": "DailyOpsReportRun",
+      "description": "Tenant-isolated Daily Hotel Operations Report execution and delivery history"
     }
   }
 }
