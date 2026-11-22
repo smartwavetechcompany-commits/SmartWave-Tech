@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LedgerEntry, Reservation, Hotel, UserProfile } from '../types';
 import { canApplyDiscount } from '../utils/policyUtils';
+import { showPolicyBlockedToast } from '../utils/policyToast';
 import { formatCurrency, cn } from '../utils';
 import { postToLedger } from '../services/ledgerService';
 import { toast } from 'sonner';
@@ -77,7 +78,7 @@ export function DiscountApplication({
       // Direct permission policy verification
       const policyResponse = canApplyDiscount(hotel, profile, discountAmount, originalAmount, customRoles);
       if (!policyResponse.allowed) {
-        toast.error(policyResponse.message || 'The policy denied applying this discount.');
+        showPolicyBlockedToast(policyResponse, 'The policy denied applying this discount.');
         setIsSubmitting(false);
         return;
       }

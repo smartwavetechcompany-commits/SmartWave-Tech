@@ -12,6 +12,7 @@ import { validatePromotion, recordPromotionRedemption, subscribePromotions } fro
 import { logActivity } from '../utils/activityLogger';
 import { validateLedgerTransaction } from '../services/financialService';
 import { canEditInvoice, canVoidTransaction, canApplyDiscount, canProcessRefund, getNoShowPenaltyPolicy, getCancellationFeePolicy, calculatePolicyPenaltyAmount, hasExistingPostedPenalty } from '../utils/policyUtils';
+import { showPolicyBlockedToast } from '../utils/policyToast';
 import { ReceiptGenerator, processLedgerTaxes } from './ReceiptGenerator';
 import { DiscountApplication } from './DiscountApplication';
 import { ConfirmModal } from './ConfirmModal';
@@ -369,7 +370,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
     const policy = canApplyDiscount(hotel, profile, finalAmount, currentReservation.totalAmount, customRoles);
     if (!policy.allowed) {
-      toast.error(policy.message || 'Discount denied by hotel policy');
+      showPolicyBlockedToast(policy, 'Discount denied by hotel policy');
       return;
     }
 
@@ -690,7 +691,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
     const policy = canEditInvoice(hotel, profile, currentReservation, customRoles);
     if (!policy.allowed) {
-      toast.error(policy.message || 'Invoice is locked');
+      showPolicyBlockedToast(policy, 'Invoice is locked');
       return;
     }
 
@@ -773,7 +774,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
     const policy = canEditInvoice(hotel, profile, currentReservation, customRoles);
     if (!policy.allowed) {
-      toast.error(policy.message || 'Invoice is locked');
+      showPolicyBlockedToast(policy, 'Invoice is locked');
       return;
     }
 
@@ -1288,7 +1289,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
     const policy = canProcessRefund(hotel, profile, refundDraft.amount, customRoles);
     if (!policy.allowed) {
-      toast.error(policy.message || 'Refund denied by policy');
+      showPolicyBlockedToast(policy, 'Refund denied by policy');
       return;
     }
 
@@ -1321,7 +1322,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
     const policy = canProcessRefund(hotel, profile, refundDraft.amount, customRoles);
     if (!policy.allowed) {
-      toast.error(policy.message || 'Refund denied by policy');
+      showPolicyBlockedToast(policy, 'Refund denied by policy');
       return;
     }
 
@@ -1428,7 +1429,7 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
     const policy = canVoidTransaction(hotel, profile, confirmDelete, customRoles);
     if (!policy.allowed) {
-      toast.error(policy.message || 'Voiding denied');
+      showPolicyBlockedToast(policy, 'Voiding denied');
       return;
     }
 

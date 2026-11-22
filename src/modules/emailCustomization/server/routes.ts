@@ -322,6 +322,12 @@ export function mountEmailCustomizationRoutes(
         return res.status(400).json({ error: "enabled boolean is required." });
       }
 
+      if (req.body.enabled === false && EMAIL_EVENT_CATALOG[eventType]?.canDisable === false) {
+        return res.status(400).json({
+          error: "This security-critical email template is required and cannot be disabled.",
+        });
+      }
+
       const hotelDoc = await fsReadDoc(`hotels/${ctx.hotelId}`, ctx.bearerToken).catch(() => null);
       const actor = ctx.caller.email || ctx.caller.uid;
 

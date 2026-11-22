@@ -58,6 +58,7 @@ import {
 import { cn, exportToCSV } from '../utils';
 import { hasPermission } from '../utils/permissions';
 import { canUpdateRoomStatus } from '../utils/policyUtils';
+import { showPolicyBlockedToast } from '../utils/policyToast';
 import { format, isWithinInterval, parseISO, isToday } from 'date-fns';
 import { safeFormatDate } from '../utils/dateUtils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -460,7 +461,7 @@ export function Housekeeping() {
     // Policy check for status updates
     const policy = canUpdateRoomStatus(hotel, profile, room, status, customRoles);
     if (!policy.allowed) {
-      toast.error(policy.message || 'Action denied by hotel policy');
+      showPolicyBlockedToast(policy, 'Action denied by hotel policy');
       return;
     }
 

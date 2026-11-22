@@ -72,6 +72,7 @@ import { roomService } from '../services/roomService';
 import { validatePromotion, recordPromotionRedemption, subscribePromotions } from '../services/promotionService';
 import { hasPermission } from '../utils/permissions';
 import { canCheckout, canCheckIn, canEditReservation, canCancelReservation, canMarkNoShow, canApplyDiscount } from '../utils/policyUtils';
+import { showPolicyBlockedToast } from '../utils/policyToast';
 import { canManageRoomRestaurantPosting, isRoomRestaurantPostingBlocked } from '../utils/restaurantPostingGuard';
 import { logActivity } from '../utils/activityLogger';
 import { getRoomDisplayStatus, isRoomAvailable, checkStayExtensionConflict } from '../utils/roomUtils';
@@ -1841,7 +1842,7 @@ export function FrontDesk() {
 
     const policy = canEditReservation(hotel, profile, editingReservation, customRoles);
     if (!policy.allowed) {
-      toast.error(policy.message || 'Editing denied by hotel policy');
+      showPolicyBlockedToast(policy, 'Editing denied by hotel policy');
       return;
     }
 
@@ -1989,7 +1990,7 @@ export function FrontDesk() {
       const targetRes = eligibleReservations[0];
       const policy = canCheckout(hotel, profile, targetRes, undefined, customRoles);
       if (!policy.allowed) {
-        toast.error(policy.message || 'Check-out denied by hotel policy');
+        showPolicyBlockedToast(policy, 'Check-out denied by hotel policy');
         return;
       }
       setCheckoutPreviewRes(targetRes);
@@ -2361,7 +2362,7 @@ export function FrontDesk() {
 
     const policy = canApplyDiscount(hotel, profile, finalAmount, showDiscountModal.totalAmount, customRoles);
     if (!policy.allowed) {
-      toast.error(policy.message || 'Discount denied by hotel policy');
+      showPolicyBlockedToast(policy, 'Discount denied by hotel policy');
       return;
     }
 
@@ -2619,7 +2620,7 @@ export function FrontDesk() {
       const guest = guests.find(g => g.id === res.guestId);
       const policy = canCheckIn(hotel, profile, res, room, guest, reservations, customRoles);
       if (!policy.allowed) {
-        toast.error(policy.message || 'Check-in denied by hotel policy');
+        showPolicyBlockedToast(policy, 'Check-in denied by hotel policy');
         return;
       }
     }
@@ -2627,7 +2628,7 @@ export function FrontDesk() {
     if (status === 'checked_out') {
       const policy = canCheckout(hotel, profile, res, undefined, customRoles);
       if (!policy.allowed) {
-        toast.error(policy.message || 'Check-out denied by hotel policy');
+        showPolicyBlockedToast(policy, 'Check-out denied by hotel policy');
         return;
       }
     }
@@ -2635,7 +2636,7 @@ export function FrontDesk() {
     if (status === 'cancelled') {
       const policy = canCancelReservation(hotel, profile, res, customRoles);
       if (!policy.allowed) {
-        toast.error(policy.message || 'Action denied by hotel policy');
+        showPolicyBlockedToast(policy, 'Action denied by hotel policy');
         return;
       }
     }
@@ -2643,7 +2644,7 @@ export function FrontDesk() {
     if (status === 'no_show') {
       const policy = canMarkNoShow(hotel, profile, res, customRoles);
       if (!policy.allowed) {
-        toast.error(policy.message || 'Action denied by hotel policy');
+        showPolicyBlockedToast(policy, 'Action denied by hotel policy');
         return;
       }
     }
@@ -6352,7 +6353,7 @@ export function FrontDesk() {
                               onClick={() => {
                                 const policy = canEditReservation(hotel, profile, res, customRoles);
                                 if (!policy.allowed) {
-                                  toast.error(policy.message || 'Editing disabled');
+                                  showPolicyBlockedToast(policy, 'Editing disabled');
                                   return;
                                 }
                                 setEditingReservation(res);

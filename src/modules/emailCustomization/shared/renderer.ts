@@ -61,10 +61,12 @@ function substituteVariablesRaw(
 ): string {
   if (!template) return "";
   const cleaned = stripDangerousMarkup(template);
-  const replaced = cleaned.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/g, (_match, key: string) => {
-    const val = (variables as Record<string, string | undefined>)[key];
-    return typeof val === "string" ? val : "";
-  });
+  const replaced = cleaned
+    .replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/g, (_match, key: string) => {
+      const val = (variables as Record<string, string | undefined>)[key];
+      return typeof val === "string" ? val : "";
+    })
+    .replace(/\{\{\s*[^}]+\s*\}\}/g, "");
   // Clean up dangling empty parentheses like "2026-11-19 ()" when check_in_time is absent
   return replaced.replace(/\s*\(\s*\)/g, "").trim();
 }
@@ -144,13 +146,12 @@ function renderTextWithInlineLinks(
 
   const pushPlain = (segment: string) => {
     if (!segment) return;
-    const cleaned = stripDangerousMarkup(segment).replace(
-      /\{\{\s*([a-z0-9_]+)\s*\}\}/g,
-      (_m, key: string) => {
+    const cleaned = stripDangerousMarkup(segment)
+      .replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/g, (_m, key: string) => {
         const val = (variables as Record<string, string | undefined>)[key];
         return typeof val === "string" ? val : "";
-      }
-    );
+      })
+      .replace(/\{\{\s*[^}]+\s*\}\}/g, "");
     htmlChunks.push(renderMultilineEscaped(cleaned));
     textChunks.push(cleaned);
   };

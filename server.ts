@@ -55,6 +55,11 @@ import {
 import { mountEmailCustomizationRoutes } from "./src/modules/emailCustomization/server/routes.ts";
 import { sendHotelEmail } from "./src/modules/emailCustomization/server/dispatcher.ts";
 import { startDailyOpsBackgroundScheduler } from "./src/modules/emailCustomization/server/dailyOpsService.ts";
+import { computeEmailFinancialBreakdown } from "./src/modules/emailCustomization/shared/financialEmailBreakdown.ts";
+import { resolveEffectiveTemplate } from "./src/modules/emailCustomization/server/resolver.ts";
+import { renderHotelEmailServerSide } from "./src/modules/emailCustomization/server/renderer.ts";
+import { normalizeHotelEmailEvent } from "./src/modules/emailCustomization/server/templateRegistry.ts";
+import type { EmailRenderContext } from "./src/modules/emailCustomization/shared/types.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -859,6 +864,95 @@ async function startServer() {
     return await Promise.race([emailPromise, timeoutPromise]);
   }
 
+  // Helper: Render customized staff activation / password reset template when explicitly customized by hotel admin
+  async function resolveCustomStaffAuthEmail(params: {
+    hotelId: string;
+    eventType: "staff_account_activation" | "staff_password_reset";
+    hotelName: string;
+    targetName: string;
+    targetEmail: string;
+    adminName: string;
+    adminEmail: string;
+    actionLink: string;
+    expiryInfo?: string;
+    note?: string;
+    bearerToken?: string;
+  }): Promise<{ subject: string; html: string; text: string; fromName?: string; replyTo?: string } | null> {
+    try {
+      const hotelDoc = await readFirestoreDocServerSide(
+        `hotels/${params.hotelId}`,
+        params.bearerToken
+      ).catch(() => null);
+      const resolved = await resolveEffectiveTemplate(
+        params.hotelId,
+        params.eventType,
+        hotelDoc,
+        undefined,
+        params.bearerToken
+      );
+      if (resolved.usedDefaultLayout) {
+        return null;
+      }
+
+      const appUrl = getAppUrl();
+      const brand = resolveHotelBrandContext(params.hotelId, hotelDoc, appUrl);
+      const renderCtx: EmailRenderContext = {
+        hotelId: params.hotelId,
+        hotelName: params.hotelName || brand.hotelName,
+        hotelAddress: brand.address,
+        hotelPhone: brand.phone,
+        hotelEmail: brand.contactEmail || params.adminEmail,
+        hotelWebsite: brand.website,
+        hotelLogoUrl: brand.logoUrl,
+        hotelPrimaryColor: brand.primaryColor,
+        hotelSecondaryColor: brand.secondaryColor,
+        hotelFooterNotes: brand.footerNotes,
+        appUrl,
+        guestName: params.targetName || params.targetEmail,
+        guestEmail: params.targetEmail,
+        staffName: params.targetName || params.targetEmail,
+        actionedBy: params.adminName || params.adminEmail,
+        actionLink: params.actionLink,
+        expiryDate: params.expiryInfo,
+        reason: params.note,
+        details: params.note,
+      };
+
+      const rendered = renderHotelEmailServerSide({
+        variant: resolved.variant,
+        context: renderCtx,
+        settings: resolved.settings,
+        language: resolved.language,
+        usedDefaultLayout: false,
+      });
+
+      // Security guarantee: always preserve the single-use activation/reset link even if an admin omitted the CTA block
+      let finalHtml = rendered.html;
+      let finalText = rendered.text;
+      if (params.actionLink && !finalHtml.includes(params.actionLink)) {
+        const safeUrl = escapeHtml(params.actionLink);
+        const fallbackBlock = `<div style="margin:20px auto;max-width:600px;padding:16px;background:#f4f4f5;border-radius:8px;text-align:center;font-family:Arial,sans-serif;font-size:13px;color:#18181b;"><p style="margin:0 0 10px 0;">Use this secure link to continue:</p><a href="${safeUrl}" style="display:inline-block;padding:10px 20px;background:#10b981;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:700;">Continue Securely</a><p style="margin:10px 0 0 0;font-size:11px;word-break:break-all;color:#52525b;">${safeUrl}</p></div>`;
+        finalHtml = finalHtml.includes("</body>")
+          ? finalHtml.replace("</body>", `${fallbackBlock}</body>`)
+          : `${finalHtml}${fallbackBlock}`;
+      }
+      if (params.actionLink && !finalText.includes(params.actionLink)) {
+        finalText = `${finalText}\n\nSecure Link: ${params.actionLink}`;
+      }
+
+      return {
+        subject: rendered.subject,
+        html: finalHtml,
+        text: finalText,
+        fromName: rendered.fromName,
+        replyTo: rendered.replyTo,
+      };
+    } catch (err) {
+      console.warn(`[EMAIL CUSTOMIZATION] Fallback to default ${params.eventType} email:`, err);
+      return null;
+    }
+  }
+
   // Helper: Build branded activation email HTML
   function buildActivationEmailHtml({
     hotelName,
@@ -1453,25 +1547,45 @@ async function startServer() {
         }
       }
 
-      // 5. Dispatch branded activation email
-      const emailHtml = buildActivationEmailHtml({
+      // 5. Dispatch branded activation email (respects customized staff_account_activation template if published)
+      const customActivationEmail1 = await resolveCustomStaffAuthEmail({
+        hotelId,
+        eventType: "staff_account_activation",
         hotelName,
         targetName: fullName.trim(),
         targetEmail: normalizedEmail,
         adminName: effectiveAdminName,
         adminEmail: effectiveAdminEmail,
-        activationUrl,
-        durationHours: '24 hours'
+        actionLink: activationUrl,
+        expiryInfo: "24 hours",
+        bearerToken: caller.idToken,
       });
+
+      const emailHtml =
+        customActivationEmail1?.html ||
+        buildActivationEmailHtml({
+          hotelName,
+          targetName: fullName.trim(),
+          targetEmail: normalizedEmail,
+          adminName: effectiveAdminName,
+          adminEmail: effectiveAdminEmail,
+          activationUrl,
+          durationHours: '24 hours'
+        });
 
       const emailResult = await dispatchEmailMessage({
         to: normalizedEmail,
-        subject: isHotelAdminRole
-          ? `[ACTION REQUIRED] Activate your Administrator account - ${hotelName}`
-          : `[ACTION REQUIRED] Activate your staff account - ${hotelName}`,
+        subject:
+          customActivationEmail1?.subject ||
+          (isHotelAdminRole
+            ? `[ACTION REQUIRED] Activate your Administrator account - ${hotelName}`
+            : `[ACTION REQUIRED] Activate your staff account - ${hotelName}`),
         html: emailHtml,
-        fromName: `${hotelName} Administration`,
-        replyTo: isValidEmailAddress(effectiveAdminEmail) ? effectiveAdminEmail : undefined,
+        text: customActivationEmail1?.text,
+        fromName: customActivationEmail1?.fromName || `${hotelName} Administration`,
+        replyTo:
+          customActivationEmail1?.replyTo ||
+          (isValidEmailAddress(effectiveAdminEmail) ? effectiveAdminEmail : undefined),
         idempotencyKey: `staff-activation:${tokenId}`,
       });
 
@@ -1747,23 +1861,43 @@ async function startServer() {
         }
       }
 
-      // 3. Dispatch activation email
-      const emailHtml = buildActivationEmailHtml({
+      // 3. Dispatch activation email (respects customized staff_account_activation template if published)
+      const customActivationEmail2 = await resolveCustomStaffAuthEmail({
+        hotelId,
+        eventType: "staff_account_activation",
         hotelName,
         targetName: userDisplayName || normalizedEmail,
         targetEmail: normalizedEmail,
         adminName: effectiveAdminName,
         adminEmail: effectiveAdminEmail,
-        activationUrl,
-        durationHours: '24 hours'
+        actionLink: activationUrl,
+        expiryInfo: "24 hours",
+        bearerToken: caller.idToken,
       });
+
+      const emailHtml =
+        customActivationEmail2?.html ||
+        buildActivationEmailHtml({
+          hotelName,
+          targetName: userDisplayName || normalizedEmail,
+          targetEmail: normalizedEmail,
+          adminName: effectiveAdminName,
+          adminEmail: effectiveAdminEmail,
+          activationUrl,
+          durationHours: '24 hours'
+        });
 
       const emailResult = await dispatchEmailMessage({
         to: normalizedEmail,
-        subject: `[ACTION REQUIRED] Activate your staff account - ${hotelName}`,
+        subject:
+          customActivationEmail2?.subject ||
+          `[ACTION REQUIRED] Activate your staff account - ${hotelName}`,
         html: emailHtml,
-        fromName: `${hotelName} Administration`,
-        replyTo: isValidEmailAddress(effectiveAdminEmail) ? effectiveAdminEmail : undefined,
+        text: customActivationEmail2?.text,
+        fromName: customActivationEmail2?.fromName || `${hotelName} Administration`,
+        replyTo:
+          customActivationEmail2?.replyTo ||
+          (isValidEmailAddress(effectiveAdminEmail) ? effectiveAdminEmail : undefined),
         idempotencyKey: `staff-resend:${tokenId}`,
       });
 
@@ -2819,24 +2953,45 @@ async function startServer() {
 
       const effectiveAdminEmail = caller.email || adminEmail;
       const effectiveAdminName = caller.profile?.displayName || adminName || effectiveAdminEmail;
-      const htmlContent = buildActivationEmailHtml({
+      const customActivationEmail3 = await resolveCustomStaffAuthEmail({
+        hotelId,
+        eventType: "staff_account_activation",
         hotelName,
         targetName: targetName || targetEmail,
         targetEmail,
         adminName: effectiveAdminName,
         adminEmail: effectiveAdminEmail,
-        activationUrl,
-        durationHours,
-        formattedExpiry,
-        note
+        actionLink: activationUrl,
+        expiryInfo: formattedExpiry ? `${durationHours} (until ${formattedExpiry})` : durationHours,
+        note,
+        bearerToken: caller.idToken,
       });
+
+      const htmlContent =
+        customActivationEmail3?.html ||
+        buildActivationEmailHtml({
+          hotelName,
+          targetName: targetName || targetEmail,
+          targetEmail,
+          adminName: effectiveAdminName,
+          adminEmail: effectiveAdminEmail,
+          activationUrl,
+          durationHours,
+          formattedExpiry,
+          note
+        });
 
       const { emailDispatched, method, previewUrl, messageId, deliveryState, errorSummary } = await dispatchEmailMessage({
         to: targetEmail,
-        subject: `[ACTION REQUIRED] Activate your staff account - ${hotelName}`,
+        subject:
+          customActivationEmail3?.subject ||
+          `[ACTION REQUIRED] Activate your staff account - ${hotelName}`,
         html: htmlContent,
-        fromName: `${hotelName} Administration`,
-        replyTo: isValidEmailAddress(effectiveAdminEmail) ? effectiveAdminEmail : undefined,
+        text: customActivationEmail3?.text,
+        fromName: customActivationEmail3?.fromName || `${hotelName} Administration`,
+        replyTo:
+          customActivationEmail3?.replyTo ||
+          (isValidEmailAddress(effectiveAdminEmail) ? effectiveAdminEmail : undefined),
         idempotencyKey: `account-activation:${activationToken}`,
       });
 
@@ -3068,12 +3223,31 @@ async function startServer() {
         </html>
       `;
 
+      const customResetEmail = await resolveCustomStaffAuthEmail({
+        hotelId,
+        eventType: "staff_password_reset",
+        hotelName,
+        targetName: targetName || targetEmail,
+        targetEmail,
+        adminName: effectiveAdminName,
+        adminEmail: effectiveAdminEmail,
+        actionLink: effectiveResetUrl,
+        expiryInfo: `${durationHours} (until ${formattedExpiry})`,
+        note,
+        bearerToken: caller.idToken,
+      });
+
       const { emailDispatched, method, previewUrl, messageId, deliveryState, errorSummary } = await dispatchEmailMessage({
         to: targetEmail,
-        subject: `[ACTION REQUIRED] Password Reset for ${targetEmail} - ${hotelName}`,
-        html: htmlContent,
-        fromName: `${hotelName} Security`,
-        replyTo: isValidEmailAddress(effectiveAdminEmail) ? effectiveAdminEmail : undefined,
+        subject:
+          customResetEmail?.subject ||
+          `[ACTION REQUIRED] Password Reset for ${targetEmail} - ${hotelName}`,
+        html: customResetEmail?.html || htmlContent,
+        text: customResetEmail?.text,
+        fromName: customResetEmail?.fromName || `${hotelName} Security`,
+        replyTo:
+          customResetEmail?.replyTo ||
+          (isValidEmailAddress(effectiveAdminEmail) ? effectiveAdminEmail : undefined),
         idempotencyKey: `password-reset:${resetToken}`,
       });
 
@@ -4593,6 +4767,7 @@ async function startServer() {
 
     const allowedModuleEvents = new Set<MultiTenantEmailEventType>([
       "payment.received",
+      "deposit.received",
       "invoice.issued",
       "receipt.sent",
       "refund.processed",
@@ -4778,27 +4953,121 @@ async function startServer() {
         (reservationDoc?.roomNumber ? `Room ${reservationDoc.roomNumber}` : undefined) ||
         (cleanMetaStr("roomNumber") ? `Room ${cleanMetaStr("roomNumber")}` : undefined);
 
+      const financialBreakdown = computeEmailFinancialBreakdown({
+        reservation: reservationDoc,
+        paymentAmount: meta.amount !== undefined ? Number(meta.amount) : undefined,
+        fallbackOutstandingBalance:
+          meta.outstandingBalance !== undefined ? Number(meta.outstandingBalance) : undefined,
+        discountAmountOverride:
+          meta.discountAmount !== undefined ? Number(meta.discountAmount) : undefined,
+      });
+
       switch (typedEvent) {
+        case "deposit.received": {
+          const depositDateLabel = cleanMetaStr("transactionDate")
+            ? new Date(cleanMetaStr("transactionDate")!).toLocaleString("en-US", {
+                year: "numeric",
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : new Date().toLocaleString("en-US", {
+                year: "numeric",
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              });
+          const updatedBalanceStr =
+            meta.depositBalanceAfter !== undefined
+              ? formatMoneyForEmail(meta.depositBalanceAfter, hotelBrand.currency)
+              : undefined;
+          const rows: EmailSummaryRow[] = [
+            { label: "Hotel", value: hotelBrand.hotelName },
+            { label: "Guest", value: resolvedGuestName },
+            ...(amtStr ? [{ label: "Deposit Amount", value: amtStr }] : []),
+            { label: "Deposit Date", value: depositDateLabel },
+            ...(cleanMetaStr("paymentMethod")
+              ? [{ label: "Payment Method", value: cleanMetaStr("paymentMethod")!.toUpperCase() }]
+              : []),
+            ...(cleanMetaStr("reference")
+              ? [{ label: "Deposit Reference", value: cleanMetaStr("reference")! }]
+              : safeEntityId
+                ? [{ label: "Deposit Reference", value: safeEntityId }]
+                : []),
+            ...(updatedBalanceStr
+              ? [{ label: "Updated Deposit Balance", value: updatedBalanceStr }]
+              : []),
+          ];
+          if (resolvedGuestEmail) {
+            plans.push({
+              audience: "guest",
+              recipients: [resolvedGuestEmail],
+              brand: hotelBrand,
+              recipientName: resolvedGuestName,
+              rows,
+              keySuffix: "guest",
+            });
+          }
+          break;
+        }
+
         case "payment.received":
         case "receipt.sent":
         case "invoice.issued":
         case "refund.processed": {
+          const isRefund = typedEvent === "refund.processed";
           const rows: EmailSummaryRow[] = [
             { label: "Hotel", value: hotelBrand.hotelName },
             { label: "Guest", value: resolvedGuestName },
             ...(safeResId ? [{ label: "Booking Reference", value: safeResId.slice(0, 8).toUpperCase() }] : []),
             ...(roomStr ? [{ label: "Room", value: roomStr }] : []),
-            ...(amtStr ? [{ label: "Amount", value: amtStr }] : []),
+            ...(!isRefund && financialBreakdown.originalAmount > 0
+              ? [
+                  {
+                    label: "Original Amount",
+                    value: formatMoneyForEmail(financialBreakdown.originalAmount, hotelBrand.currency),
+                  },
+                ]
+              : []),
+            ...(!isRefund && financialBreakdown.discountAmount > 0
+              ? [
+                  {
+                    label: "Discount Granted",
+                    value: `-${formatMoneyForEmail(financialBreakdown.discountAmount, hotelBrand.currency)}`,
+                  },
+                ]
+              : []),
+            ...(amtStr
+              ? [
+                  {
+                    label: isRefund ? "Refund Amount" : "Amount Paid",
+                    value: amtStr,
+                  },
+                ]
+              : !isRefund && financialBreakdown.amountPaid > 0
+                ? [
+                    {
+                      label: "Amount Paid",
+                      value: formatMoneyForEmail(financialBreakdown.amountPaid, hotelBrand.currency),
+                    },
+                  ]
+                : []),
             ...(cleanMetaStr("paymentMethod")
               ? [{ label: "Method", value: cleanMetaStr("paymentMethod")!.toUpperCase() }]
               : []),
             ...(cleanMetaStr("reference") ? [{ label: "Reference", value: cleanMetaStr("reference")! }] : []),
             ...(cleanMetaStr("reason") ? [{ label: "Reason", value: cleanMetaStr("reason")! }] : []),
-            ...(meta.outstandingBalance !== undefined
+            ...(!isRefund && (reservationDoc || meta.outstandingBalance !== undefined)
               ? [
                   {
-                    label: "Outstanding Balance",
-                    value: formatMoneyForEmail(meta.outstandingBalance, hotelBrand.currency),
+                    label: "Remaining Balance",
+                    value: formatMoneyForEmail(financialBreakdown.remainingBalance, hotelBrand.currency),
+                  },
+                  {
+                    label: "Payment Status",
+                    value: financialBreakdown.paymentStatusLabel,
                   },
                 ]
               : []),
@@ -5246,6 +5515,11 @@ async function startServer() {
 
       let anySucceeded = false;
 
+      const guestLang =
+        (typeof guestDoc?.language === "string" && guestDoc.language) ||
+        (typeof reservationDoc?.guestLanguage === "string" && reservationDoc.guestLanguage) ||
+        undefined;
+
       for (const plan of plans) {
         const pref =
           plan.audience === "platform_superadmin"
@@ -5260,14 +5534,210 @@ async function startServer() {
           continue;
         }
 
-        const rendered = renderMultiTenantEmail(typedEvent, plan.brand, {
-          recipientName: plan.recipientName,
-          rows: plan.rows,
-          note: plan.note,
-          subjectOverride: plan.subjectOverride,
-          ctaLabel: plan.audience === "platform_superadmin" ? "Admin Portal" : "Hotel Portal",
-          ctaUrl: appUrl,
-        });
+        // Resolve customizable template from the unified Email Templates module for all hotel events
+        let rendered: {
+          subject: string;
+          html: string;
+          text: string;
+          fromName: string;
+          replyTo?: string;
+        } | null = null;
+
+        let mappedEvent =
+          plan.audience !== "platform_superadmin" ? normalizeHotelEmailEvent(typedEvent) : null;
+
+        if (mappedEvent) {
+          // For fully settled discounted payments, prefer discount_settlement_confirmation when explicitly customized
+          if (
+            typedEvent === "payment.received" &&
+            plan.audience === "guest" &&
+            financialBreakdown.discountAmount > 0 &&
+            financialBreakdown.remainingBalance === 0
+          ) {
+            const discResolved = await resolveEffectiveTemplate(
+              hotelId,
+              "discount_settlement_confirmation",
+              hotelDoc,
+              guestLang,
+              caller.idToken
+            ).catch(() => null);
+            if (discResolved && !discResolved.usedDefaultLayout) {
+              mappedEvent = "discount_settlement_confirmation";
+            }
+          }
+
+          const resolvedTpl = await resolveEffectiveTemplate(
+            hotelId,
+            mappedEvent,
+            hotelDoc,
+            plan.audience === "guest" ? guestLang : undefined,
+            caller.idToken
+          ).catch(() => null);
+
+          if (resolvedTpl && !resolvedTpl.enabled) {
+            dispatchResults.push({
+              audience: plan.audience,
+              success: true,
+              skipped: true,
+            });
+            continue;
+          }
+
+          if (resolvedTpl) {
+            const isInternalAudience =
+              plan.audience === "hotel_staff" || plan.audience === "staff_member";
+            const depositDateIso = cleanMetaStr("transactionDate") || new Date().toISOString();
+            const depositDateFormatted = new Date(depositDateIso).toLocaleString("en-US", {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+
+            const renderCtx: EmailRenderContext = {
+              hotelId,
+              hotelName: plan.brand.hotelName,
+              hotelAddress: plan.brand.address,
+              hotelPhone: plan.brand.phone,
+              hotelEmail: plan.brand.contactEmail,
+              hotelWebsite: plan.brand.website,
+              hotelLogoUrl: plan.brand.logoUrl,
+              hotelPrimaryColor: plan.brand.primaryColor,
+              hotelSecondaryColor: plan.brand.secondaryColor,
+              hotelFooterNotes: plan.brand.footerNotes,
+              // Never pass PMS appUrl as a clickable link for guest or corporate audiences
+              appUrl: isInternalAudience ? appUrl : "",
+              currency: plan.brand.currency,
+              guestName: plan.recipientName || resolvedGuestName,
+              guestEmail: resolvedGuestEmail || undefined,
+              guestPhone: guestDoc?.phone ? String(guestDoc.phone) : undefined,
+              bookingRef: safeResId ? safeResId.slice(0, 8).toUpperCase() : undefined,
+              roomType: reservationDoc?.roomType ? String(reservationDoc.roomType) : undefined,
+              roomNumber:
+                (reservationDoc?.roomNumber ? String(reservationDoc.roomNumber) : undefined) ||
+                cleanMetaStr("roomNumber"),
+              checkInDate: reservationDoc?.checkIn ? String(reservationDoc.checkIn) : undefined,
+              checkOutDate: reservationDoc?.checkOut ? String(reservationDoc.checkOut) : undefined,
+              originalAmount:
+                financialBreakdown.originalAmount > 0
+                  ? financialBreakdown.originalAmount
+                  : undefined,
+              discountAmount:
+                financialBreakdown.discountAmount > 0
+                  ? financialBreakdown.discountAmount
+                  : undefined,
+              totalAmount:
+                financialBreakdown.netPayable > 0
+                  ? financialBreakdown.netPayable
+                  : meta.amount !== undefined
+                    ? Number(meta.amount)
+                    : undefined,
+              amountPaid:
+                typedEvent === "payment.received" || typedEvent === "receipt.sent"
+                  ? meta.amount !== undefined
+                    ? Number(meta.amount)
+                    : financialBreakdown.amountPaid
+                  : financialBreakdown.amountPaid > 0
+                    ? financialBreakdown.amountPaid
+                    : undefined,
+              balanceDue:
+                typedEvent === "refund.processed"
+                  ? undefined
+                  : reservationDoc || meta.outstandingBalance !== undefined
+                    ? financialBreakdown.remainingBalance
+                    : undefined,
+              paymentStatus:
+                typedEvent === "refund.processed"
+                  ? "Refund Processed"
+                  : financialBreakdown.paymentStatusLabel,
+              paymentMethod: cleanMetaStr("paymentMethod")?.toUpperCase(),
+              referenceCode:
+                cleanMetaStr("reference") ||
+                cleanMetaStr("billNumber") ||
+                (safeEntityId || undefined),
+              depositAmount:
+                typedEvent === "deposit.received" && meta.amount !== undefined
+                  ? Number(meta.amount)
+                  : undefined,
+              depositBalance:
+                meta.depositBalanceAfter !== undefined
+                  ? Number(meta.depositBalanceAfter)
+                  : undefined,
+              depositDate: typedEvent === "deposit.received" ? depositDateFormatted : undefined,
+              depositReference:
+                typedEvent === "deposit.received"
+                  ? cleanMetaStr("reference") || safeEntityId || undefined
+                  : undefined,
+              refundAmount:
+                typedEvent === "refund.processed" && meta.amount !== undefined
+                  ? Number(meta.amount)
+                  : undefined,
+              loyaltyPoints:
+                cleanMetaStr("updatedBalanceFormatted") ||
+                (meta.updatedBalance !== undefined ? String(meta.updatedBalance) : undefined),
+              loyaltyTier: cleanMetaStr("membershipLevel"),
+              loyaltyPointsDelta: cleanMetaStr("pointsFormatted"),
+              loyaltyPreviousTier: cleanMetaStr("previousTier"),
+              loyaltyRedemptionValue: cleanMetaStr("monetaryValueFormatted"),
+              loyaltyExpiryDate: cleanMetaStr("expiryDate"),
+              corporateName: String(corporateDoc?.name || cleanMetaStr("corporateName") || "") || undefined,
+              corporateBalance:
+                corporateDoc?.currentBalance !== undefined
+                  ? Number(corporateDoc.currentBalance)
+                  : undefined,
+              outletName: cleanMetaStr("outletName"),
+              billNumber: cleanMetaStr("billNumber"),
+              issueTitle: cleanMetaStr("issue") || cleanMetaStr("item"),
+              priority: cleanMetaStr("priority")?.toUpperCase(),
+              inspectionScore: meta.score !== undefined ? `${meta.score}%` : undefined,
+              statusLabel: cleanMetaStr("status") || String(verifiedStaffDoc?.status || "") || undefined,
+              staffName:
+                String(verifiedStaffDoc?.displayName || verifiedStaffDoc?.name || "") || undefined,
+              actionedBy: caller.email || caller.uid,
+              reason: cleanMetaStr("reason", 240) || cleanMetaStr("remarks", 240),
+              summary: cleanMetaStr("summary", 240),
+              details: cleanMetaStr("details", 300) || cleanMetaStr("notes", 300),
+              transactionDate: cleanMetaStr("transactionDate") || depositDateFormatted,
+              expiryDate: cleanMetaStr("expiryDate"),
+            };
+
+            const out = renderHotelEmailServerSide({
+              variant: resolvedTpl.variant,
+              context: renderCtx,
+              settings: resolvedTpl.settings,
+              language: resolvedTpl.language,
+              usedDefaultLayout: resolvedTpl.usedDefaultLayout,
+            });
+            rendered = {
+              subject: plan.subjectOverride || out.subject,
+              html: out.html,
+              text: out.text,
+              fromName: out.fromName,
+              replyTo: out.replyTo,
+            };
+          }
+        }
+
+        if (!rendered) {
+          const isInternalAudience =
+            plan.audience === "platform_superadmin" ||
+            plan.audience === "hotel_staff" ||
+            plan.audience === "staff_member";
+          rendered = renderMultiTenantEmail(typedEvent, plan.brand, {
+            recipientName: plan.recipientName,
+            rows: plan.rows,
+            note: plan.note,
+            subjectOverride: plan.subjectOverride,
+            // Only include PMS portal URL for internal staff/superadmin audiences — never guest/corporate
+            ...(isInternalAudience
+              ? {
+                  ctaLabel: plan.audience === "platform_superadmin" ? "Admin Portal" : "Hotel Portal",
+                  ctaUrl: appUrl,
+                }
+              : {}),
+          });
+        }
 
         const logId = `em_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const nowIso = new Date().toISOString();
@@ -5557,9 +6027,6 @@ async function startServer() {
     },
   });
 
-  // Start server-side Automated Daily Hotel Operations Report scheduler (independent of browser sessions)
-  startDailyOpsBackgroundScheduler();
-
   // API routes FIRST
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
@@ -5618,6 +6085,12 @@ async function startServer() {
 
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    // Start non-blocking Daily Hotel Operations Report scheduler strictly AFTER HTTP server is live
+    try {
+      startDailyOpsBackgroundScheduler();
+    } catch (schedErr) {
+      console.error("[DAILY OPS SCHEDULER] Failed to initialize background scheduler (non-fatal):", schedErr);
+    }
   });
 }
 

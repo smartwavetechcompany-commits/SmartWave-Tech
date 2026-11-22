@@ -47,6 +47,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../utils';
 import { canManageGuest } from '../utils/policyUtils';
+import { showPolicyBlockedToast } from '../utils/policyToast';
 import { hasPermission } from '../utils/permissions';
 import Fuse from 'fuse.js';
 import { format, startOfMonth, isWithinInterval, startOfDay, endOfDay, differenceInDays, parseISO, isValid } from 'date-fns';
@@ -617,13 +618,13 @@ export function GuestManagement() {
     if (editingGuest) {
       const policy = canManageGuest(hotel, profile, 'edit', customRoles);
       if (!policy.allowed) {
-        toast.error(policy.message || 'Editing denied by hotel policy');
+        showPolicyBlockedToast(policy, 'Editing denied by hotel policy');
         return;
       }
     } else {
       const policy = canManageGuest(hotel, profile, 'create', customRoles);
       if (!policy.allowed) {
-        toast.error(policy.message || 'Access denied: You do not have permission to add guests.');
+        showPolicyBlockedToast(policy, 'Access denied: You do not have permission to add guests.');
         return;
       }
     }
@@ -790,7 +791,7 @@ export function GuestManagement() {
 
     const policy = canManageGuest(hotel, profile, 'delete', customRoles);
     if (!policy.allowed) {
-      toast.error(policy.message || 'Deletion denied by hotel policy');
+      showPolicyBlockedToast(policy, 'Deletion denied by hotel policy');
       return;
     }
     

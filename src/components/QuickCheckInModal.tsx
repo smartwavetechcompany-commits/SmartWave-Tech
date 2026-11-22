@@ -21,6 +21,7 @@ import {
 import { Reservation, Room, RoomBlocking, Hotel, RoomType } from '../types';
 import { isRoomAvailable, doDateRangesOverlap } from '../utils/roomUtils';
 import { canCheckIn } from '../utils/policyUtils';
+import { showPolicyBlockedToast } from '../utils/policyToast';
 import { hasPermission } from '../utils/permissions';
 import { formatCurrency, cn } from '../utils';
 import { format, addDays, parseISO, differenceInDays } from 'date-fns';
@@ -300,7 +301,7 @@ export function QuickCheckInModal({
 
     const policy = canCheckIn(hotel, profile, res, room, undefined, liveReservations, customRoles);
     if (!policy.allowed) {
-      toast.error(policy.message || 'Check-in denied by hotel policy');
+      showPolicyBlockedToast(policy, 'Check-in denied by hotel policy');
       return;
     }
 
@@ -563,7 +564,7 @@ export function QuickCheckInModal({
     };
     const walkInPolicy = canCheckIn(hotel, profile, walkInPolicyRes, selectedRoom, undefined, liveReservations, customRoles);
     if (!walkInPolicy.allowed) {
-      toast.error(walkInPolicy.message || 'Check-in denied by hotel policy');
+      showPolicyBlockedToast(walkInPolicy, 'Check-in denied by hotel policy');
       return;
     }
 

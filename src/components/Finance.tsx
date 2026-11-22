@@ -7,6 +7,7 @@ import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Accou
 import { settleLedger, refundGuest, validateRefundRequest } from '../services/ledgerService';
 import { reconcileFinanceRecords, reconcileLedgerEntries, isActualPaymentLedgerEntry, calculateGuestFinancialPosition } from '../services/financialService';
 import { canProcessRefund } from '../utils/policyUtils';
+import { showPolicyBlockedToast } from '../utils/policyToast';
 import { syncDailyCharges } from '../services/financeService';
 import { useRequestManager } from '../contexts/RequestManagerContext';
 import { GuestFolio } from './GuestFolio';
@@ -622,7 +623,7 @@ export function Finance() {
       if (settleType === 'refund') {
         const policy = canProcessRefund(hotel, profile, totalAmount, customRoles);
         if (!policy.allowed) {
-          toast.error(policy.message || 'Refund denied by policy');
+          showPolicyBlockedToast(policy, 'Refund denied by policy');
           return;
         }
 

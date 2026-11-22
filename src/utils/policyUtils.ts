@@ -5,18 +5,98 @@ import { getReservationLiveBalance } from './billingEngine';
 
 import { validateGuestAccount } from '../services/financialService';
 
+export interface PolicyBlockDetail {
+  /** Standard heading shown in UI & logs */
+  title: string;
+  /** Exact configured Admin Control Policy or RBAC rule name */
+  policyName: string;
+  /** Policy category in Admin Control Policy */
+  policyCategory: string;
+  /** Exact Admin Control Policy navigation path / section */
+  policySection: string;
+  /** Active configured threshold, rule, or toggle value from hotel.settings */
+  configuredCondition?: string;
+  /** Specific runtime reason the operation was blocked */
+  reason: string;
+  /** Safe suggested next step for staff or Hotel Administrator */
+  suggestedAction: string;
+  /** True when blocked by RBAC role permission rather than a hotel policy toggle */
+  isPermissionBlock?: boolean;
+}
+
+export interface PolicyCheckResult {
+  allowed: boolean;
+  message?: string;
+  detail?: PolicyBlockDetail;
+}
+
+const POLICY_CURRENCY_SYMBOLS: Record<string, string> = {
+  NGN: '₦',
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  GHS: '₵',
+  KES: 'KSh ',
+  ZAR: 'R',
+};
+
+function formatPolicyCurrency(amount: number, hotel?: Hotel | null): string {
+  const code = String(hotel?.defaultCurrency || 'NGN').toUpperCase();
+  const sym = POLICY_CURRENCY_SYMBOLS[code] || `${code} `;
+  return `${sym}${Math.round(Number(amount) || 0).toLocaleString()}`;
+}
+
+export function buildPolicyBlockResult(
+  input: Omit<PolicyBlockDetail, 'title'> & { title?: string }
+): PolicyCheckResult {
+  const detail: PolicyBlockDetail = {
+    title: input.title || 'Operation Blocked by Hotel Policy',
+    policyName: input.policyName,
+    policyCategory: input.policyCategory,
+    policySection: input.policySection,
+    configuredCondition: input.configuredCondition,
+    reason: input.reason,
+    suggestedAction: input.suggestedAction,
+    isPermissionBlock: input.isPermissionBlock,
+  };
+
+  const parts: string[] = [
+    detail.title,
+    `Policy: ${detail.policyName} (${detail.policySection})`,
+  ];
+  if (detail.configuredCondition) {
+    parts.push(`Condition: ${detail.configuredCondition}`);
+  }
+  parts.push(`Reason: ${detail.reason}`);
+  parts.push(`Action: ${detail.suggestedAction}`);
+
+  return {
+    allowed: false,
+    message: parts.join(' — '),
+    detail,
+  };
+}
+
 export const canCheckout = (
   hotel: Hotel | null,
   profile: UserProfile | null,
   reservation: Reservation,
   ledgerEntries?: LedgerEntry[],
   customRoles: any[] = []
-): { allowed: boolean; message?: string } => {
+): PolicyCheckResult => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   // Granular Action Permission Check (Rule 2)
   if (!hasPermission(profile, 'check_out_guests', customRoles)) {
-    return { allowed: false, message: 'Access denied: You do not have permission to check out guests.' };
+    return buildPolicyBlockResult({
+      policyName: 'Check-Out Permission (check_out_guests)',
+      policyCategory: 'Role & Access Control',
+      policySection: 'Staff Management → Role-Based Access Control',
+      configuredCondition: 'Required permission: check_out_guests',
+      reason: 'Your assigned staff role does not include permission to check out guests.',
+      suggestedAction: 'Ask a Hotel Administrator or authorized Front Desk supervisor to complete checkout or update your role permissions.',
+      isPermissionBlock: true,
+    });
   }
 
   // HARD REQUIREMENT: Financial Consistency Audit Gate
@@ -29,10 +109,14 @@ export const canCheckout = (
     });
 
     if (!validation.isValid) {
-      return {
-        allowed: false,
-        message: `Checkout blocked by Financial Validation Engine: ${validation.violations[0] || 'Guest account failed multi-point audit consistency check.'}`
-      };
+      return buildPolicyBlockResult({
+        policyName: 'Financial Consistency Audit Gate',
+        policyCategory: 'Checkout & Financial Integrity',
+        policySection: 'Admin Control Policy → Checkout Policies',
+        configuredCondition: 'Multi-point guest folio & ledger consistency check must pass before checkout',
+        reason: validation.violations[0] || 'Guest account failed multi-point audit consistency check.',
+        suggestedAction: 'Open the Guest Folio to reconcile the balance and ledger entries, or request Finance / Hotel Administrator review before retrying checkout.',
+      });
     }
   }
 
@@ -50,10 +134,14 @@ export const canCheckout = (
   // Scenario 2: Guest Owes Money (Outstanding Balance > 0)
   // Policy applies uniformly to every user with check_out_guests permission.
   if (settings.requireFullPaymentBeforeCheckout) {
-    return { 
-      allowed: false, 
-      message: `Full payment is required before checkout as per hotel policy. Outstanding balance: ₦${Math.round(outstandingBalance).toLocaleString()}` 
-    };
+    return buildPolicyBlockResult({
+      policyName: 'Hard Pay-First Rule (Require Full Payment Before Checkout)',
+      policyCategory: 'Checkout Policies',
+      policySection: 'Admin Control Policy → Checkout Policies',
+      configuredCondition: 'Require Full Payment Before Checkout is enabled (Balance must be 0)',
+      reason: `Guest still has an outstanding balance of ${formatPolicyCurrency(outstandingBalance, hotel)}.`,
+      suggestedAction: 'Collect and post the remaining balance on the Guest Folio before checkout, or have a Hotel Administrator review the Hard Pay-First Rule in Admin Control Policy → Checkout Policies.',
+    });
   }
 
   // Check the setting: "Allow Checkout with Outstanding Balance"
@@ -62,10 +150,16 @@ export const canCheckout = (
     if (settings.allowPostpaidCheckout && (reservation.corporateId || (reservation as any).isPostpaid)) {
       return { allowed: true };
     }
-    return { 
-      allowed: false, 
-      message: `Checkout blocked. Guest has an outstanding balance of ₦${Math.round(outstandingBalance).toLocaleString()}.` 
-    };
+    return buildPolicyBlockResult({
+      policyName: 'Allow Checkout with Outstanding Balance',
+      policyCategory: 'Checkout Policies',
+      policySection: 'Admin Control Policy → Checkout Policies',
+      configuredCondition: settings.allowPostpaidCheckout
+        ? 'Checkout with unpaid balance is disabled (except linked Corporate Postpaid bookings)'
+        : 'Checkout with unpaid balance is disabled',
+      reason: `Guest has an unpaid outstanding balance of ${formatPolicyCurrency(outstandingBalance, hotel)}.`,
+      suggestedAction: 'Settle the outstanding balance in Guest Folio (or transfer to an approved Corporate Account if applicable), or ask a Hotel Administrator to review Checkout Policies.',
+    });
   }
 
   return { allowed: true };
@@ -79,12 +173,20 @@ export const canCheckIn = (
   guest?: Guest | null,
   allReservations: Reservation[] = [],
   customRoles: any[] = []
-): { allowed: boolean; message?: string } => {
+): PolicyCheckResult => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
 
   // Granular Action Permission Check (Rule 2)
   if (!hasPermission(profile, 'check_in_guests', customRoles)) {
-    return { allowed: false, message: 'Access denied: You do not have permission to check in guests.' };
+    return buildPolicyBlockResult({
+      policyName: 'Check-In Permission (check_in_guests)',
+      policyCategory: 'Role & Access Control',
+      policySection: 'Staff Management → Role-Based Access Control',
+      configuredCondition: 'Required permission: check_in_guests',
+      reason: 'Your assigned staff role does not include permission to check in guests.',
+      suggestedAction: 'Contact your Hotel Administrator or an authorized Front Desk staff member to perform check-in.',
+      isPermissionBlock: true,
+    });
   }
 
   // 1. HARD AVAILABILITY BLOCK: Prevent check-in if another guest is already checked into this room
@@ -95,10 +197,14 @@ export const canCheckIn = (
       r.id !== reservation.id
     );
     if (activeCheckedInGuest) {
-      return { 
-        allowed: false, 
-        message: `Cannot check in to Room ${room?.roomNumber || reservation.roomNumber}. It is currently occupied by in-house guest "${activeCheckedInGuest.guestName}". They must check out before a new guest can check in.` 
-      };
+      return buildPolicyBlockResult({
+        policyName: 'Room Occupancy Integrity Lock',
+        policyCategory: 'Check-In Protocols',
+        policySection: 'Admin Control Policy → Check-In Protocols',
+        configuredCondition: 'A room cannot host two simultaneous checked-in reservations',
+        reason: `Room ${room?.roomNumber || reservation.roomNumber} is currently occupied by in-house guest "${activeCheckedInGuest.guestName}".`,
+        suggestedAction: 'Check out the current in-house guest first, or reassign this arrival to an available clean room.',
+      });
     }
   }
   
@@ -110,23 +216,41 @@ export const canCheckIn = (
     const scheduledTime = /^\d{2}:\d{2}$/.test(scheduledTimeRaw) ? scheduledTimeRaw : '14:00';
     const scheduledStart = new Date(`${reservation.checkIn}T${scheduledTime}:00`);
     if (!isNaN(scheduledStart.getTime()) && new Date() < scheduledStart) {
-      return {
-        allowed: false,
-        message: `Early check-in is disabled by hotel policy. Scheduled check-in opens at ${reservation.checkIn} ${scheduledTime}.`
-      };
+      return buildPolicyBlockResult({
+        policyName: 'Permit Early Check-In',
+        policyCategory: 'Check-In Protocols',
+        policySection: 'Admin Control Policy → Check-In Protocols',
+        configuredCondition: `Early Check-In is disabled; standard check-in opens at ${reservation.checkIn} ${scheduledTime}`,
+        reason: `Attempted check-in before the scheduled check-in time (${reservation.checkIn} ${scheduledTime}).`,
+        suggestedAction: 'Wait until the scheduled check-in time, or ask a Hotel Administrator to enable "Permit Early Check-In" in Admin Control Policy → Check-In Protocols.',
+      });
     }
   }
 
   // Check Blacklist (DNR)
   if (hotel.settings?.guests?.allowBlacklisting && guest) {
     if ((guest.tags || []).includes('DNR')) {
-      return { allowed: false, message: 'Check-in denied: Guest is on Do Not Rent (DNR) / Blacklist.' };
+      return buildPolicyBlockResult({
+        policyName: 'Blacklist Management (Do Not Rent / DNR)',
+        policyCategory: 'CRM & Profiles',
+        policySection: 'Admin Control Policy → CRM & Profiles',
+        configuredCondition: 'Blacklist Management is enabled and guest profile carries the DNR flag',
+        reason: `Guest "${guest.name || reservation.guestName}" is flagged as Do Not Rent (DNR) / Blacklisted.`,
+        suggestedAction: 'Escalate to a Hotel Administrator or Manager to review the guest DNR status in Guest Management before proceeding.',
+      });
     }
   }
 
   if (room) {
     if (room.status === 'occupied') {
-      return { allowed: false, message: `Cannot check-in. Room ${room.roomNumber} is currently occupied by another guest.` };
+      return buildPolicyBlockResult({
+        policyName: 'Occupied Room Check-In Lock',
+        policyCategory: 'Check-In Protocols',
+        policySection: 'Admin Control Policy → Check-In Protocols',
+        configuredCondition: 'Room status must not be Occupied',
+        reason: `Room ${room.roomNumber} is currently marked as Occupied.`,
+        suggestedAction: 'Complete checkout for the current occupant or assign an available clean room.',
+      });
     }
 
     const isDirty = (room.status === 'cleaning' || room.housekeepingStatus === 'cleaning' || room.housekeepingStatus === 'failed')
@@ -137,20 +261,38 @@ export const canCheckIn = (
 
     const preventDirty = settings ? settings.preventCheckInDirty !== false : true;
     if (preventDirty && isDirty) {
-      return { 
-        allowed: false, 
-        message: `Cannot check in to Room ${room.roomNumber}: Room is currently dirty or undergoing housekeeping. Housekeeping must service and inspect the room before check-in.` 
-      };
+      return buildPolicyBlockResult({
+        policyName: 'Strict Hygiene Check (Prevent Check-In to Dirty Rooms)',
+        policyCategory: 'Check-In Protocols',
+        policySection: 'Admin Control Policy → Check-In Protocols',
+        configuredCondition: 'Prevent Check-In to Dirty/Cleaning Rooms is enabled',
+        reason: `Room ${room.roomNumber} is currently dirty, undergoing housekeeping, or failed inspection.`,
+        suggestedAction: 'Have Housekeeping service and mark the room Clean/Ready, assign another clean room, or ask a Hotel Administrator to review Check-In Protocols.',
+      });
     }
 
     const preventMaintenance = settings ? settings.preventCheckInMaintenance !== false : true;
     if (preventMaintenance && (room.status === 'maintenance' || room.status === 'out_of_service' || room.status === 'out_of_order')) {
-      return { allowed: false, message: `Cannot check-in. Room ${room.roomNumber} is currently down for maintenance or out of order.` };
+      return buildPolicyBlockResult({
+        policyName: 'Block Maintenance Check-In',
+        policyCategory: 'Check-In Protocols',
+        policySection: 'Admin Control Policy → Check-In Protocols',
+        configuredCondition: 'Prevent Check-In to Maintenance / Out-of-Order Rooms is enabled',
+        reason: `Room ${room.roomNumber} is currently marked as ${room.status.replace(/_/g, ' ')}.`,
+        suggestedAction: 'Assign a different available room or wait for Maintenance to resolve the issue and return the room to Clean status.',
+      });
     }
 
     if (settings?.requireRoomInspection && room.status !== 'clean' && room.status !== 'vacant' && room.status !== 'inspected' && room.housekeepingStatus !== 'ready' && (room.housekeepingStatus as string) !== 'clean') {
       if (!settings.allowManualRoomOverride || !hasPermission(profile, 'manage_rooms', customRoles)) {
-        return { allowed: false, message: `Room ${room.roomNumber} must be clean and inspected before check-in.` };
+        return buildPolicyBlockResult({
+          policyName: 'Room Clean Lock (Require Room Inspection)',
+          policyCategory: 'Check-In Protocols',
+          policySection: 'Admin Control Policy → Check-In Protocols',
+          configuredCondition: 'Rooms must pass Housekeeping inspection (Clean / Ready / Inspected) before check-in',
+          reason: `Room ${room.roomNumber} has status "${room.status}" and has not been marked Clean & Inspected.`,
+          suggestedAction: 'Ask Housekeeping to inspect and clear Room ' + room.roomNumber + ', or request a Manager with room management authority to review.',
+        });
       }
     }
   }
@@ -160,25 +302,60 @@ export const canCheckIn = (
   if (settings?.requirePaymentBeforeCheckIn) {
     if (settings.allowCheckInPendingBalance === false) {
       if (paidAmount + 0.01 < totalAmount) {
-        return { allowed: false, message: 'Full payment is required before check-in as per hotel policy.' };
+        return buildPolicyBlockResult({
+          policyName: 'Pre-payment Requirement + Disallow Pending Balance Check-In',
+          policyCategory: 'Check-In Protocols',
+          policySection: 'Admin Control Policy → Check-In Protocols',
+          configuredCondition: 'Full payment is required prior to check-in (Allow Pending Balance Check-In is disabled)',
+          reason: `Booking requires ${formatPolicyCurrency(totalAmount, hotel)} in full; paid/credited so far is ${formatPolicyCurrency(paidAmount, hotel)}.`,
+          suggestedAction: 'Collect the remaining balance in Guest Folio before checking the guest in, or ask a Hotel Administrator to adjust Check-In Protocols.',
+        });
       }
     } else if (totalAmount > 0.01 && paidAmount <= 0.01) {
-      return { allowed: false, message: 'A minimum deposit or upfront payment is required before check-in as per hotel policy.' };
+      return buildPolicyBlockResult({
+        policyName: 'Pre-payment Requirement',
+        policyCategory: 'Check-In Protocols',
+        policySection: 'Admin Control Policy → Check-In Protocols',
+        configuredCondition: 'A minimum deposit or upfront payment is required before check-in',
+        reason: `No upfront payment or deposit has been posted yet against the ${formatPolicyCurrency(totalAmount, hotel)} booking total.`,
+        suggestedAction: 'Record a deposit or upfront payment on the reservation before completing check-in, or ask a Hotel Administrator to review Pre-payment Requirement.',
+      });
     }
   } else if (settings?.allowCheckInPendingBalance === false && totalAmount > 0.01 && paidAmount <= 0.01) {
-    return { allowed: false, message: 'Check-in with zero upfront payment is disabled by hotel policy. Please collect a payment first.' };
+    return buildPolicyBlockResult({
+      policyName: 'Allow Pending Balance Check-In',
+      policyCategory: 'Check-In Protocols',
+      policySection: 'Admin Control Policy → Check-In Protocols',
+      configuredCondition: 'Allow Pending Balance Check-In is disabled (zero upfront payment not permitted)',
+      reason: `Booking has zero upfront payment recorded against ${formatPolicyCurrency(totalAmount, hotel)}.`,
+      suggestedAction: 'Collect an upfront payment first, or ask a Hotel Administrator to enable "Allow Pending Balance Check-In" in Admin Control Policy → Check-In Protocols.',
+    });
   }
 
   const guestSettings = hotel.settings?.guests;
   if (guestSettings?.requireIdVerification) {
     if (!reservation.idNumber || !reservation.idType) {
-      return { allowed: false, message: 'Guest ID verification is required for check-in. Please update the reservation with ID details.' };
+      return buildPolicyBlockResult({
+        policyName: 'ID Attachment Lock (Require ID Verification)',
+        policyCategory: 'CRM & Profiles',
+        policySection: 'Admin Control Policy → CRM & Profiles',
+        configuredCondition: 'Guest ID Type and ID Number are required before check-in',
+        reason: 'The reservation is missing valid guest ID Type or ID Number details.',
+        suggestedAction: 'Update the reservation with the guest ID type and number, then retry check-in.',
+      });
     }
   }
 
   if (guestSettings?.requirePhoneVerification) {
     if (!reservation.guestPhone) {
-      return { allowed: false, message: 'Guest phone verification is required for check-in. Please update reservation with guest phone number.' };
+      return buildPolicyBlockResult({
+        policyName: 'Valid Phone Requirement (Require Phone Verification)',
+        policyCategory: 'CRM & Profiles',
+        policySection: 'Admin Control Policy → CRM & Profiles',
+        configuredCondition: 'A valid guest phone number is required before check-in',
+        reason: 'The reservation does not have a guest phone number recorded.',
+        suggestedAction: 'Add the guest phone number to the reservation or guest profile, then retry check-in.',
+      });
     }
   }
 
@@ -190,19 +367,34 @@ export const canEditReservation = (
   profile: UserProfile | null,
   reservation: Reservation,
   customRoles: any[] = []
-): { allowed: boolean; message?: string } => {
+): PolicyCheckResult => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   // Granular Action Permission Check (Rule 2)
   if (!hasPermission(profile, 'edit_reservations', customRoles)) {
-    return { allowed: false, message: 'Access denied: You do not have permission to edit reservations.' };
+    return buildPolicyBlockResult({
+      policyName: 'Edit Reservations Permission (edit_reservations)',
+      policyCategory: 'Role & Access Control',
+      policySection: 'Staff Management → Role-Based Access Control',
+      configuredCondition: 'Required permission: edit_reservations',
+      reason: 'Your assigned staff role does not include permission to edit reservations.',
+      suggestedAction: 'Request an authorized Front Desk Manager or Hotel Administrator to edit this reservation or update your role permissions.',
+      isPermissionBlock: true,
+    });
   }
 
   const settings = hotel.settings?.reservations;
   if (!settings) return { allowed: true };
 
   if (!settings.allowEditing) {
-    return { allowed: false, message: 'Reservation editing is currently disabled by administrator.' };
+    return buildPolicyBlockResult({
+      policyName: 'Allow Reservation Editing',
+      policyCategory: 'Reservation Policies',
+      policySection: 'Admin Control Policy → Reservation Policies',
+      configuredCondition: 'Reservation editing is disabled for this property',
+      reason: 'Modifications to existing reservations are currently disabled by hotel policy.',
+      suggestedAction: 'Ask a Hotel Administrator to enable "Allow Reservation Editing" in Admin Control Policy → Reservation Policies if edits are needed.',
+    });
   }
 
   const isApprover =
@@ -211,7 +403,14 @@ export const canEditReservation = (
     profile.staffRole === 'manager' ||
     hasPermission(profile, 'override_checkout', customRoles);
   if (settings.requireApprovalForEdits && !isApprover) {
-    return { allowed: false, message: 'Manager approval required to edit reservations.' };
+    return buildPolicyBlockResult({
+      policyName: 'Edits Require Approval',
+      policyCategory: 'Reservation Policies',
+      policySection: 'Admin Control Policy → Reservation Policies',
+      configuredCondition: 'Manager or Hotel Administrator approval is required to modify reservations',
+      reason: 'Your role cannot edit reservations directly while "Edits Require Approval" is active.',
+      suggestedAction: 'Ask a Manager or Hotel Administrator to approve/apply this reservation edit, or review "Edits Require Approval" in Admin Control Policy → Reservation Policies.',
+    });
   }
 
   return { allowed: true };
@@ -222,19 +421,34 @@ export const canCancelReservation = (
   profile: UserProfile | null,
   reservation: Reservation,
   customRoles: any[] = []
-): { allowed: boolean; message?: string } => {
+): PolicyCheckResult => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   // Granular Action Permission Check (Rule 2)
   if (!hasPermission(profile, 'cancel_reservations', customRoles)) {
-    return { allowed: false, message: 'Access denied: You do not have permission to cancel reservations.' };
+    return buildPolicyBlockResult({
+      policyName: 'Cancel Reservations Permission (cancel_reservations)',
+      policyCategory: 'Role & Access Control',
+      policySection: 'Staff Management → Role-Based Access Control',
+      configuredCondition: 'Required permission: cancel_reservations',
+      reason: 'Your assigned staff role does not include permission to cancel reservations.',
+      suggestedAction: 'Ask a Manager or Hotel Administrator with cancellation privileges to cancel this reservation.',
+      isPermissionBlock: true,
+    });
   }
 
   const settings = hotel.settings?.reservations;
   if (!settings) return { allowed: true };
 
   if (!settings.allowCancellation) {
-    return { allowed: false, message: 'Cancellations are currently disabled by administrator.' };
+    return buildPolicyBlockResult({
+      policyName: 'Allow Reservation Cancellation',
+      policyCategory: 'Reservation Policies',
+      policySection: 'Admin Control Policy → Reservation Policies',
+      configuredCondition: 'Reservation cancellations are disabled for this property',
+      reason: 'Cancelling reservations is currently blocked by the active hotel policy.',
+      suggestedAction: 'Ask a Hotel Administrator to review "Allow Cancellation" in Admin Control Policy → Reservation Policies.',
+    });
   }
 
   return { allowed: true };
@@ -245,16 +459,31 @@ export const canMarkNoShow = (
   profile: UserProfile | null,
   reservation: Reservation,
   customRoles: any[] = []
-): { allowed: boolean; message?: string } => {
+): PolicyCheckResult => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
 
   if (!hasPermission(profile, 'cancel_reservations', customRoles)) {
-    return { allowed: false, message: 'Access denied: You do not have permission to mark reservations as no-show.' };
+    return buildPolicyBlockResult({
+      policyName: 'No-Show / Cancellation Permission (cancel_reservations)',
+      policyCategory: 'Role & Access Control',
+      policySection: 'Staff Management → Role-Based Access Control',
+      configuredCondition: 'Required permission: cancel_reservations',
+      reason: 'Your assigned staff role does not include permission to mark reservations as No-Show.',
+      suggestedAction: 'Ask a Manager or Hotel Administrator to mark this reservation as No-Show or grant the required permission.',
+      isPermissionBlock: true,
+    });
   }
 
   const settings = hotel.settings?.reservations;
   if (settings && settings.allowNoShow === false) {
-    return { allowed: false, message: 'Marking reservations as No-Show is currently disabled by administrator.' };
+    return buildPolicyBlockResult({
+      policyName: 'No-Show Attribution',
+      policyCategory: 'Reservation Policies',
+      policySection: 'Admin Control Policy → Reservation Policies',
+      configuredCondition: 'No-Show Attribution is disabled',
+      reason: 'Marking reservations as No-Show is currently disabled in the hotel configuration.',
+      suggestedAction: 'Ask a Hotel Administrator to enable "No-Show Attribution" in Admin Control Policy → Reservation Policies.',
+    });
   }
 
   return { allowed: true };
@@ -475,7 +704,7 @@ export const canUpdateRoomStatus = (
   room: Room,
   newStatus: Room['status'],
   customRoles: any[] = []
-): { allowed: boolean; message?: string } => {
+): PolicyCheckResult => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   // Hotel Admin & Super Admin always have full authority
@@ -484,10 +713,15 @@ export const canUpdateRoomStatus = (
     // Granular Action Permission Check: Must have explicit 'change_room_status' permission
     const hasStatusChangePerm = hasPermission(profile, 'change_room_status', customRoles);
     if (!hasStatusChangePerm) {
-      return { 
-        allowed: false, 
-        message: 'Permission denied: You do not have permission to change room status (e.g., from clean to dirty). Please contact your Hotel Administrator to grant this permission.' 
-      };
+      return buildPolicyBlockResult({
+        policyName: 'Change Room Status Permission (change_room_status)',
+        policyCategory: 'Role & Access Control',
+        policySection: 'Staff Management → Role-Based Access Control',
+        configuredCondition: 'Required permission: change_room_status',
+        reason: `Your role does not have permission to change Room ${room.roomNumber} status to "${newStatus}".`,
+        suggestedAction: 'Contact your Hotel Administrator to grant the "change_room_status" permission or have Housekeeping/Management update the room status.',
+        isPermissionBlock: true,
+      });
     }
   }
 
@@ -495,15 +729,36 @@ export const canUpdateRoomStatus = (
   if (!settings) return { allowed: true };
 
   if (!settings.allowStatusUpdates && !hasPermission(profile, 'manage_rooms', customRoles) && !isAdmin) {
-    return { allowed: false, message: 'Room status updates are currently disabled by administrator.' };
+    return buildPolicyBlockResult({
+      policyName: 'Mobile Status Updates (Allow Room Status Updates)',
+      policyCategory: 'Housekeeping Policies',
+      policySection: 'Admin Control Policy → Housekeeping',
+      configuredCondition: 'Staff room status updates are disabled for non-managers',
+      reason: `Unable to update Room ${room.roomNumber} status because room status updates are currently disabled by policy.`,
+      suggestedAction: 'Ask a Manager with room management privileges to update the room, or have a Hotel Administrator enable "Mobile Status Updates" in Admin Control Policy → Housekeeping.',
+    });
   }
 
   if (settings.preventOccupiedOverride && room.status === 'occupied' && !hasPermission(profile, 'manage_rooms', customRoles) && !isAdmin) {
-    return { allowed: false, message: 'Cannot change the status of an occupied room from here.' };
+    return buildPolicyBlockResult({
+      policyName: 'Occupied Room Shield (Prevent Occupied Override)',
+      policyCategory: 'Housekeeping Policies',
+      policySection: 'Admin Control Policy → Housekeeping',
+      configuredCondition: 'Prevent status overrides on rooms currently marked Occupied',
+      reason: `Room ${room.roomNumber} is currently Occupied and protected from status overrides.`,
+      suggestedAction: 'Wait until the guest checks out, or ask a Hotel Administrator / Manager with room management rights to review.',
+    });
   }
 
   if (!settings.allowDirtyToCleanChanges && room.status === 'dirty' && newStatus === 'clean') {
-    return { allowed: false, message: 'Policy prevents direct "Dirty" to "Clean" status changes. Please use "Cleaning" status first.' };
+    return buildPolicyBlockResult({
+      policyName: 'Enable Dirty-to-Clean Flow',
+      policyCategory: 'Housekeeping Policies',
+      policySection: 'Admin Control Policy → Housekeeping',
+      configuredCondition: 'Direct Dirty → Clean transitions are disabled; Cleaning intermediate stage is required',
+      reason: `Room ${room.roomNumber} cannot be changed directly from "Dirty" to "Clean".`,
+      suggestedAction: 'Set Room ' + room.roomNumber + ' to "Cleaning" first before marking it "Clean", or ask a Hotel Administrator to enable "Enable Dirty-to-Clean Flow" in Admin Control Policy → Housekeeping.',
+    });
   }
 
   return { allowed: true };
@@ -514,23 +769,45 @@ export const canProcessRefund = (
   profile: UserProfile | null,
   amount: number,
   customRoles: any[] = []
-): { allowed: boolean; message?: string } => {
+): PolicyCheckResult => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   // Granular Action Permission Check (Rule 2)
   if (!hasPermission(profile, 'process_refunds', customRoles) && !hasPermission(profile, 'approve_refund', customRoles) && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
-    return { allowed: false, message: 'Access denied: You do not have permission to process refunds.' };
+    return buildPolicyBlockResult({
+      policyName: 'Refund Processing Permission (process_refunds / approve_refund)',
+      policyCategory: 'Role & Access Control',
+      policySection: 'Staff Management → Role-Based Access Control',
+      configuredCondition: 'Required permission: process_refunds or approve_refund',
+      reason: 'Your assigned staff role does not include permission to process guest refunds.',
+      suggestedAction: 'Request an authorized Finance Manager or Hotel Administrator to process this refund.',
+      isPermissionBlock: true,
+    });
   }
 
   const settings = hotel.settings?.financial;
   if (!settings) return { allowed: true };
 
   if (!settings.allowRefunds) {
-    return { allowed: false, message: 'Refund processing is currently disabled by administrator.' };
+    return buildPolicyBlockResult({
+      policyName: 'Enable Refund Processing',
+      policyCategory: 'Accounting Policies',
+      policySection: 'Admin Control Policy → Accounting Policies',
+      configuredCondition: 'Refund processing is currently disabled for this hotel',
+      reason: `Refund of ${formatPolicyCurrency(amount, hotel)} cannot be processed while refunds are disabled.`,
+      suggestedAction: 'Ask a Hotel Administrator to enable "Enable Refund Processing" in Admin Control Policy → Accounting Policies.',
+    });
   }
 
   if (settings.requireApprovalForRefunds && !hasPermission(profile, 'void_transaction', customRoles) && !hasPermission(profile, 'approve_refund', customRoles)) {
-    return { allowed: false, message: 'Manager approval is required to process refunds.' };
+    return buildPolicyBlockResult({
+      policyName: 'Refunds Require Approval',
+      policyCategory: 'Accounting Policies',
+      policySection: 'Admin Control Policy → Accounting Policies',
+      configuredCondition: 'Manager/Admin approval (approve_refund or void_transaction) is required for all refunds',
+      reason: `Your account requires manager approval to issue a refund of ${formatPolicyCurrency(amount, hotel)}.`,
+      suggestedAction: 'Escalate to a Manager or Hotel Administrator with refund approval authority, or review "Refunds Require Approval" in Admin Control Policy → Accounting Policies.',
+    });
   }
 
   return { allowed: true };
@@ -542,20 +819,35 @@ export const canApplyDiscount = (
   amount: number,
   totalAmount: number,
   customRoles: any[] = []
-): { allowed: boolean; message?: string } => {
+): PolicyCheckResult => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   const settings = hotel.settings?.financial;
   if (!settings) return { allowed: true };
 
   if (!settings.allowDiscounts) {
-    return { allowed: false, message: 'Discounts are currently disabled by administrator.' };
+    return buildPolicyBlockResult({
+      policyName: 'Enable Discount Engine',
+      policyCategory: 'Accounting Policies',
+      policySection: 'Admin Control Policy → Accounting Policies',
+      configuredCondition: 'Manual discounts are currently disabled for this property',
+      reason: `Cannot apply a discount of ${formatPolicyCurrency(amount, hotel)} while the Discount Engine is disabled.`,
+      suggestedAction: 'Ask a Hotel Administrator to enable "Enable Discount Engine" in Admin Control Policy → Accounting Policies.',
+    });
   }
 
   const percentage = totalAmount > 0 ? (amount / totalAmount) * 100 : 0;
   if (settings.requireApprovalForLargeDiscounts && percentage > (settings.largeDiscountThreshold || 10)) {
     if (!hasPermission(profile, 'void_transaction', customRoles)) {
-      return { allowed: false, message: `Discounts above ${settings.largeDiscountThreshold}% require manager approval.` };
+      const limitPct = settings.largeDiscountThreshold || 10;
+      return buildPolicyBlockResult({
+        policyName: 'Large Discount Approval Policy (Cap Discount Visibility)',
+        policyCategory: 'Accounting Policies',
+        policySection: 'Admin Control Policy → Accounting Policies',
+        configuredCondition: `Discounts above ${limitPct}% require Manager/Admin approval`,
+        reason: `Requested discount of ${percentage.toFixed(1)}% (${formatPolicyCurrency(amount, hotel)}) exceeds the configured ${limitPct}% self-approval limit.`,
+        suggestedAction: `Reduce the discount to ${limitPct}% or less, or ask a Manager / Hotel Administrator to approve this discount or adjust "Large Discount Limit (%)" in Admin Control Policy → Accounting Policies.`,
+      });
     }
   }
 
@@ -567,36 +859,89 @@ export const canManageGuest = (
   profile: UserProfile | null,
   action: 'create' | 'edit' | 'delete' | 'blacklist' | 'export',
   customRoles: any[] = []
-): { allowed: boolean; message?: string } => {
+): PolicyCheckResult => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   // Strict Granular Permission Check (Rule 2)
   if (action === 'create' && !hasPermission(profile, 'add_guests', customRoles)) {
-    return { allowed: false, message: 'Access denied: You do not have permission to add guests.' };
+    return buildPolicyBlockResult({
+      policyName: 'Add Guests Permission (add_guests)',
+      policyCategory: 'Role & Access Control',
+      policySection: 'Staff Management → Role-Based Access Control',
+      configuredCondition: 'Required permission: add_guests',
+      reason: 'Your assigned staff role does not include permission to create guest profiles.',
+      suggestedAction: 'Contact your Hotel Administrator to grant the "add_guests" permission.',
+      isPermissionBlock: true,
+    });
   }
   if (action === 'edit' && !hasPermission(profile, 'edit_guests', customRoles)) {
-    return { allowed: false, message: 'Access denied: You do not have permission to edit guests.' };
+    return buildPolicyBlockResult({
+      policyName: 'Edit Guests Permission (edit_guests)',
+      policyCategory: 'Role & Access Control',
+      policySection: 'Staff Management → Role-Based Access Control',
+      configuredCondition: 'Required permission: edit_guests',
+      reason: 'Your assigned staff role does not include permission to edit guest profiles.',
+      suggestedAction: 'Contact your Hotel Administrator to grant the "edit_guests" permission.',
+      isPermissionBlock: true,
+    });
   }
   if (action === 'delete' && !hasPermission(profile, 'delete_guests', customRoles)) {
-    return { allowed: false, message: 'Access denied: You do not have permission to delete guests.' };
+    return buildPolicyBlockResult({
+      policyName: 'Delete Guests Permission (delete_guests)',
+      policyCategory: 'Role & Access Control',
+      policySection: 'Staff Management → Role-Based Access Control',
+      configuredCondition: 'Required permission: delete_guests',
+      reason: 'Your assigned staff role does not include permission to delete guest profiles.',
+      suggestedAction: 'Contact your Hotel Administrator if a guest record must be removed.',
+      isPermissionBlock: true,
+    });
   }
   if (action === 'export' && !hasPermission(profile, 'export_guests', customRoles)) {
-    return { allowed: false, message: 'Access denied: You do not have permission to export guests.' };
+    return buildPolicyBlockResult({
+      policyName: 'Export Guests Permission (export_guests)',
+      policyCategory: 'Role & Access Control',
+      policySection: 'Staff Management → Role-Based Access Control',
+      configuredCondition: 'Required permission: export_guests',
+      reason: 'Your assigned staff role does not include permission to export guest records.',
+      suggestedAction: 'Ask a Hotel Administrator to export the guest list or grant the "export_guests" permission.',
+      isPermissionBlock: true,
+    });
   }
 
   const settings = hotel.settings?.guests;
   if (!settings) return { allowed: true };
 
   if (action === 'edit' && !settings.allowProfileEditing && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
-    return { allowed: false, message: 'Guest profile editing is currently disabled by administrator.' };
+    return buildPolicyBlockResult({
+      policyName: 'Enable Profile Updates',
+      policyCategory: 'CRM & Profiles',
+      policySection: 'Admin Control Policy → CRM & Profiles',
+      configuredCondition: 'Guest profile editing by non-admin staff is disabled',
+      reason: 'Editing guest profile details is currently restricted to Hotel Administrators.',
+      suggestedAction: 'Ask a Hotel Administrator to update this guest profile or enable "Enable Profile Updates" in Admin Control Policy → CRM & Profiles.',
+    });
   }
 
   if (action === 'delete' && !settings.allowDeletion && profile.role !== 'hotelAdmin' && profile.role !== 'superAdmin') {
-    return { allowed: false, message: 'Guest record deletion is currently restricted.' };
+    return buildPolicyBlockResult({
+      policyName: 'Enable Guest Deletion',
+      policyCategory: 'CRM & Profiles',
+      policySection: 'Admin Control Policy → CRM & Profiles',
+      configuredCondition: 'Guest record deletion by non-admin staff is disabled',
+      reason: 'Deleting guest records is restricted under the current hotel CRM policy.',
+      suggestedAction: 'Request a Hotel Administrator to delete the record or review "Enable Guest Deletion" in Admin Control Policy → CRM & Profiles.',
+    });
   }
 
   if (action === 'blacklist' && !settings.allowBlacklisting && !hasPermission(profile, 'manage_staff', customRoles)) {
-    return { allowed: false, message: 'Blacklisting functionality is currently disabled.' };
+    return buildPolicyBlockResult({
+      policyName: 'Blacklist Management',
+      policyCategory: 'CRM & Profiles',
+      policySection: 'Admin Control Policy → CRM & Profiles',
+      configuredCondition: 'Blacklist Management (DNR flagging) is disabled',
+      reason: 'Flagging guests as Do Not Rent (DNR) / Blacklisted is currently disabled by hotel policy.',
+      suggestedAction: 'Ask a Hotel Administrator to enable "Blacklist Management" in Admin Control Policy → CRM & Profiles.',
+    });
   }
 
   return { allowed: true };
@@ -611,40 +956,89 @@ export const canBlockRoom = (
   frequency?: string,
   hasPartialTimes?: boolean,
   customRoles: any[] = []
-): { allowed: boolean; message?: string } => {
+): PolicyCheckResult => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   const settings = hotel.settings?.roomBlocking;
   if (!settings) return { allowed: true };
 
   if (!settings.allowBlocking) {
-    return { allowed: false, message: 'Room blocking is currently disabled by administrator.' };
+    return buildPolicyBlockResult({
+      policyName: 'Global Room Blocking',
+      policyCategory: 'Room Blocking Settings',
+      policySection: 'Admin Control Policy → Room Blocking Settings',
+      configuredCondition: 'Global Room Blocking is disabled',
+      reason: 'Placing rooms out of service / blocked is currently disabled by hotel policy.',
+      suggestedAction: 'Ask a Hotel Administrator to enable "Global Room Blocking" in Admin Control Policy → Room Blocking Settings.',
+    });
   }
 
   if (settings.requireReasonForBlock && !reason) {
-    return { allowed: false, message: 'A reason or category is required for room blocking.' };
+    return buildPolicyBlockResult({
+      policyName: 'Mandatory Block Reason',
+      policyCategory: 'Room Blocking Settings',
+      policySection: 'Admin Control Policy → Room Blocking Settings',
+      configuredCondition: 'A block reason or category is required before taking a room out of inventory',
+      reason: 'No block reason or category was provided.',
+      suggestedAction: 'Select a valid block reason/category and submit the room block again.',
+    });
   }
 
   if (reason === 'maintenance' && !settings.allowMaintenanceBlocks) {
-    return { allowed: false, message: 'Maintenance blocks are currently disabled.' };
+    return buildPolicyBlockResult({
+      policyName: 'Allow Maintenance Categorization',
+      policyCategory: 'Room Blocking Settings',
+      policySection: 'Admin Control Policy → Room Blocking Settings',
+      configuredCondition: 'Maintenance room blocks are disabled',
+      reason: 'Creating room blocks with the "Maintenance" category is disabled by hotel policy.',
+      suggestedAction: 'Ask a Hotel Administrator to enable "Allow Maintenance Categorization" in Admin Control Policy → Room Blocking Settings.',
+    });
   }
 
   if (reason === 'housekeeping' && !settings.allowHousekeepingBlocks) {
-    return { allowed: false, message: 'Housekeeping cleaning blocks are currently disabled.' };
+    return buildPolicyBlockResult({
+      policyName: 'Allow Cleaning Blocks',
+      policyCategory: 'Room Blocking Settings',
+      policySection: 'Admin Control Policy → Room Blocking Settings',
+      configuredCondition: 'Housekeeping cleaning blocks are disabled',
+      reason: 'Creating room blocks with the "Housekeeping" category is disabled by hotel policy.',
+      suggestedAction: 'Ask a Hotel Administrator to enable "Allow Cleaning Blocks" in Admin Control Policy → Room Blocking Settings.',
+    });
   }
 
   if (frequency && frequency !== 'once' && !settings.allowRecurringBlocks) {
-    return { allowed: false, message: 'Recurring room blocks are disabled by configuration.' };
+    return buildPolicyBlockResult({
+      policyName: 'Enable Recurring Blocks',
+      policyCategory: 'Room Blocking Settings',
+      policySection: 'Admin Control Policy → Room Blocking Settings',
+      configuredCondition: 'Recurring room blocks are disabled (only single one-time blocks permitted)',
+      reason: `Recurring room block frequency ("${frequency}") is not allowed under the current policy.`,
+      suggestedAction: 'Use a single one-time room block, or ask a Hotel Administrator to enable "Enable Recurring Blocks" in Admin Control Policy → Room Blocking Settings.',
+    });
   }
 
   if (hasPartialTimes && !settings.allowPartialDayBlocks) {
-    return { allowed: false, message: 'Partial-day room blocking is disabled by configuration.' };
+    return buildPolicyBlockResult({
+      policyName: 'Partial-day Blocking',
+      policyCategory: 'Room Blocking Settings',
+      policySection: 'Admin Control Policy → Room Blocking Settings',
+      configuredCondition: 'Partial-day (hourly) room blocks are disabled',
+      reason: 'Blocking rooms for specific hours within a day is disabled by hotel policy.',
+      suggestedAction: 'Create a full-day room block instead, or ask a Hotel Administrator to enable "Partial-day Blocking" in Admin Control Policy → Room Blocking Settings.',
+    });
   }
 
   const duration = differenceInDays(new Date(endDate), new Date(startDate)) + 1;
   const maxDur = settings.maxBlockDuration || 30;
   if (duration > maxDur) {
-    return { allowed: false, message: `Policy limits room blocks to a maximum of ${maxDur} days.` };
+    return buildPolicyBlockResult({
+      policyName: 'Maximum Block Duration (Days)',
+      policyCategory: 'Room Blocking Settings',
+      policySection: 'Admin Control Policy → Room Blocking Settings',
+      configuredCondition: `Maximum allowed room block duration is ${maxDur} consecutive day(s)`,
+      reason: `Requested block spans ${duration} days (${startDate} to ${endDate}), exceeding the ${maxDur}-day limit.`,
+      suggestedAction: `Shorten the block duration to ${maxDur} days or fewer, or ask a Hotel Administrator to increase "Maximum Block Duration (Days)" in Admin Control Policy → Room Blocking Settings.`,
+    });
   }
 
   return { allowed: true };
@@ -654,14 +1048,21 @@ export const canUnblockRoom = (
   hotel: Hotel | null,
   profile: UserProfile | null,
   customRoles: any[] = []
-): { allowed: boolean; message?: string } => {
+): PolicyCheckResult => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   const settings = hotel.settings?.roomBlocking;
   if (!settings) return { allowed: true };
 
   if (!settings.allowUnblocking && !hasPermission(profile, 'remove_room_blocks', customRoles) && !hasPermission(profile, 'unblock_rooms', customRoles)) {
-    return { allowed: false, message: 'Unblocking rooms is currently restricted to administrators.' };
+    return buildPolicyBlockResult({
+      policyName: 'Enable Unblocking',
+      policyCategory: 'Room Blocking Settings',
+      policySection: 'Admin Control Policy → Room Blocking Settings',
+      configuredCondition: 'Unblocking rooms is restricted to administrators or staff with unblock_rooms / remove_room_blocks permission',
+      reason: 'Your account is not permitted to lift room blocks while "Enable Unblocking" is disabled.',
+      suggestedAction: 'Ask a Hotel Administrator to unblock the room or enable "Enable Unblocking" in Admin Control Policy → Room Blocking Settings.',
+    });
   }
 
   return { allowed: true };
@@ -672,14 +1073,22 @@ export const canVoidTransaction = (
   profile: UserProfile | null,
   entry: LedgerEntry,
   customRoles: any[] = []
-): { allowed: boolean; message?: string } => {
+): PolicyCheckResult => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   const settings = hotel.settings?.financial;
   if (!settings) return { allowed: true };
 
   if (!hasPermission(profile, 'void_transaction', customRoles)) {
-    return { allowed: false, message: 'You do not have permission to void transactions.' };
+    return buildPolicyBlockResult({
+      policyName: 'Void Transaction Permission (void_transaction)',
+      policyCategory: 'Role & Access Control',
+      policySection: 'Staff Management → Role-Based Access Control',
+      configuredCondition: 'Required permission: void_transaction',
+      reason: 'Your assigned staff role does not have permission to void financial ledger transactions.',
+      suggestedAction: 'Request a Manager or Hotel Administrator with void authority to void or reverse this transaction.',
+      isPermissionBlock: true,
+    });
   }
 
   return { allowed: true };
@@ -690,7 +1099,7 @@ export const canEditInvoice = (
   profile: UserProfile | null,
   reservation: Reservation,
   customRoles: any[] = []
-): { allowed: boolean; message?: string } => {
+): PolicyCheckResult => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   const financialSettings = hotel.settings?.financial;
@@ -701,12 +1110,26 @@ export const canEditInvoice = (
   const isInvoiceLocked = financialSettings?.lockInvoicesAfterCheckout ?? checkoutSettings?.lockInvoicesAfterCheckout ?? true;
 
   if (reservation.status === 'checked_out' && isInvoiceLocked && !hasPermission(profile, 'void_transaction', customRoles)) {
-    return { allowed: false, message: 'Invoices are locked for checked-out reservations. Manager override required.' };
+    return buildPolicyBlockResult({
+      policyName: 'Lock Invoices After Checkout',
+      policyCategory: 'Accounting & Checkout Policies',
+      policySection: 'Admin Control Policy → Accounting Policies / Checkout Policies',
+      configuredCondition: 'Invoices are automatically locked after guest checkout (Manager override required)',
+      reason: 'This reservation has already checked out and its folio/invoice is locked against post-checkout edits.',
+      suggestedAction: 'Request a Manager or Hotel Administrator with override authority (void_transaction), or review "Lock Invoices After Checkout" in Admin Control Policy.',
+    });
   }
 
   const allowInvoiceEditingAfterPayment = financialSettings?.allowInvoiceEditingAfterPayment ?? false;
   if (reservation.ledgerBalance === 0 && !allowInvoiceEditingAfterPayment && !hasPermission(profile, 'void_transaction', customRoles)) {
-     return { allowed: false, message: 'Editing is disabled for fully paid invoices. Manager override required.' };
+    return buildPolicyBlockResult({
+      policyName: 'Allow Invoice Editing After Payment',
+      policyCategory: 'Accounting Policies',
+      policySection: 'Admin Control Policy → Accounting Policies',
+      configuredCondition: 'Editing fully paid / settled invoices is disabled (Manager override required)',
+      reason: 'This invoice has a zero balance (fully settled) and cannot be edited without manager override.',
+      suggestedAction: 'Request a Manager or Hotel Administrator to perform the adjustment, or review "Allow Invoice Editing After Payment" in Admin Control Policy → Accounting Policies.',
+    });
   }
 
   return { allowed: true };
@@ -716,14 +1139,21 @@ export const canReleaseNoShow = (
   hotel: Hotel | null,
   profile: UserProfile | null,
   customRoles: any[] = []
-): { allowed: boolean; message?: string } => {
+): PolicyCheckResult => {
   if (!hotel || !profile) return { allowed: false, message: 'System error: Missing context' };
   
   const settings = hotel.settings?.reservations;
   if (!settings) return { allowed: true };
 
   if (!settings.autoReleaseNoShow && !hasPermission(profile, 'manage_rooms', customRoles)) {
-    return { allowed: false, message: 'Manual release of no-shows is restricted.' };
+    return buildPolicyBlockResult({
+      policyName: 'Auto-release No-shows',
+      policyCategory: 'Reservation Policies',
+      policySection: 'Admin Control Policy → Reservation Policies',
+      configuredCondition: 'Auto-release No-shows is disabled; releasing no-show inventory requires manage_rooms permission',
+      reason: 'Your account does not have room management authority to manually release No-Show rooms.',
+      suggestedAction: 'Ask a Manager or Hotel Administrator to release the room, or enable "Auto-release No-shows" in Admin Control Policy → Reservation Policies.',
+    });
   }
 
   return { allowed: true };

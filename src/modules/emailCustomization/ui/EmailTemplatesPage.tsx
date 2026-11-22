@@ -1,12 +1,14 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   Clock,
   FileBarChart2,
   Image as ImageIcon,
   Loader2,
+  Lock,
   Mail,
   Pencil,
+  Search,
   Settings as SettingsIcon,
   ShieldAlert,
 } from "lucide-react";
@@ -31,10 +33,35 @@ import { TemplateBlockEditor } from "./TemplateBlockEditor";
 import { DailyOperationsReportPanel } from "./DailyOperationsReportPanel";
 
 type ActiveTab = "templates" | "daily-ops" | "settings" | "images";
+type TemplateCategoryFilter =
+  | "all"
+  | "guest_stays"
+  | "payments_billing"
+  | "loyalty_rewards"
+  | "corporate"
+  | "staff_operations";
+
+const TEMPLATE_CATEGORY_TABS: Array<{ id: TemplateCategoryFilter; label: string }> = [
+  { id: "all", label: "All Templates" },
+  { id: "guest_stays", label: "Guest Stays" },
+  { id: "payments_billing", label: "Payments & Deposits" },
+  { id: "loyalty_rewards", label: "Loyalty & Rewards" },
+  { id: "corporate", label: "Corporate" },
+  { id: "staff_operations", label: "Staff & Operations" },
+];
+
+const AUDIENCE_LABEL: Record<string, string> = {
+  guest: "Guest",
+  corporate: "Corporate",
+  hotel_staff: "Staff",
+  platform_admin: "Admin",
+};
 
 export function EmailTemplatesPage() {
   const { profile, hotel, customRoles } = useAuth();
   const [activeTab, setActiveTab] = useState<ActiveTab>("templates");
+  const [categoryFilter, setCategoryFilter] = useState<TemplateCategoryFilter>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [config, setConfig] = useState<EmailCustomizationConfigResponse | null>(null);
   const [templates, setTemplates] = useState<EmailTemplateOverviewItem[]>([]);
   const [settings, setSettings] = useState<HotelEmailSettings>(DEFAULT_HOTEL_EMAIL_SETTINGS);
@@ -50,6 +77,21 @@ export function EmailTemplatesPage() {
   } | null>(null);
   const [openingEvent, setOpeningEvent] = useState<string | null>(null);
   const [togglingEvent, setTogglingEvent] = useState<string | null>(null);
+
+  const filteredTemplates = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return templates.filter((item) => {
+      if (categoryFilter !== "all" && item.category && item.category !== categoryFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        item.name.toLowerCase().includes(q) ||
+        item.description.toLowerCase().includes(q) ||
+        item.eventType.toLowerCase().includes(q)
+      );
+    });
+  }, [templates, categoryFilter, searchQuery]);
 
   const isStrictAdmin = Boolean(
     profile &&
@@ -190,7 +232,7 @@ export function EmailTemplatesPage() {
                 Email Templates & Branding
               </h1>
               <p className="text-xs text-zinc-400 mt-1">
-                Customize guest transactional emails for{" "}
+                Customize all automated guest, deposit, billing, loyalty, corporate, and staff emails for{" "}
                 <span className="text-zinc-200 font-medium">
                   {config?.hotelName || hotel?.name || "your hotel"}
                 </span>
@@ -283,75 +325,147 @@ export function EmailTemplatesPage() {
               <Loader2 size={16} className="animate-spin" /> Loading email customization workspace...
             </div>
           ) : activeTab === "templates" ? (
-            <div className="rounded-xl bg-zinc-900/60 border border-zinc-800 divide-y divide-zinc-800">
-              {templates.map((item) => (
-                <div
-                  key={item.eventType}
-                  className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-zinc-900/90 transition-colors"
-                >
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <span className="text-sm font-semibold text-zinc-100">{item.name}</span>
-                      <span className="text-xs text-zinc-500 tabular-nums">
-                        {item.isCustomized
-                          ? `Customized · v${item.publishedVersion}`
-                          : "Default"}
-                        {item.hasDraftChanges ? " · Draft pending" : ""}
-                      </span>
-                      {item.requiresScheduler && (
-                        <span className="inline-flex items-center gap-1 text-[11px] text-zinc-400">
-                          <Clock size={11} /> Scheduled
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-zinc-400">{item.description}</p>
-                    <div className="text-[11px] text-zinc-500 tabular-nums">
-                      Languages: EN / DE
-                      {item.updatedAt
-                        ? ` · Last updated ${new Date(item.updatedAt).toLocaleDateString()}`
-                        : ""}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-4 shrink-0">
-                    <label className={`inline-flex items-center gap-2 text-xs text-zinc-400 ${canManageEmailModule ? "cursor-pointer" : "opacity-60 cursor-not-allowed"}`}>
-                      <span>{item.enabled ? "Enabled" : "Paused"}</span>
+            <div className="space-y-4">
+              {/* Category Filter & Search Controls */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {TEMPLATE_CATEGORY_TABS.map((cat) => {
+                    const count =
+                      cat.id === "all"
+                        ? templates.length
+                        : templates.filter((t) => t.category === cat.id).length;
+                    const active = categoryFilter === cat.id;
+                    return (
                       <button
+                        key={cat.id}
                         type="button"
-                        role="switch"
-                        aria-checked={item.enabled}
-                        disabled={!canManageEmailModule || togglingEvent === item.eventType}
-                        onClick={() => canManageEmailModule && void handleToggleEvent(item)}
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                          item.enabled ? "bg-emerald-600" : "bg-zinc-700"
-                        } ${!canManageEmailModule ? "cursor-not-allowed" : ""}`}
+                        onClick={() => setCategoryFilter(cat.id)}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                          active
+                            ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+                            : "bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                        }`}
                       >
-                        <span
-                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                            item.enabled ? "translate-x-4.5" : "translate-x-1"
-                          }`}
-                        />
+                        {cat.label} <span className="text-[11px] opacity-70 tabular-nums">({count})</span>
                       </button>
-                    </label>
-
-                    {canManageEmailModule && (
-                      <button
-                        type="button"
-                        disabled={openingEvent === item.eventType}
-                        onClick={() => void handleOpenEditor(item)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-100 whitespace-nowrap transition-colors"
-                      >
-                        {openingEvent === item.eventType ? (
-                          <Loader2 size={13} className="animate-spin" />
-                        ) : (
-                          <Pencil size={13} />
-                        )}
-                        Customize
-                      </button>
-                    )}
-                  </div>
+                    );
+                  })}
                 </div>
-              ))}
+
+                <div className="relative w-full md:w-64">
+                  <Search
+                    size={13}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
+                  />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search templates..."
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-zinc-900/80 border border-zinc-800 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500/60"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-zinc-900/60 border border-zinc-800 divide-y divide-zinc-800">
+                {filteredTemplates.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-zinc-500">
+                    No email templates match your current filter.
+                  </div>
+                ) : (
+                  filteredTemplates.map((item) => {
+                    const isRequired = item.canDisable === false;
+                    return (
+                      <div
+                        key={item.eventType}
+                        className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-zinc-900/90 transition-colors"
+                      >
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            <span className="text-sm font-semibold text-zinc-100">{item.name}</span>
+                            {item.audience && AUDIENCE_LABEL[item.audience] && (
+                              <span className="text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700/70">
+                                {AUDIENCE_LABEL[item.audience]}
+                              </span>
+                            )}
+                            <span className="text-xs text-zinc-500 tabular-nums">
+                              {item.isCustomized
+                                ? `Customized · v${item.publishedVersion}`
+                                : "Default"}
+                              {item.hasDraftChanges ? " · Draft pending" : ""}
+                            </span>
+                            {item.requiresScheduler && (
+                              <span className="inline-flex items-center gap-1 text-[11px] text-zinc-400">
+                                <Clock size={11} /> Scheduled
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-zinc-400">{item.description}</p>
+                          <div className="text-[11px] text-zinc-500 tabular-nums">
+                            Languages: EN / DE
+                            {item.updatedAt
+                              ? ` · Last updated ${new Date(item.updatedAt).toLocaleDateString()}`
+                              : ""}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-4 shrink-0">
+                          {isRequired ? (
+                            <span
+                              title="Security-critical emails cannot be disabled, but their branding and copy can be customized."
+                              className="inline-flex items-center gap-1 text-[11px] text-zinc-400"
+                            >
+                              <Lock size={11} /> Required
+                            </span>
+                          ) : (
+                            <label
+                              className={`inline-flex items-center gap-2 text-xs text-zinc-400 ${
+                                canManageEmailModule
+                                  ? "cursor-pointer"
+                                  : "opacity-60 cursor-not-allowed"
+                              }`}
+                            >
+                              <span>{item.enabled ? "Enabled" : "Paused"}</span>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={item.enabled}
+                                disabled={!canManageEmailModule || togglingEvent === item.eventType}
+                                onClick={() => canManageEmailModule && void handleToggleEvent(item)}
+                                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                                  item.enabled ? "bg-emerald-600" : "bg-zinc-700"
+                                } ${!canManageEmailModule ? "cursor-not-allowed" : ""}`}
+                              >
+                                <span
+                                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                                    item.enabled ? "translate-x-4.5" : "translate-x-1"
+                                  }`}
+                                />
+                              </button>
+                            </label>
+                          )}
+
+                          {canManageEmailModule && (
+                            <button
+                              type="button"
+                              disabled={openingEvent === item.eventType}
+                              onClick={() => void handleOpenEditor(item)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-100 whitespace-nowrap transition-colors"
+                            >
+                              {openingEvent === item.eventType ? (
+                                <Loader2 size={13} className="animate-spin" />
+                              ) : (
+                                <Pencil size={13} />
+                              )}
+                              Customize
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </div>
           ) : activeTab === "daily-ops" ? (
             <DailyOperationsReportPanel

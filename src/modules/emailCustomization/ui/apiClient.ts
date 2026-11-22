@@ -45,6 +45,9 @@ export interface EmailTemplateOverviewItem {
   eventType: CustomizableEmailEventType;
   name: string;
   description: string;
+  category?: "guest_stays" | "payments_billing" | "loyalty_rewards" | "corporate" | "staff_operations";
+  audience?: "guest" | "hotel_staff" | "corporate" | "platform_admin";
+  canDisable?: boolean;
   enabled: boolean;
   isCustomized: boolean;
   publishedVersion: number;

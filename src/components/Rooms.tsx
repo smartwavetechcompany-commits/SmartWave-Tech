@@ -44,6 +44,7 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
 import { canBlockRoom, canUnblockRoom, canCheckout } from '../utils/policyUtils';
+import { showPolicyBlockedToast } from '../utils/policyToast';
 import { ensureBaseRateSnapshot } from '../utils/rateSnapshot';
 import { calculateBilling, parseLocalDateTime, getReservationLiveBalance, BillingService } from '../utils/billingEngine';
 import { calculateStayDuration, safeFormatDate, parseTimestampToDate } from '../utils/dateUtils';
@@ -776,7 +777,7 @@ export function Rooms() {
     if (status === 'checked_out') {
       const policy = canCheckout(hotel, profile, res, undefined, customRoles);
       if (!policy.allowed) {
-        toast.error(policy.message || 'Check-out denied by hotel policy');
+        showPolicyBlockedToast(policy, 'Check-out denied by hotel policy');
         return;
       }
 
@@ -1596,7 +1597,7 @@ export function Rooms() {
 
                     const policy = canBlockRoom(hotel, profile, startDate, endDate, reason, data.frequency, !!(data.startTime || data.endTime), customRoles);
                     if (!policy.allowed) {
-                      toast.error(policy.message || 'Room blocking denied by hotel policy');
+                      showPolicyBlockedToast(policy, 'Room blocking denied by hotel policy');
                       setIsBlockingRoom(false);
                       return;
                     }
@@ -1735,7 +1736,7 @@ export function Rooms() {
                           if (hotel?.id) {
                             const policy = canUnblockRoom(hotel, profile, customRoles);
                             if (!policy.allowed) {
-                              toast.error(policy.message || 'Unblocking denied by hotel policy');
+                              showPolicyBlockedToast(policy, 'Unblocking denied by hotel policy');
                               return;
                             }
                             try {
