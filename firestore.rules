@@ -431,6 +431,30 @@ service cloud.firestore {
         allow write: if canManageEmailTemplates(hotelId);
       }
 
+      // Daily Hotel Operations Report: Per-Hotel Configuration & Recipients (strict tenant isolation)
+      match /dailyOpsReportConfig/{docId} {
+        allow read: if canViewEmailTemplates(hotelId);
+        allow create, update: if canManageEmailTemplates(hotelId) &&
+                                 request.resource.data.hotelId == hotelId &&
+                                 request.resource.data.enabled is bool &&
+                                 request.resource.data.scheduledTime is string &&
+                                 request.resource.data.timezone is string &&
+                                 request.resource.data.recipients is list &&
+                                 request.resource.data.recipients.size() <= 50;
+        allow delete: if isSuperAdmin();
+      }
+
+      // Daily Hotel Operations Report: Per-Hotel Execution & Delivery History (strict tenant isolation)
+      match /dailyOpsReportRuns/{runId} {
+        allow read: if canViewEmailTemplates(hotelId);
+        allow create, update: if canManageEmailTemplates(hotelId) &&
+                                 request.resource.data.hotelId == hotelId &&
+                                 request.resource.data.reportDate is string &&
+                                 request.resource.data.generationStatus in ['generated', 'failed'] &&
+                                 request.resource.data.deliveryStatus in ['pending', 'sent', 'partial', 'failed'];
+        allow delete: if isSuperAdmin();
+      }
+
       // User Settings & Preferences
       match /user_settings/{userId} {
         allow read, write: if isSuperAdmin() || (sameHotel(hotelId) && (request.auth.uid == userId || isHotelAdmin() || hasStaffManagementPermission()));
@@ -606,14 +630,14 @@ service cloud.firestore {
         allow update, delete: if false;
       }
 
-      // Recursive subcollections (Reservations, Housekeeping, Staff, etc. — excludes hardened loyalty collections)
+      // Recursive subcollections (Reservations, Housekeeping, Staff, etc. — excludes hardened loyalty & daily ops collections)
       match /{subcol}/{docPath=**} {
-        allow read: if !(subcol in ['loyaltyAccounts', 'loyaltyTransactions']) && (
+        allow read: if !(subcol in ['loyaltyAccounts', 'loyaltyTransactions', 'dailyOpsReportConfig', 'dailyOpsReportRuns']) && (
                        isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
                        isAuthenticated() ||
                        (resource != null && resource.data.hotelId == hotelId)
                      );
-        allow create, update: if !(subcol in ['loyaltyAccounts', 'loyaltyTransactions']) && (
+        allow create, update: if !(subcol in ['loyaltyAccounts', 'loyaltyTransactions', 'dailyOpsReportConfig', 'dailyOpsReportRuns']) && (
                                  isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
                                  isAuthenticated() ||
                                  (exists(/databases/$(database)/documents/hotels/$(hotelId)) &&
@@ -621,7 +645,7 @@ service cloud.firestore {
                                   get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs is list &&
                                   get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid]))
                                );
-        allow delete: if !(subcol in ['loyaltyAccounts', 'loyaltyTransactions']) && (
+        allow delete: if !(subcol in ['loyaltyAccounts', 'loyaltyTransactions', 'dailyOpsReportConfig', 'dailyOpsReportRuns']) && (
                          isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin() || isStaffOf(hotelId))) || isAuthenticated()
                        );
       }
