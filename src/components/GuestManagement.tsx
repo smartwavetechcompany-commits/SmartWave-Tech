@@ -206,7 +206,7 @@ export function GuestManagement() {
   const [viewingHistory, setViewingHistory] = useState<Guest | null>(null);
   const [guestHistory, setGuestHistory] = useState<Reservation[]>([]);
   const [guestLedger, setGuestLedger] = useState<LedgerEntry[]>([]);
-  const [historyTab, setHistoryTab] = useState<'reservations' | 'ledger' | 'loyalty'>('reservations');
+  const [historyTab, setHistoryTab] = useState<'reservations' | 'ledger'>('reservations');
   const [showReceipt, setShowReceipt] = useState<{ res: Reservation; type: 'restaurant' | 'comprehensive' } | null>(null);
   const [showFolio, setShowFolio] = useState<Reservation | null>(null);
   const [showDigitalKey, setShowDigitalKey] = useState<Reservation | null>(null);
@@ -1755,32 +1755,6 @@ export function GuestManagement() {
                       </button>
                     )}
 
-                    {/* Additive Loyalty & Rewards Summary Badge on Guest Profile Card */}
-                    {userCanViewLoyalty && hotel && (
-                      (() => {
-                        const acc = loyaltyAccountsMap[guest.id];
-                        return (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setViewingHistory(guest);
-                              setHistoryTab('loyalty');
-                            }}
-                            className="w-full mb-3 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/25 flex items-center justify-between text-xs font-bold text-amber-300 transition-colors"
-                            title="View Loyalty & Rewards"
-                          >
-                            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-extrabold">
-                              <Award size={12} className="shrink-0 text-amber-400" />
-                              <span>{acc?.membershipLevelName || 'Loyalty'}</span>
-                            </div>
-                            <span className="text-xs font-extrabold text-amber-200 font-mono">
-                              {(acc?.availablePoints ?? 0).toLocaleString()} pts
-                            </span>
-                          </button>
-                        );
-                      })()
-                    )}
-
                     <div className="grid grid-cols-2 gap-2">
                       <div className="bg-zinc-950 p-2 rounded-lg border border-zinc-800/50 flex flex-col justify-center">
                         <div className="text-[7px] text-zinc-500 font-bold uppercase tracking-widest mb-0.5">Visits</div>
@@ -2706,45 +2680,9 @@ export function GuestManagement() {
                 >
                   Account Ledger
                 </button>
-                {userCanViewLoyalty && hotel && (
-                  <button
-                    onClick={() => setHistoryTab('loyalty')}
-                    className={cn(
-                      "flex-1 py-1.5 rounded-md text-[10px] font-bold transition-all flex items-center justify-center gap-1.5",
-                      historyTab === 'loyalty'
-                        ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                        : "text-zinc-500 hover:text-amber-300"
-                    )}
-                  >
-                    <Award size={12} />
-                    <span>Loyalty &amp; Rewards</span>
-                  </button>
-                )}
               </div>
 
-              {historyTab === 'loyalty' && userCanViewLoyalty && hotel ? (
-                <GuestLoyaltyPanel
-                  hotel={hotel}
-                  profile={profile}
-                  customRoles={customRoles}
-                  guest={viewingHistory}
-                  account={loyaltyAccountsMap[viewingHistory.id] || null}
-                  guestTransactions={loyaltyTransactions.filter(
-                    (tx) => tx.guestId === viewingHistory.id
-                  )}
-                  guestReservations={allReservations.filter(
-                    (r) =>
-                      r.guestId === viewingHistory.id ||
-                      (viewingHistory.email && r.guestEmail === viewingHistory.email)
-                  )}
-                  allLedgerEntries={allLedgerEntries}
-                  currency={currency}
-                  exchangeRate={exchangeRate}
-                  onOpenManageModal={(g, action = 'manual_award') =>
-                    setManageLoyaltyModal({ isOpen: true, guest: g, action })
-                  }
-                />
-              ) : historyTab === 'reservations' ? (
+              {historyTab === 'reservations' ? (
                 <div className="space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-zinc-800/70">
                     <div className="flex items-center gap-2">

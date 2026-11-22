@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   AlertCircle,
   Clock,
-  FileBarChart2,
   Image as ImageIcon,
   Loader2,
   Mail,
@@ -28,9 +27,8 @@ import {
 import { EmailSettingsPanel } from "./EmailSettingsPanel";
 import { ImageLibraryPanel } from "./ImageLibraryModal";
 import { TemplateBlockEditor } from "./TemplateBlockEditor";
-import { DailyOperationsReportPanel } from "./DailyOperationsReportPanel";
 
-type ActiveTab = "templates" | "daily-ops" | "settings" | "images";
+type ActiveTab = "templates" | "settings" | "images";
 
 export function EmailTemplatesPage() {
   const { profile, hotel, customRoles } = useAuth();
@@ -211,17 +209,6 @@ export function EmailTemplatesPage() {
               >
                 <Mail size={13} /> Templates
               </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab("daily-ops")}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${
-                  activeTab === "daily-ops"
-                    ? "bg-zinc-800 text-zinc-50"
-                    : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                <FileBarChart2 size={13} /> Daily Operations Report
-              </button>
               {canManageEmailModule && (
                 <>
                   <button
@@ -353,13 +340,6 @@ export function EmailTemplatesPage() {
                 </div>
               ))}
             </div>
-          ) : activeTab === "daily-ops" ? (
-            <DailyOperationsReportPanel
-              hotelId={targetHotelId}
-              hotelName={config?.hotelName || hotel?.name || "Hotel Property"}
-              canManage={canManageEmailModule}
-              callerEmail={config?.callerEmail || profile?.email || ""}
-            />
           ) : activeTab === "settings" ? (
             <EmailSettingsPanel
               hotelId={targetHotelId}

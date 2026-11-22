@@ -54,7 +54,6 @@ import {
 } from "./src/services/multiTenantEmailService.ts";
 import { mountEmailCustomizationRoutes } from "./src/modules/emailCustomization/server/routes.ts";
 import { sendHotelEmail } from "./src/modules/emailCustomization/server/dispatcher.ts";
-import { startDailyOpsBackgroundScheduler } from "./src/modules/emailCustomization/server/dailyOpsService.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -5556,9 +5555,6 @@ async function startServer() {
       return h.startsWith("Bearer ") ? h.slice(7).trim() : null;
     },
   });
-
-  // Start server-side Automated Daily Hotel Operations Report scheduler (independent of browser sessions)
-  startDailyOpsBackgroundScheduler();
 
   // API routes FIRST
   app.get("/api/health", (req, res) => {

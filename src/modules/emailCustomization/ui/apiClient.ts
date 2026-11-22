@@ -13,12 +13,6 @@ import type {
   SupportedEmailLanguage,
 } from "../shared/types";
 import type { ValidationIssue } from "../shared/validation";
-import type {
-  DailyOpsReportConfig,
-  DailyOpsReportData,
-  DailyOpsReportRun,
-  DailyOpsReportSectionsConfig,
-} from "../shared/dailyOpsTypes";
 
 export interface EmailCustomizationConfigResponse {
   enabled: boolean;
@@ -285,99 +279,6 @@ export const emailCustomizationApi = {
     return apiFetch<{ ok: boolean; referencedByDraft?: string[] }>(
       `/api/email-customization/images/${encodeURIComponent(imageId)}`,
       { method: "DELETE", hotelId }
-    );
-  },
-
-  // Daily Hotel Operations Report (Additive inside Email Module)
-  getDailyOpsConfig(hotelId?: string) {
-    return apiFetch<{
-      ok: boolean;
-      canManage: boolean;
-      callerEmail: string;
-      config: DailyOpsReportConfig;
-      timezoneFallbackUsed: boolean;
-      nextScheduledDelivery: {
-        iso: string;
-        localDisplay: string;
-        targetReportDate: string;
-      };
-    }>("/api/email-customization/daily-ops-report/config", { hotelId });
-  },
-
-  saveDailyOpsConfig(config: Partial<DailyOpsReportConfig>, hotelId?: string) {
-    return apiFetch<{
-      ok: boolean;
-      config: DailyOpsReportConfig;
-      nextScheduledDelivery: {
-        iso: string;
-        localDisplay: string;
-        targetReportDate: string;
-      };
-    }>("/api/email-customization/daily-ops-report/config", {
-      method: "PUT",
-      body: { config },
-      hotelId,
-    });
-  },
-
-  listDailyOpsRuns(hotelId?: string, limit = 30) {
-    return apiFetch<{
-      ok: boolean;
-      runs: Array<Omit<DailyOpsReportRun, "htmlSnapshot"> & { hasHtmlSnapshot?: boolean }>;
-    }>(`/api/email-customization/daily-ops-report/runs?limit=${limit}`, { hotelId });
-  },
-
-  getDailyOpsRun(runId: string, hotelId?: string) {
-    return apiFetch<{ ok: boolean; run: DailyOpsReportRun }>(
-      `/api/email-customization/daily-ops-report/runs/${encodeURIComponent(runId)}`,
-      { hotelId }
-    );
-  },
-
-  previewDailyOpsReport(
-    payload: { reportDate?: string; sections?: Partial<DailyOpsReportSectionsConfig> },
-    hotelId?: string
-  ) {
-    return apiFetch<{
-      ok: boolean;
-      report: DailyOpsReportData;
-      rendered: { subject: string; html: string; text: string; fromName: string };
-    }>("/api/email-customization/daily-ops-report/preview", {
-      method: "POST",
-      body: payload,
-      hotelId,
-    });
-  },
-
-  sendDailyOpsTestReport(payload: { email?: string; reportDate?: string }, hotelId?: string) {
-    return apiFetch<{
-      ok: boolean;
-      sentTo: string;
-      reportDate: string;
-      messageId?: string;
-      remainingThisHour?: number;
-    }>("/api/email-customization/daily-ops-report/test-send", {
-      method: "POST",
-      body: payload,
-      hotelId,
-    });
-  },
-
-  retryDailyOpsRun(runId: string, hotelId?: string) {
-    return apiFetch<{ ok: boolean; run: DailyOpsReportRun }>(
-      `/api/email-customization/daily-ops-report/runs/${encodeURIComponent(runId)}/retry`,
-      { method: "POST", body: {}, hotelId }
-    );
-  },
-
-  resendDailyOpsRun(
-    runId: string,
-    payload: { recipients?: string[]; idempotencyKey?: string },
-    hotelId?: string
-  ) {
-    return apiFetch<{ ok: boolean; duplicate?: boolean; run: DailyOpsReportRun }>(
-      `/api/email-customization/daily-ops-report/runs/${encodeURIComponent(runId)}/resend`,
-      { method: "POST", body: payload, hotelId }
     );
   },
 };
