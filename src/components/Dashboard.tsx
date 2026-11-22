@@ -382,6 +382,8 @@ export function Dashboard() {
       d = new Date((ts as any)._seconds * 1000);
     } else if (ts instanceof Date) {
       d = ts;
+    } else if (typeof ts === 'number') {
+      d = new Date(ts);
     } else if (typeof ts === 'string') {
       d = new Date(ts);
     }
@@ -495,10 +497,10 @@ export function Dashboard() {
   const todayRevenue = useMemo(() => {
     if (!canViewFinances) return 0;
     const finToday = validFinance
-      .filter(f => f.type === 'income' && isRecordToday(f.timestamp || (f as any).createdAt))
+      .filter(f => f.type === 'income' && isRecordToday(f.timestamp || (f as any).createdAt || (f as any).date))
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
     const ledgToday = unlinkedPaymentLedgerEntries
-      .filter(e => isRecordToday(e.timestamp || (e as any).createdAt))
+      .filter(e => isRecordToday(e.timestamp || (e as any).createdAt || (e as any).date))
       .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
     return Number((finToday + ledgToday).toFixed(2));
   }, [canViewFinances, validFinance, unlinkedPaymentLedgerEntries]);
@@ -588,37 +590,51 @@ export function Dashboard() {
   }, [validFinance, validLedgerEntries]);
 
   // Role-Based Dashboard Stats Card Definition
-  const stats = (profile?.role === 'superAdmin' && !hotel?.id)
+  const stats: Array<{
+    label: string;
+    subtitle?: string;
+    tooltip?: string;
+    value: string | number;
+    icon: any;
+    color: string;
+    module?: string;
+  }> = (profile?.role === 'superAdmin' && !hotel?.id)
     ? [
-        { label: 'Total Hotels', value: allHotels.length, icon: BedDouble, color: 'text-blue-500' },
-        { label: 'Active Subscriptions', value: allHotels.filter(h => h.subscriptionStatus === 'active').length, icon: CheckCircle2, color: 'text-emerald-500' },
-        { label: 'Suspended', value: allHotels.filter(h => h.subscriptionStatus === 'suspended').length, icon: AlertCircle, color: 'text-red-500' },
-        { label: 'Expired', value: allHotels.filter(h => h.subscriptionStatus === 'expired').length, icon: Clock, color: 'text-amber-500' },
+        { label: 'Total Hotels', subtitle: 'Registered properties', value: allHotels.length, icon: BedDouble, color: 'text-blue-500' },
+        { label: 'Active Subscriptions', subtitle: 'Current active plans', value: allHotels.filter(h => h.subscriptionStatus === 'active').length, icon: CheckCircle2, color: 'text-emerald-500' },
+        { label: 'Suspended', subtitle: 'Access paused', value: allHotels.filter(h => h.subscriptionStatus === 'suspended').length, icon: AlertCircle, color: 'text-red-500' },
+        { label: 'Expired', subtitle: 'Renewal required', value: allHotels.filter(h => h.subscriptionStatus === 'expired').length, icon: Clock, color: 'text-amber-500' },
       ]
     : canViewFinances
       ? [
           // Finance & Hotel Admin Visibility: Complete Financial Summary
           { 
             label: 'Occupancy', 
+            subtitle: `${occupiedRoomsCount} of ${rooms.length} rooms occupied`,
             value: `${occupancyRate}%`, 
             icon: BedDouble, 
             color: 'text-blue-500' 
           },
           { 
             label: 'Active Guests', 
+            subtitle: 'Currently checked in',
             value: activeGuestsCount, 
             icon: Users, 
             color: 'text-emerald-500' 
           },
           { 
-            label: 'Today Revenue', 
+            label: 'Collected Today', 
+            subtitle: "Today's payments only",
+            tooltip: 'Verified payments and income recorded today only. Resets at the start of each new day.',
             value: formatCurrency(todayRevenue, currency, exchangeRate), 
             icon: TrendingUp, 
             color: 'text-amber-500',
             module: 'finance'
           },
           ...(canViewTotalCollected ? [{ 
-            label: 'Total Collected', 
+            label: 'Total Collected (All-Time)', 
+            subtitle: 'Cumulative across all dates',
+            tooltip: 'All-time cumulative verified payments and income collected across all dates (matches Finance Overview).',
             value: formatCurrency(totalRevenue, currency, exchangeRate), 
             icon: DollarSign, 
             color: 'text-emerald-400',
@@ -626,6 +642,7 @@ export function Dashboard() {
           }] : []),
           { 
             label: 'Total Transactions', 
+            subtitle: `${todayTransactionsCount} today • all-time count`,
             value: totalTransactionsCount, 
             icon: Receipt, 
             color: 'text-cyan-400',
@@ -633,6 +650,7 @@ export function Dashboard() {
           },
           { 
             label: 'Overall Outstanding', 
+            subtitle: 'In-house & debtor balances',
             value: formatCurrency(totalOutstandingOwing, currency, exchangeRate), 
             icon: AlertCircle, 
             color: 'text-red-500',
@@ -640,6 +658,7 @@ export function Dashboard() {
           },
           { 
             label: 'Dirty Rooms', 
+            subtitle: 'Vacant rooms needing cleaning',
             value: dirtyRoomsCount, 
             icon: AlertCircle, 
             color: 'text-amber-500' 
@@ -649,42 +668,50 @@ export function Dashboard() {
           // General Staff Visibility
           { 
             label: 'My Collections Today', 
+            subtitle: 'Your payments recorded today',
             value: formatCurrency(myCollectionsToday, currency, exchangeRate), 
             icon: DollarSign, 
             color: 'text-emerald-400' 
           },
           ...(canViewTotalCollected && isModuleEnabled(hotel, 'finance') ? [{
-            label: 'Total Collected',
+            label: 'Total Collected (All-Time)',
+            subtitle: 'Cumulative across all dates',
+            tooltip: 'All-time cumulative verified payments and income collected across all dates.',
             value: formatCurrency(totalRevenue, currency, exchangeRate),
             icon: DollarSign,
             color: 'text-emerald-400'
           }] : []),
           { 
             label: 'Occupancy', 
+            subtitle: `${occupiedRoomsCount} of ${rooms.length} rooms occupied`,
             value: `${occupancyRate}%`, 
             icon: BedDouble, 
             color: 'text-blue-500' 
           },
           { 
             label: 'Active Guests', 
+            subtitle: 'Currently checked in',
             value: activeGuestsCount, 
             icon: Users, 
             color: 'text-emerald-500' 
           },
           { 
             label: 'Total Transactions', 
+            subtitle: `${todayTransactionsCount} today • all-time count`,
             value: totalTransactionsCount, 
             icon: Receipt, 
             color: 'text-cyan-400' 
           },
           { 
             label: 'Overall Outstanding', 
+            subtitle: 'In-house & debtor balances',
             value: formatCurrency(totalOutstandingOwing, currency, exchangeRate), 
             icon: AlertCircle, 
             color: 'text-red-500' 
           },
           { 
             label: 'Dirty Rooms', 
+            subtitle: 'Vacant rooms needing cleaning',
             value: dirtyRoomsCount, 
             icon: AlertCircle, 
             color: 'text-amber-500' 
@@ -938,6 +965,7 @@ export function Dashboard() {
           stats.map((stat) => (
             <div
               key={stat.label}
+              title={stat.tooltip || stat.subtitle || stat.label}
               className="bg-zinc-900 border border-zinc-800 p-3 sm:p-4 rounded-xl md:rounded-2xl hover:border-zinc-700 transition-colors cursor-default"
             >
               <div className="flex items-center justify-between mb-2">
@@ -946,7 +974,10 @@ export function Dashboard() {
                 </div>
               </div>
               <div className="text-base sm:text-xl font-bold text-zinc-50 mb-0.5 truncate">{stat.value}</div>
-              <div className="text-[7px] sm:text-[9px] font-bold text-zinc-500 uppercase tracking-wider">{stat.label}</div>
+              <div className="text-[7px] sm:text-[9px] font-bold text-zinc-400 uppercase tracking-wider">{stat.label}</div>
+              {stat.subtitle && (
+                <div className="text-[9px] sm:text-[10px] text-zinc-500 mt-0.5 truncate">{stat.subtitle}</div>
+              )}
             </div>
           ))
         )}
