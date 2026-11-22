@@ -1354,3 +1354,121 @@ export async function fetchGuestLoyaltyTransactions(
     .map((d) => ({ id: d.id, ...d.data() } as LoyaltyTransaction))
     .sort((a, b) => new Date(b.timestamp || b.createdAt).getTime() - new Date(a.timestamp || a.createdAt).getTime());
 }
+
+export interface AutoAwardStayCompletionResult {
+  awarded: boolean;
+  duplicate?: boolean;
+  pointsAwarded?: number;
+  updatedBalance?: number;
+  membershipLevel?: string;
+  skippedReason?: string;
+}
+
+/**
+ * Non-blocking post-checkout / post-settlement loyalty accumulation hook.
+ * When the hotel's Loyalty program and Automatic Earning are enabled in Admin Controls,
+ * automatically evaluates a completed & settled reservation and additively accumulates
+ * earned points onto the guest's existing loyalty account (`loyaltyAccounts/{guestId}`).
+ * Unredeemed points from prior stays are strictly preserved and keep accumulating until redeemed.
+ * Idempotent per reservation (`auto_earn_{reservationId}`). Never mutates folio, pricing, or checkout workflows.
+ */
+export async function tryAutoAwardLoyaltyOnStayCompletion(
+  hotel: Hotel | null | undefined,
+  guestOrId: Guest | string | null | undefined,
+  res: Reservation | null | undefined,
+  adminProfile: UserProfile | null | undefined,
+  customRoles: any[] = []
+): Promise<AutoAwardStayCompletionResult> {
+  if (!hotel?.id || !res?.id || !adminProfile?.uid || !guestOrId) {
+    return { awarded: false, skippedReason: 'Missing hotel, reservation, guest, or operator context.' };
+  }
+
+  if (!canManageLoyalty(adminProfile, customRoles)) {
+    return { awarded: false, skippedReason: 'Operator does not have loyalty management permission.' };
+  }
+
+  try {
+    const policy = await fetchFreshHotelPolicy(hotel);
+    if (!policy.enabled || !policy.enableAutoEarning) {
+      return { awarded: false, skippedReason: 'Loyalty program or automatic earning is disabled.' };
+    }
+
+    let resolvedGuest: Guest;
+    if (typeof guestOrId === 'string') {
+      const guestSnap = await getDoc(doc(db, 'hotels', hotel.id, 'guests', guestOrId));
+      if (guestSnap.exists()) {
+        resolvedGuest = { id: guestSnap.id, ...guestSnap.data() } as Guest;
+      } else {
+        resolvedGuest = {
+          id: guestOrId,
+          name: res.guestName || 'Guest',
+          email: res.guestEmail || '',
+          phone: res.guestPhone || '',
+          totalStays: 1,
+          totalNights: res.nights || 1,
+          totalSpent: res.paidAmount || 0,
+          ledgerBalance: 0,
+          createdAt: new Date().toISOString(),
+        } as Guest;
+      }
+    } else {
+      resolvedGuest = guestOrId;
+    }
+
+    if (!resolvedGuest?.id) {
+      return { awarded: false, skippedReason: 'Could not resolve guest profile ID.' };
+    }
+
+    // Fetch fresh committed reservation & ledger entries read-only to evaluate settled spend accurately
+    const [freshResSnap, ledgerSnap] = await Promise.all([
+      getDoc(doc(db, 'hotels', hotel.id, 'reservations', res.id)),
+      getDocs(query(collection(db, 'hotels', hotel.id, 'ledger'), where('reservationId', '==', res.id))),
+    ]);
+    const resLedger = ledgerSnap.docs.map((d) => ({ id: d.id, ...d.data() } as LedgerEntry));
+    const freshResData = freshResSnap.exists() ? (freshResSnap.data() as Partial<Reservation>) : {};
+
+    const completedRes: Reservation = {
+      ...res,
+      ...freshResData,
+      id: res.id,
+      status: 'checked_out',
+    };
+
+    const result = await awardAutomaticStayPoints(
+      hotel,
+      resolvedGuest,
+      completedRes,
+      resLedger,
+      adminProfile
+    );
+
+    if (result.success && !result.duplicate && result.transaction && result.account) {
+      return {
+        awarded: true,
+        duplicate: false,
+        pointsAwarded: result.transaction.points,
+        updatedBalance: result.account.availablePoints,
+        membershipLevel: result.account.membershipLevelName,
+      };
+    }
+
+    if (result.success && result.duplicate) {
+      return {
+        awarded: false,
+        duplicate: true,
+        updatedBalance: result.account?.availablePoints,
+        membershipLevel: result.account?.membershipLevelName,
+        skippedReason: 'Points already awarded for this stay.',
+      };
+    }
+
+    return {
+      awarded: false,
+      skippedReason: result.error || 'Stay not eligible for automatic loyalty earning.',
+    };
+  } catch (err: any) {
+    console.warn('[LoyaltyService] Non-blocking post-checkout auto-award skipped:', err?.message || err);
+    return { awarded: false, skippedReason: err?.message || 'Unexpected error during auto-award.' };
+  }
+}
+

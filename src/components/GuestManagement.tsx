@@ -69,6 +69,7 @@ import { Pagination } from './Pagination';
 import { DateFilterControl, DateFilterValue, getDefaultDateFilter, matchesDateFilter } from './DateFilterControl';
 import { useBookingSources } from '../hooks/useSettings';
 import { canManageLoyalty, canViewLoyalty, getLoyaltyPolicy } from '../services/loyaltyService';
+import { findReturningGuestMatch, buildMissingGuestFieldUpdates } from '../utils/guestMatchingUtils';
 import { ManageLoyaltyPointsModal } from './ManageLoyaltyPointsModal';
 import { GuestLoyaltyPanel } from './GuestLoyaltyPanel';
 import { LoyaltyHistoryView } from './LoyaltyHistoryView';
@@ -706,33 +707,78 @@ export function GuestManagement() {
           }
         }
       } else {
-        const createdGuestRef = await database.safeAdd(collection(db, 'hotels', hotel.id, 'guests'), {
-          ...newGuest,
-          totalStays: hotel?.settings?.guests?.allowLoyaltyEditing ? (newGuest.totalStays || 0) : 0,
-          totalNights: 0,
-          totalSpent: hotel?.settings?.guests?.allowLoyaltyEditing ? (newGuest.totalSpent || 0) : 0,
-          ledgerBalance: 0,
-          stayHistory: [],
-          createdAt: new Date().toISOString()
-        }, {
-          hotelId: hotel.id,
-          module: 'Guests',
-          action: 'GUEST_CREATED',
-          details: `Created new guest: ${newGuest.name}`
-        });
+        // Detect if this guest already exists (email, phone, ID number, or full name without conflict)
+        // so returning guests are linked to their existing account instead of splitting loyalty points.
+        const returningMatch = findReturningGuestMatch(
+          {
+            name: newGuest.name,
+            email: newGuest.email,
+            phone: newGuest.phone,
+            idNumber: newGuest.idNumber,
+            idType: newGuest.idType,
+            address: newGuest.address,
+          },
+          guests,
+          loyaltyAccountsMap
+        );
 
-        const createdGuestId = (createdGuestRef as any)?.id;
-        if (createdGuestId && newGuest.email) {
-          try {
-            void notifyPlatformEvent({
+        if (returningMatch && returningMatch.confidence === 'high') {
+          const existing = returningMatch.guest;
+          const missingUpdates = buildMissingGuestFieldUpdates(existing, {
+            email: newGuest.email,
+            phone: newGuest.phone,
+            idType: newGuest.idType,
+            idNumber: newGuest.idNumber,
+            address: newGuest.address,
+          });
+          if (Object.keys(missingUpdates).length > 0) {
+            await database.safeUpdate(doc(db, 'hotels', hotel.id, 'guests', existing.id), {
+              ...missingUpdates,
+              updatedAt: new Date().toISOString(),
+            }, {
               hotelId: hotel.id,
-              eventType: 'guest.profile_created',
-              guestId: createdGuestId,
-              entityId: createdGuestId,
-              idempotencyKey: `guest-created:${hotel.id}:${createdGuestId}`,
+              module: 'Guests',
+              action: 'GUEST_UPDATED',
+              details: `Linked returning guest ${existing.name} (matched via ${returningMatch.matchReasons.join(', ')}) and filled missing contact details`
             });
-          } catch {
-            // Non-blocking email dispatch
+          }
+          const existingPts = returningMatch.loyaltyAccount?.availablePoints || 0;
+          const ptsNote =
+            existingPts > 0
+              ? ` (${existingPts.toLocaleString()} unredeemed loyalty pts preserved)`
+              : '';
+          toast.info(
+            `Existing profile found for "${existing.name}" via ${returningMatch.matchReasons.join(', ')}. Linked to existing guest account instead of creating a duplicate${ptsNote}.`
+          );
+        } else {
+          const createdGuestRef = await database.safeAdd(collection(db, 'hotels', hotel.id, 'guests'), {
+            ...newGuest,
+            totalStays: hotel?.settings?.guests?.allowLoyaltyEditing ? (newGuest.totalStays || 0) : 0,
+            totalNights: 0,
+            totalSpent: hotel?.settings?.guests?.allowLoyaltyEditing ? (newGuest.totalSpent || 0) : 0,
+            ledgerBalance: 0,
+            stayHistory: [],
+            createdAt: new Date().toISOString()
+          }, {
+            hotelId: hotel.id,
+            module: 'Guests',
+            action: 'GUEST_CREATED',
+            details: `Created new guest: ${newGuest.name}`
+          });
+
+          const createdGuestId = (createdGuestRef as any)?.id;
+          if (createdGuestId && newGuest.email) {
+            try {
+              void notifyPlatformEvent({
+                hotelId: hotel.id,
+                eventType: 'guest.profile_created',
+                guestId: createdGuestId,
+                entityId: createdGuestId,
+                idempotencyKey: `guest-created:${hotel.id}:${createdGuestId}`,
+              });
+            } catch {
+              // Non-blocking email dispatch
+            }
           }
         }
       }

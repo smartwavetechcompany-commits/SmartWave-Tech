@@ -16,9 +16,11 @@ import {
   ShieldCheck, 
   Sparkles,
   ChevronRight,
-  ArrowRight
+  ArrowRight,
+  Users,
+  Award
 } from 'lucide-react';
-import { Reservation, Room, RoomBlocking, Hotel, RoomType } from '../types';
+import { Reservation, Room, RoomBlocking, Hotel, RoomType, Guest, LoyaltyAccount } from '../types';
 import { isRoomAvailable, doDateRangesOverlap } from '../utils/roomUtils';
 import { canCheckIn } from '../utils/policyUtils';
 import { showPolicyBlockedToast } from '../utils/policyToast';
@@ -33,6 +35,7 @@ import { postToLedger, settleLedger } from '../services/ledgerService';
 import { buildInitialRateSnapshot, ensureBaseRateSnapshot } from '../utils/rateSnapshot';
 import { toast } from 'sonner';
 import { notifyReservationEmailEvent } from '../services/transactionalEmailClient';
+import { findReturningGuestMatch, buildMissingGuestFieldUpdates } from '../utils/guestMatchingUtils';
 
 export function isRoomDirtyOrUnprepared(room: Room | undefined | null): boolean {
   if (!room) return false;
@@ -97,6 +100,8 @@ export function QuickCheckInModal({
   const [liveRooms, setLiveRooms] = useState<Room[]>(rooms);
   const [liveReservations, setLiveReservations] = useState<Reservation[]>(reservations);
   const [liveBlockings, setLiveBlockings] = useState<RoomBlocking[]>(roomBlockings);
+  const [liveGuests, setLiveGuests] = useState<Guest[]>([]);
+  const [loyaltyAccountsMap, setLoyaltyAccountsMap] = useState<Record<string, LoyaltyAccount>>({});
 
   useEffect(() => {
     setLiveRooms(rooms);
@@ -143,10 +148,37 @@ export function QuickCheckInModal({
       }
     );
 
+    const unsubGuests = onSnapshot(
+      collection(db, 'hotels', hotel.id, 'guests'),
+      (snap) => {
+        setLiveGuests(snap.docs.map(d => ({ id: d.id, ...d.data() } as Guest)));
+      },
+      (err) => {
+        console.warn('Live guests snapshot in QuickCheckInModal:', err);
+      }
+    );
+
+    const unsubLoyalty = onSnapshot(
+      collection(db, 'hotels', hotel.id, 'loyaltyAccounts'),
+      (snap) => {
+        const nextMap: Record<string, LoyaltyAccount> = {};
+        snap.docs.forEach((d) => {
+          const acc = { id: d.id, ...d.data() } as LoyaltyAccount;
+          nextMap[acc.guestId || d.id] = acc;
+        });
+        setLoyaltyAccountsMap(nextMap);
+      },
+      () => {
+        // Silent fallback when operator does not have loyalty read permission
+      }
+    );
+
     return () => {
       unsubRooms();
       unsubRes();
       unsubBlockings();
+      unsubGuests();
+      unsubLoyalty();
     };
   }, [isOpen, hotel?.id]);
 
@@ -181,6 +213,7 @@ export function QuickCheckInModal({
   const [guestName, setGuestName] = useState('');
   const [guestPhone, setGuestPhone] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
+  const [selectedWalkInGuestId, setSelectedWalkInGuestId] = useState<string>('');
   const [selectedRoomId, setSelectedRoomId] = useState<string>('');
   const [checkInDate, setCheckInDate] = useState<string>(todayStr);
   const [checkOutDate, setCheckOutDate] = useState<string>(tomorrowStr);
@@ -188,6 +221,14 @@ export function QuickCheckInModal({
   const [paymentOption, setPaymentOption] = useState<'unpaid' | 'cash' | 'card' | 'transfer'>('unpaid');
   const [paymentAmount, setPaymentAmount] = useState<number | ''>('');
   const [isSubmittingWalkIn, setIsSubmittingWalkIn] = useState(false);
+
+  const detectedWalkInMatch = useMemo(() => {
+    return findReturningGuestMatch(
+      { name: guestName, email: guestEmail, phone: guestPhone },
+      liveGuests,
+      loyaltyAccountsMap
+    );
+  }, [guestName, guestEmail, guestPhone, liveGuests, loyaltyAccountsMap]);
 
   // Filtered expected arrivals based on search
   const filteredArrivals = useMemo(() => {
@@ -380,27 +421,38 @@ export function QuickCheckInModal({
             }, { merge: true });
           }
         } else {
-          // If reservation had no guestId, lookup or create active guest
+          // If reservation had no guestId, run multi-signal returning guest detection across existing profiles
           const trimmedPhone = (res.guestPhone || '').trim();
           const trimmedEmail = (res.guestEmail || '').trim();
           const trimmedName = (res.guestName || '').trim();
-          let existingSnap = null;
-          if (trimmedPhone) {
-            const snap = await getDocs(query(guestsCol, where('phone', '==', trimmedPhone), limit(1)));
-            if (!snap.empty) existingSnap = snap.docs[0];
-          }
-          if (!existingSnap && trimmedEmail) {
-            const snap = await getDocs(query(guestsCol, where('email', '==', trimmedEmail), limit(1)));
-            if (!snap.empty) existingSnap = snap.docs[0];
-          }
-          if (!existingSnap && trimmedName) {
-            const snap = await getDocs(query(guestsCol, where('name', '==', trimmedName), limit(1)));
-            if (!snap.empty) existingSnap = snap.docs[0];
+          const trimmedIdNumber = ((res as any).idNumber || '').trim();
+
+          let candidateGuests = liveGuests;
+          if (candidateGuests.length === 0) {
+            const allGuestsSnap = await getDocs(guestsCol);
+            candidateGuests = allGuestsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Guest));
           }
 
-          if (existingSnap) {
-            resolvedGuestId = existingSnap.id;
+          const returningMatch = findReturningGuestMatch(
+            {
+              name: trimmedName,
+              email: trimmedEmail,
+              phone: trimmedPhone,
+              idNumber: trimmedIdNumber,
+            },
+            candidateGuests,
+            loyaltyAccountsMap
+          );
+
+          if (returningMatch) {
+            resolvedGuestId = returningMatch.guest.id;
+            const missingUpdates = buildMissingGuestFieldUpdates(returningMatch.guest, {
+              email: trimmedEmail,
+              phone: trimmedPhone,
+              idNumber: trimmedIdNumber,
+            });
             await database.safeUpdate(doc(db, 'hotels', hotel.id, 'guests', resolvedGuestId), {
+              ...missingUpdates,
               totalStays: increment(1),
               lastStay: res.checkIn || todayStr,
               updatedAt: now.toISOString()
@@ -408,7 +460,7 @@ export function QuickCheckInModal({
               hotelId: hotel.id,
               module: 'Guests',
               action: 'STAY_COUNT_INCREMENT',
-              details: `Incremented stay count for existing guest ${resolvedGuestId} upon quick check-in`
+              details: `Linked returning guest ${resolvedGuestId} (via ${returningMatch.matchReasons.join(', ')}) and incremented stay count upon quick check-in`
             });
           } else {
             const newGuestRef = await addDoc(guestsCol, {
@@ -580,45 +632,56 @@ export function QuickCheckInModal({
           ? 'partial' 
           : 'unpaid';
 
-      // 1. Resolve or create guest in hotel's guests collection
+      // 1. Resolve or create guest in hotel's guests collection using multi-signal returning guest detection
       let linkedGuestId = '';
+      let matchedReturningLabel: { name: string; reasons: string[]; availablePoints: number } | null = null;
       const trimmedPhone = guestPhone.trim();
       const trimmedEmail = guestEmail.trim();
       const trimmedName = guestName.trim();
 
       try {
         const guestsCol = collection(db, 'hotels', hotel.id, 'guests');
-        let existingGuestSnap = null;
-        if (trimmedPhone) {
-          const snap = await getDocs(query(guestsCol, where('phone', '==', trimmedPhone), limit(1)));
-          if (!snap.empty) existingGuestSnap = snap.docs[0];
-        }
-        if (!existingGuestSnap && trimmedEmail) {
-          const snap = await getDocs(query(guestsCol, where('email', '==', trimmedEmail), limit(1)));
-          if (!snap.empty) existingGuestSnap = snap.docs[0];
-        }
-        if (!existingGuestSnap && trimmedName) {
-          const snap = await getDocs(query(guestsCol, where('name', '==', trimmedName), limit(1)));
-          if (!snap.empty) existingGuestSnap = snap.docs[0];
+        let candidateGuests = liveGuests;
+        if (candidateGuests.length === 0) {
+          const allGuestsSnap = await getDocs(guestsCol);
+          candidateGuests = allGuestsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Guest));
         }
 
-        if (existingGuestSnap) {
-          linkedGuestId = existingGuestSnap.id;
+        const explicitlySelected = selectedWalkInGuestId
+          ? candidateGuests.find((g) => g.id === selectedWalkInGuestId)
+          : undefined;
+        const autoMatch = findReturningGuestMatch(
+          { name: trimmedName, email: trimmedEmail, phone: trimmedPhone },
+          candidateGuests,
+          loyaltyAccountsMap
+        );
+        const resolvedExisting = explicitlySelected || autoMatch?.guest;
+
+        if (resolvedExisting) {
+          linkedGuestId = resolvedExisting.id;
           const guestRef = doc(db, 'hotels', hotel.id, 'guests', linkedGuestId);
+          const missingUpdates = buildMissingGuestFieldUpdates(resolvedExisting, {
+            email: trimmedEmail,
+            phone: trimmedPhone,
+          });
           await database.safeUpdate(guestRef, {
+            ...missingUpdates,
             totalStays: increment(1),
             totalNights: increment(walkInNights),
             totalSpent: increment(initialPaid),
             lastStay: checkInDate,
-            phone: trimmedPhone || existingGuestSnap.data().phone || '',
-            email: trimmedEmail || existingGuestSnap.data().email || '',
             updatedAt: now.toISOString()
           }, {
             hotelId: hotel.id,
             module: 'Guests',
             action: 'GUEST_UPDATED',
-            details: `Updated stay count and details for guest ${trimmedName} on Express Walk-in Check-in`
+            details: `Linked returning guest ${resolvedExisting.name || trimmedName} (${autoMatch?.matchReasons?.join(', ') || 'Profile Selected'}) on Express Walk-in Check-in`
           });
+          matchedReturningLabel = {
+            name: resolvedExisting.name || trimmedName,
+            reasons: autoMatch?.matchReasons || ['Profile'],
+            availablePoints: loyaltyAccountsMap[linkedGuestId]?.availablePoints || 0,
+          };
         } else {
           const guestDocRef = await addDoc(guestsCol, {
             name: trimmedName,
@@ -640,6 +703,15 @@ export function QuickCheckInModal({
       } catch (guestErr) {
         console.error('Failed to link/create guest record during quick check-in:', guestErr);
         linkedGuestId = `guest_${Date.now()}`;
+      }
+      if (matchedReturningLabel) {
+        const ptsText =
+          matchedReturningLabel.availablePoints > 0
+            ? ` (${matchedReturningLabel.availablePoints.toLocaleString()} unredeemed loyalty pts preserved)`
+            : '';
+        toast.info(
+          `Returning guest "${matchedReturningLabel.name}" linked via ${matchedReturningLabel.reasons.join(', ')}${ptsText}.`
+        );
       }
 
       // 2. Create reservation document with linked guestId
@@ -1026,7 +1098,10 @@ export function QuickCheckInModal({
                     required
                     placeholder="e.g. Adebayo Adeleke"
                     value={guestName}
-                    onChange={(e) => setGuestName(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedWalkInGuestId('');
+                      setGuestName(e.target.value);
+                    }}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2.5 text-base sm:text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 min-h-[44px]"
                     autoFocus
                   />
@@ -1040,7 +1115,10 @@ export function QuickCheckInModal({
                       type="tel"
                       placeholder="+234..."
                       value={guestPhone}
-                      onChange={(e) => setGuestPhone(e.target.value)}
+                      onChange={(e) => {
+                        setSelectedWalkInGuestId('');
+                        setGuestPhone(e.target.value);
+                      }}
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2.5 text-base sm:text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 min-h-[44px]"
                     />
                   </div>
@@ -1052,11 +1130,55 @@ export function QuickCheckInModal({
                       type="email"
                       placeholder="guest@example.com"
                       value={guestEmail}
-                      onChange={(e) => setGuestEmail(e.target.value)}
+                      onChange={(e) => {
+                        setSelectedWalkInGuestId('');
+                        setGuestEmail(e.target.value);
+                      }}
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2.5 text-base sm:text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 min-h-[44px]"
                     />
                   </div>
                 </div>
+
+                {/* Returning Guest Detection & Loyalty Preservation Banner */}
+                {detectedWalkInMatch && (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/25 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                    <div className="flex items-start gap-2">
+                      <Users size={15} className="text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-semibold text-amber-300">
+                          Returning Guest Detected ({detectedWalkInMatch.guest.totalStays || 0} prior {(detectedWalkInMatch.guest.totalStays || 0) === 1 ? 'stay' : 'stays'})
+                        </p>
+                        <p className="text-zinc-400 mt-0.5">
+                          Matches <span className="text-zinc-100 font-medium">{detectedWalkInMatch.guest.name}</span> via <span className="text-amber-300">{detectedWalkInMatch.matchReasons.join(' + ')}</span>. Will auto-link to existing account.
+                        </p>
+                        {detectedWalkInMatch.loyaltyAccount && (detectedWalkInMatch.loyaltyAccount.availablePoints > 0 || detectedWalkInMatch.loyaltyAccount.lifetimePointsEarned > 0) && (
+                          <p className="text-amber-300 font-semibold mt-1 flex items-center gap-1">
+                            <Award size={12} className="shrink-0" />
+                            <span>
+                              {detectedWalkInMatch.loyaltyAccount.availablePoints.toLocaleString()} unredeemed pts ({detectedWalkInMatch.loyaltyAccount.membershipLevelName || 'Member'}) — will keep accumulating
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {selectedWalkInGuestId !== detectedWalkInMatch.guest.id && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const g = detectedWalkInMatch.guest;
+                          setSelectedWalkInGuestId(g.id);
+                          setGuestName(g.name || guestName);
+                          if (g.phone) setGuestPhone(g.phone);
+                          if (g.email) setGuestEmail(g.email);
+                          toast.success(`Linked to existing profile: ${g.name}`);
+                        }}
+                        className="shrink-0 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-[10px] uppercase tracking-wider px-3 py-1.5 rounded-lg cursor-pointer self-end sm:self-center"
+                      >
+                        Use Profile
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Stay Period & Available Room */}

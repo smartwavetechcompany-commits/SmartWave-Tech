@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, getDocs, getDoc, where, writeBatch, increment, arrayUnion, addDoc, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking, LedgerEntry, Promotion } from '../types';
+import { Reservation, Room, Guest, CorporateAccount, CorporateRate, OperationType, RoomType, RoomBlocking, LedgerEntry, Promotion, LoyaltyAccount } from '../types';
 import { postToLedger, settleLedger, transferToCityLedger, processAutomatedBillingForReservation, deleteReservationWithFinancialReversal, reconcileAndRepairReservationFinancials, reconcileCorporateAccountBalance, applyPolicyPenaltyForReservation } from '../services/ledgerService';
 import { principalRoomService } from '../services/principalRoomService';
 import { recordOutstandingDebt, checkReturningGuestDebt, syncOutstandingDebtWithReservation } from '../services/debtService';
@@ -21,6 +21,8 @@ import {
 } from '../services/guestDepositService';
 import { printDocument } from '../utils/printUtils';
 import { notifyReservationEmailEvent, notifyPlatformEvent } from '../services/transactionalEmailClient';
+import { tryAutoAwardLoyaltyOnStayCompletion } from '../services/loyaltyService';
+import { findReturningGuestMatch, buildMissingGuestFieldUpdates } from '../utils/guestMatchingUtils';
 import { QrCode, Key as SmartKeyIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -63,7 +65,8 @@ import {
   UserCheck,
   ChevronDown,
   Check,
-  Wallet
+  Wallet,
+  Award
 } from 'lucide-react';
 import { cn, formatCurrency, exportToCSV, safeStringify } from '../utils';
 import { database } from '../utils/database';
@@ -105,6 +108,7 @@ export function FrontDesk() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
+  const [loyaltyAccountsMap, setLoyaltyAccountsMap] = useState<Record<string, LoyaltyAccount>>({});
   const [depositModalGuest, setDepositModalGuest] = useState<Guest | null>(null);
   const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
   const [activeCorporateRates, setActiveCorporateRates] = useState<CorporateRate[]>([]);
@@ -809,6 +813,22 @@ export function FrontDesk() {
       setAvailablePromotions(promos.filter(p => p.status === 'active'));
     });
 
+    // Additive read-only listener for loyalty accounts to support returning guest recognition & tie-breaking
+    const unsubLoyaltyAccounts = onSnapshot(
+      collection(db, 'hotels', hotel.id, 'loyaltyAccounts'),
+      (snap) => {
+        const nextMap: Record<string, LoyaltyAccount> = {};
+        snap.docs.forEach((d) => {
+          const acc = { id: d.id, ...d.data() } as LoyaltyAccount;
+          nextMap[acc.guestId || d.id] = acc;
+        });
+        setLoyaltyAccountsMap(nextMap);
+      },
+      () => {
+        // Silent fallback if operator role does not have loyalty read permission
+      }
+    );
+
     return () => {
       try { unsubRes(); } catch (_) {}
       try { unsubRooms(); } catch (_) {}
@@ -822,6 +842,7 @@ export function FrontDesk() {
       try { unsubRateConfigs(); } catch (_) {}
       try { unsubLedger(); } catch (_) {}
       try { unsubPromo(); } catch (_) {}
+      try { unsubLoyaltyAccounts(); } catch (_) {}
     };
   }, [hotel?.id, profile?.uid]);
 
@@ -1290,6 +1311,9 @@ export function FrontDesk() {
     setLoading(true);
     try {
       const batch = writeBatch(db);
+      const batchCreatedGuests: Guest[] = [];
+      const updatedExistingGuestIds = new Set<string>();
+      const autoLinkedReturningGuests: Array<{ name: string; reasons: string[]; availablePoints: number }> = [];
       const createdStays: { 
         resId: string; 
         guestId: string; 
@@ -1400,23 +1424,66 @@ export function FrontDesk() {
 
         let guestId = stay.guestId;
         if (!guestId) {
-          const guestRef = doc(collection(db, 'hotels', hotel.id, 'guests'));
-          batch.set(guestRef, {
-            name: stay.guestName,
-            email: stay.guestEmail,
-            phone: stay.guestPhone,
-            idType: stay.idType,
-            idNumber: stay.idNumber,
-            address: stay.address,
-            corporateId: newBooking.corporateId,
-            ledgerBalance: 0,
-            totalStays: 0,
-            totalNights: 0,
-            totalSpent: 0,
-            preferredBookingSource: newBooking.bookingSource || defaultBookingSource?.name || 'Walk-in',
-            createdAt: new Date().toISOString()
-          });
-          guestId = guestRef.id;
+          // Automatically detect returning guest from existing profiles (or earlier stay in this batch)
+          // so duplicate guest profiles are avoided and unredeemed loyalty points keep accumulating on one account.
+          const returningMatch = findReturningGuestMatch(
+            {
+              name: stay.guestName,
+              email: stay.guestEmail,
+              phone: stay.guestPhone,
+              idNumber: stay.idNumber,
+              idType: stay.idType,
+              address: stay.address,
+            },
+            [...guests, ...batchCreatedGuests],
+            loyaltyAccountsMap
+          );
+
+          if (returningMatch) {
+            guestId = returningMatch.guest.id;
+            const isFromExistingPersisted = guests.some((g) => g.id === guestId);
+            if (isFromExistingPersisted && !updatedExistingGuestIds.has(guestId)) {
+              const missingUpdates = buildMissingGuestFieldUpdates(returningMatch.guest, {
+                email: stay.guestEmail,
+                phone: stay.guestPhone,
+                idType: stay.idType,
+                idNumber: stay.idNumber,
+                address: stay.address,
+              });
+              if (Object.keys(missingUpdates).length > 0) {
+                batch.update(doc(db, 'hotels', hotel.id, 'guests', guestId), {
+                  ...missingUpdates,
+                  updatedAt: new Date().toISOString(),
+                });
+              }
+              updatedExistingGuestIds.add(guestId);
+              autoLinkedReturningGuests.push({
+                name: returningMatch.guest.name || stay.guestName,
+                reasons: returningMatch.matchReasons,
+                availablePoints: returningMatch.loyaltyAccount?.availablePoints || 0,
+              });
+            }
+          } else {
+            const guestRef = doc(collection(db, 'hotels', hotel.id, 'guests'));
+            const newGuestPayload = {
+              name: stay.guestName,
+              email: stay.guestEmail,
+              phone: stay.guestPhone,
+              idType: stay.idType,
+              idNumber: stay.idNumber,
+              address: stay.address,
+              corporateId: newBooking.corporateId,
+              ledgerBalance: 0,
+              totalStays: 0,
+              totalNights: 0,
+              totalSpent: 0,
+              preferredBookingSource: newBooking.bookingSource || defaultBookingSource?.name || 'Walk-in',
+              createdAt: new Date().toISOString()
+            };
+            batch.set(guestRef, newGuestPayload);
+            guestId = guestRef.id;
+            batchCreatedGuests.push({ id: guestId, ...newGuestPayload } as Guest);
+          }
         }
 
         const initialRateSnapshot = buildInitialRateSnapshot({
@@ -1508,6 +1575,17 @@ export function FrontDesk() {
         details: `Created batch of ${allStays.length} bookings for ${newBooking.guestName}`,
         userContext: { uid: profile.uid, email: profile.email, role: profile.role }
       });
+
+      if (autoLinkedReturningGuests.length > 0) {
+        const primaryLinked = autoLinkedReturningGuests[0];
+        const ptsSummary =
+          primaryLinked.availablePoints > 0
+            ? ` (${primaryLinked.availablePoints.toLocaleString()} unredeemed loyalty pts preserved & accumulating)`
+            : ' (existing stay & loyalty history preserved)';
+        toast.info(
+          `Returning guest "${primaryLinked.name}" detected via ${primaryLinked.reasons.join(', ')} and linked to existing account${ptsSummary}.`
+        );
+      }
 
       // logActivity for each created stay
       for (const stay of createdStays) {
@@ -3024,6 +3102,30 @@ export function FrontDesk() {
             }
           }).catch(() => {});
           toast.success('Guest checked out successfully.');
+
+          // Additive non-blocking loyalty accumulation for settled completed stay
+          if (res.guestId) {
+            const matchedGuestObj = guests.find((g) => g.id === res.guestId);
+            void tryAutoAwardLoyaltyOnStayCompletion(
+              hotel,
+              matchedGuestObj || res.guestId,
+              {
+                ...res,
+                status: 'checked_out',
+                checkOut: checkoutDateStr,
+                totalAmount: totalDebits,
+                ledgerBalance: outstandingBalance,
+              },
+              profile,
+              customRoles
+            ).then((awardRes) => {
+              if (awardRes.awarded && awardRes.pointsAwarded) {
+                toast.success(
+                  `Loyalty points accumulated for ${res.guestName}: +${awardRes.pointsAwarded.toLocaleString()} pts (Balance: ${(awardRes.updatedBalance || 0).toLocaleString()} pts).`
+                );
+              }
+            });
+          }
         }
 
         if (res.corporateId) {
@@ -3264,6 +3366,24 @@ export function FrontDesk() {
                 paidAmount: freshData.paidAmount || 0,
                 paymentStatus: freshData.paymentStatus || 'paid'
               }, { merge: true });
+
+              // Additive non-blocking loyalty accumulation when a checked-out stay becomes settled
+              if ((freshData.ledgerBalance ?? 0) <= 0.01 && res.guestId) {
+                const matchedGuestObj = guests.find((g) => g.id === res.guestId);
+                void tryAutoAwardLoyaltyOnStayCompletion(
+                  hotel,
+                  matchedGuestObj || res.guestId,
+                  { ...res, ...freshData, id: res.id, status: 'checked_out' },
+                  profile,
+                  customRoles
+                ).then((awardRes) => {
+                  if (awardRes.awarded && awardRes.pointsAwarded) {
+                    toast.success(
+                      `Loyalty points accumulated for ${res.guestName}: +${awardRes.pointsAwarded.toLocaleString()} pts (Balance: ${(awardRes.updatedBalance || 0).toLocaleString()} pts).`
+                    );
+                  }
+                });
+              }
             }
           }
         } catch (syncErr) {
@@ -4195,26 +4315,26 @@ export function FrontDesk() {
               {/* Returning Guest Auto-Detection Banner */}
               {(() => {
                 if (newBooking.guestId) return null;
-                const normalizedEmail = newBooking.guestEmail?.trim().toLowerCase();
-                const normalizedPhone = newBooking.guestPhone?.trim();
-                const normalizedName = newBooking.guestName?.trim().toLowerCase();
 
-                if (!normalizedEmail && !normalizedPhone && !normalizedName) return null;
+                const returningMatch = findReturningGuestMatch(
+                  {
+                    name: newBooking.guestName,
+                    email: newBooking.guestEmail,
+                    phone: newBooking.guestPhone,
+                    idNumber: newBooking.idNumber,
+                  },
+                  guests,
+                  loyaltyAccountsMap
+                );
 
-                const match = guests.find(g => {
-                  if (normalizedEmail && g.email && g.email.trim().toLowerCase() === normalizedEmail) return true;
-                  if (normalizedPhone && g.phone && g.phone.trim() === normalizedPhone) return true;
-                  // Look for name match but only if they have typed at least 3 characters
-                  if (normalizedName && normalizedName.length >= 3 && g.name && g.name.trim().toLowerCase() === normalizedName) return true;
-                  return false;
-                });
+                if (!returningMatch) return null;
 
-                if (!match) return null;
-
-                const guestRes = reservations.filter(r => r.guestId === match.id || (match.email && r.guestEmail === match.email));
+                const match = returningMatch.guest;
+                const guestRes = reservations.filter(r => r.guestId === match.id || (match.email && r.guestEmail && r.guestEmail.trim().toLowerCase() === match.email.trim().toLowerCase()));
                 const completedCount = guestRes.filter(r => r.status === 'checked_out').length;
                 const activeCount = guestRes.filter(r => r.status === 'checked_in').length;
-                const staysCount = completedCount + activeCount;
+                const staysCount = Math.max(completedCount + activeCount, match.totalStays || 0);
+                const loyaltyAcc = returningMatch.loyaltyAccount || loyaltyAccountsMap[match.id];
 
                 return (
                   <motion.div 
@@ -4227,10 +4347,20 @@ export function FrontDesk() {
                         <Users size={16} />
                       </div>
                       <div>
-                        <p className="font-semibold text-amber-300">Returning Guest Detected ({staysCount} previous {staysCount === 1 ? 'visit' : 'visits'})</p>
-                        <p className="text-zinc-400 mt-0.5">
-                          We found an existing profile for <span className="text-zinc-50 font-medium">{match.name}</span> ({match.email || match.phone || 'No contact'}). Match level is high.
+                        <p className="font-semibold text-amber-300">
+                          Returning Guest Detected ({staysCount} previous {staysCount === 1 ? 'visit' : 'visits'})
                         </p>
+                        <p className="text-zinc-400 mt-0.5">
+                          Matched existing profile <span className="text-zinc-50 font-medium">{match.name}</span> ({match.email || match.phone || match.idNumber || 'No contact'}) via <span className="text-amber-300 font-medium">{returningMatch.matchReasons.join(' + ')}</span>. Will auto-link on save.
+                        </p>
+                        {loyaltyAcc && (loyaltyAcc.availablePoints > 0 || loyaltyAcc.lifetimePointsEarned > 0) && (
+                          <p className="text-amber-300 font-bold mt-1 flex items-center gap-1.5 flex-wrap">
+                            <Award size={12} className="shrink-0" />
+                            <span>
+                              Loyalty Balance: {loyaltyAcc.availablePoints.toLocaleString()} pts ({loyaltyAcc.membershipLevelName || 'Member'}) — unredeemed points will keep accumulating on this account
+                            </span>
+                          </p>
+                        )}
                         {getAvailableGuestDeposit(match) > 0.01 && (
                           <p className="text-emerald-400 font-bold mt-1 flex items-center gap-1">
                             <Wallet size={11} />
@@ -4246,15 +4376,15 @@ export function FrontDesk() {
                           ...newBooking,
                           guestId: match.id,
                           guestName: match.name,
-                          guestEmail: match.email || '',
-                          guestPhone: match.phone || '',
-                          idType: match.idType || '',
-                          idNumber: match.idNumber || '',
-                          address: match.address || '',
+                          guestEmail: match.email || newBooking.guestEmail || '',
+                          guestPhone: match.phone || newBooking.guestPhone || '',
+                          idType: match.idType || newBooking.idType || '',
+                          idNumber: match.idNumber || newBooking.idNumber || '',
+                          address: match.address || newBooking.address || '',
                           corporateId: match.corporateId || newBooking.corporateId,
                           guestType: match.corporateId ? 'corporate' : newBooking.guestType
                         });
-                        toast.success(`Matched to returning guest: ${match.name}`);
+                        toast.success(`Linked to returning guest: ${match.name}`);
                       }}
                       className="shrink-0 bg-amber-500 hover:bg-amber-600 active:scale-95 text-black px-3.5 py-1.5 rounded-lg font-bold text-[10px] uppercase tracking-wide transition-all self-end sm:self-center cursor-pointer"
                     >

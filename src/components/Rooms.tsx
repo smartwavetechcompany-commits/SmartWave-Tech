@@ -60,6 +60,7 @@ import { RestaurantPostingControlModal } from './RestaurantPostingControlModal';
 import { useNavigate } from 'react-router-dom';
 import { AvailableRoomsModal } from './AvailableRoomsModal';
 import { Pagination } from './Pagination';
+import { tryAutoAwardLoyaltyOnStayCompletion } from '../services/loyaltyService';
 
 export function Rooms() {
   const navigate = useNavigate();
@@ -956,6 +957,29 @@ export function Rooms() {
             }
           }).catch(() => {});
           toast.success(`Guest checked out successfully`, { id: toastId });
+
+          // Additive non-blocking loyalty accumulation for settled completed stay
+          if (res.guestId) {
+            void tryAutoAwardLoyaltyOnStayCompletion(
+              hotel,
+              res.guestId,
+              {
+                ...res,
+                status: 'checked_out',
+                checkOut: checkoutDateStr,
+                totalAmount: totalDebits,
+                ledgerBalance: outstandingBalance,
+              },
+              profile,
+              customRoles
+            ).then((awardRes) => {
+              if (awardRes.awarded && awardRes.pointsAwarded) {
+                toast.success(
+                  `Loyalty points accumulated for ${res.guestName}: +${awardRes.pointsAwarded.toLocaleString()} pts (Balance: ${(awardRes.updatedBalance || 0).toLocaleString()} pts).`
+                );
+              }
+            });
+          }
         }
 
         if (res.corporateId) {
