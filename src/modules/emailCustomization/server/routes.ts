@@ -981,6 +981,7 @@ export function mountEmailCustomizationRoutes(
       const generated = await generateDailyOpsReportForHotel({
         hotelId: ctx.hotelId,
         reportDate,
+        defaultToCurrentDay: true,
         sectionsOverride,
         bearerToken: ctx.bearerToken,
       });

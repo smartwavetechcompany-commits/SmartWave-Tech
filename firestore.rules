@@ -205,6 +205,22 @@ service cloud.firestore {
       );
     }
 
+    function isStrictHotelAdminOf(hotelId) {
+      let data = getUserData();
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        (exists(/databases/$(database)/documents/hotels/$(hotelId)) &&
+         get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs != null &&
+         get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs is list &&
+         get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid])) ||
+        (sameHotel(hotelId) && data != null &&
+         data.role != "guest" && data.role != "corporate" &&
+         data.get('status', 'active') != "suspended" &&
+         data.get('status', 'active') != "inactive" &&
+         (data.role == "hotelAdmin" || data.role == "admin" || data.role == "hotel_admin"))
+      );
+    }
+
     function canViewLoyalty(hotelId) {
       let data = getUserData();
       let roleId = data != null ? data.get('customRoleId', '') : '';
@@ -617,17 +633,18 @@ service cloud.firestore {
         allow create, update: if isValidLoyaltyId(guestId) &&
                                  canManageLoyalty(hotelId) &&
                                  isValidLoyaltyAccount(request.resource.data, hotelId, guestId);
-        allow delete: if isSuperAdmin();
+        allow delete: if isStrictHotelAdminOf(hotelId);
       }
 
-      // Guest Loyalty Transactions (Strictly immutable append-only ledger — no edits or deletions)
+      // Guest Loyalty Transactions (Append-only ledger — no edits; deletion restricted to Hotel Admin / SuperAdmin for Complete System Reset)
       match /loyaltyTransactions/{txId} {
         allow get: if isValidLoyaltyId(txId) && canViewLoyalty(hotelId);
         allow list: if canViewLoyalty(hotelId);
         allow create: if isValidLoyaltyId(txId) &&
                          canManageLoyalty(hotelId) &&
                          isValidLoyaltyTransaction(request.resource.data, hotelId);
-        allow update, delete: if false;
+        allow update: if false;
+        allow delete: if isStrictHotelAdminOf(hotelId);
       }
 
       // Recursive subcollections (Reservations, Housekeeping, Staff, etc. — excludes hardened loyalty & daily ops collections)

@@ -566,6 +566,17 @@ export function computePreviousCalendarDayWindow(referenceNow: Date, timezone: s
 }
 
 /**
+ * Computes the current calendar day window relative to `referenceNow` in the hotel's timezone.
+ * Used for interactive Preview and Send Test operations so live current-day PMS figures match
+ * the Dashboard 1-to-1 when no historical date is explicitly chosen.
+ */
+export function computeCurrentCalendarDayWindow(referenceNow: Date, timezone: string) {
+  const safeTz = isValidIanaTimezone(timezone) ? timezone : DEFAULT_DAILY_OPS_TIMEZONE;
+  const localNow = getZonedDateParts(referenceNow, safeTz);
+  return computeCalendarDayWindow(localNow.dateStr, safeTz);
+}
+
+/**
  * Determines whether a hotel is currently due for its scheduled daily operations report delivery.
  * Because the report covers the preceding calendar day, once the hotel's local clock reaches
  * or passes `scheduledTime` (default 00:00) on calendar day D, the target reportDate is D-1.

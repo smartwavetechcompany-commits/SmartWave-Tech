@@ -24,21 +24,39 @@ import {
   type DailyOpsRoomTransitionItem,
 } from "../shared/dailyOpsTypes.ts";
 
+function normalizeStatusToken(value: unknown): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
 /**
  * Server-safe read-only room display status resolver matching src/utils/roomUtils.ts
  * without importing frontend extensionless modules under Node native ESM.
+ *
+ * When a room's live `room.status` is "occupied" solely because a guest checked in
+ * AFTER a historical reporting date (`occupiedAfterReportDate === true`), we do NOT
+ * artificially convert it into a phantom "dirty" room for the earlier date.
  */
 function resolveRoomDisplayStatusReadOnly(
   room: Record<string, any>,
   isOccupied: boolean,
   isBlocked: boolean,
-  isReserved: boolean
+  isReserved: boolean,
+  occupiedAfterReportDate = false
 ): string {
   if (isOccupied) return "occupied";
   if (isBlocked) return "maintenance";
   if (isReserved) return "reserved";
-  const raw = String(room?.status || "").toLowerCase();
-  if (raw === "occupied") return "dirty";
+  const raw = normalizeStatusToken(room?.status);
+  if (raw === "occupied") {
+    if (occupiedAfterReportDate) {
+      const hk = normalizeStatusToken(room?.housekeepingStatus);
+      return hk === "dirty" || hk === "failed" ? "dirty" : "clean";
+    }
+    return "dirty";
+  }
   return raw;
 }
 
@@ -62,6 +80,7 @@ export interface DailyOpsAggregationInput {
   periodEndUtc: Date;
   timezone: string;
   generatedAt?: string;
+  initialLimitations?: string[];
 }
 
 /**
@@ -126,7 +145,15 @@ function extractLocalDateStr(value: unknown, timezone: string): string | null {
   return getZonedDateParts(dt, timezone).dateStr;
 }
 
-function isTimestampWithinWindow(value: unknown, startUtc: Date, endUtc: Date): boolean {
+function isTimestampWithinWindow(
+  value: unknown,
+  startUtc: Date,
+  endUtc: Date,
+  reportDate?: string
+): boolean {
+  if (typeof value === "string" && reportDate && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    return value.trim() === reportDate;
+  }
   const dt = parseAnyTimestamp(value);
   if (!dt) return false;
   const ms = dt.getTime();
@@ -221,18 +248,42 @@ export function buildDailyOperationsReport(input: DailyOpsAggregationInput): Dai
   } = input;
 
   const generatedAt = input.generatedAt || new Date().toISOString();
+  const generatedDate = parseAnyTimestamp(generatedAt) || new Date();
+  const todayLocalDate = getZonedDateParts(generatedDate, timezone).dateStr;
+  const isLiveSnapshotDay = reportDate >= todayLocalDate;
+
   const hotelName =
     hotelDoc?.branding?.organizationName || hotelDoc?.name || "Hotel Property";
 
-  const limitations: string[] = [];
+  const limitations: string[] = Array.isArray(input.initialLimitations)
+    ? [...input.initialLimitations]
+    : [];
 
-  // Map roomId -> roomNumber for consistent lookup
+  // Map roomId -> roomNumber and normalized roomNumber -> roomId for consistent lookup
   const roomNumberById = new Map<string, string>();
+  const roomIdByNumber = new Map<string, string>();
   for (const r of rooms) {
     if (r?.id) {
-      roomNumberById.set(String(r.id), String(r.roomNumber || r.name || r.id));
+      const idStr = String(r.id);
+      const numStr = String(r.roomNumber || r.name || r.id).trim();
+      roomNumberById.set(idStr, numStr);
+      if (numStr) {
+        roomIdByNumber.set(numStr.toLowerCase(), idStr);
+      }
     }
   }
+
+  const resolveReservationRoomId = (res: Record<string, any>): string => {
+    const rawRoomId = String(res?.roomId || "").trim();
+    if (rawRoomId && roomNumberById.has(rawRoomId)) {
+      return rawRoomId;
+    }
+    const rawRoomNum = String(res?.roomNumber || "").trim().toLowerCase();
+    if (rawRoomNum && roomIdByNumber.has(rawRoomNum)) {
+      return roomIdByNumber.get(rawRoomNum) || rawRoomId;
+    }
+    return rawRoomId;
+  };
 
   // Standard hotel check-in / check-out cutoff times for early arrival / early departure detection
   const standardCheckInMinutes = parseHhMmToMinutes(
@@ -257,28 +308,55 @@ export function buildDailyOperationsReport(input: DailyOpsAggregationInput): Dai
   // Active room blockings overlapping the reporting day
   const activeBlockedRoomIds = new Set<string>();
   for (const blk of roomBlockings) {
+    const blkStatus = normalizeStatusToken(blk.status);
+    if (["released", "cancelled", "expired", "completed", "unblocked"].includes(blkStatus)) {
+      continue;
+    }
     const blkStart = extractLocalDateStr(blk.startDate, timezone);
     const blkEnd = extractLocalDateStr(blk.endDate, timezone);
     if (!blkStart || !blkEnd) continue;
     if (blkStart <= reportDate && blkEnd >= reportDate) {
-      if (blk.roomId) activeBlockedRoomIds.add(String(blk.roomId));
+      const resolvedBlkRoomId = resolveReservationRoomId(blk);
+      if (resolvedBlkRoomId) activeBlockedRoomIds.add(resolvedBlkRoomId);
+    }
+  }
+
+  // Track all rooms that currently have an active checked_in reservation right now
+  // so historical reports never misclassify a later check-in's live `status: "occupied"` as "dirty".
+  const currentlyCheckedInRoomIds = new Set<string>();
+  for (const res of uniqueReservations) {
+    if (normalizeStatusToken(res.status) === "checked_in") {
+      const rId = resolveReservationRoomId(res);
+      if (rId) currentlyCheckedInRoomIds.add(rId);
     }
   }
 
   // In-house reservations overlapping the reporting cutoff
-  // Strictly excludes cancelled and no_show (never counted as occupied/completed stays)
+  // Strictly excludes cancelled and no_show (never counted as occupied/completed stays).
+  // On live current-day reports (Preview / Send Test for today), matches Dashboard.tsx exactly:
+  // every reservation with status === "checked_in" is currently in-house.
   const inHouseReservations = uniqueReservations.filter((res) => {
-    const status = String(res.status || "").toLowerCase();
+    const status = normalizeStatusToken(res.status);
     if (status === "cancelled" || status === "no_show") return false;
     if (status === "checked_in") {
-      // Ensure the reservation started on or before the reporting day
-      const ciDate = extractLocalDateStr(res.actualCheckIn || res.checkIn, timezone);
+      if (isLiveSnapshotDay) return true;
+      // Historical report date: ensure the reservation started on or before the reporting day
+      const ciDate = extractLocalDateStr(
+        res.actualCheckIn || res.checkInDateTime || res.checkIn,
+        timezone
+      );
       return !ciDate || ciDate <= reportDate;
     }
     if (status === "checked_out") {
       // Was in-house at end of reporting day if checked in <= reportDate and checked out > reportDate
-      const ciDate = extractLocalDateStr(res.actualCheckIn || res.checkIn, timezone);
-      const coDate = extractLocalDateStr(res.actualCheckOut || res.checkOut, timezone);
+      const ciDate = extractLocalDateStr(
+        res.actualCheckIn || res.checkInDateTime || res.checkIn,
+        timezone
+      );
+      const coDate = extractLocalDateStr(
+        res.actualCheckOut || res.checkOutDateTime || res.checkOut,
+        timezone
+      );
       return Boolean(ciDate && coDate && ciDate <= reportDate && coDate > reportDate);
     }
     return false;
@@ -286,18 +364,20 @@ export function buildDailyOperationsReport(input: DailyOpsAggregationInput): Dai
 
   const occupiedRoomIds = new Set<string>();
   for (const res of inHouseReservations) {
-    if (res.roomId) occupiedRoomIds.add(String(res.roomId));
+    const rId = resolveReservationRoomId(res);
+    if (rId) occupiedRoomIds.add(rId);
   }
 
   // Reserved rooms for the reporting day (confirmed/pending arriving on or staying over reportDate)
   const reservedRoomIds = new Set<string>();
   for (const res of uniqueReservations) {
-    const status = String(res.status || "").toLowerCase();
+    const status = normalizeStatusToken(res.status);
     if (status !== "confirmed" && status !== "pending") continue;
     const ciDate = extractLocalDateStr(res.checkIn, timezone);
     const coDate = extractLocalDateStr(res.checkOut, timezone);
-    if (ciDate && coDate && ciDate <= reportDate && coDate > reportDate && res.roomId) {
-      reservedRoomIds.add(String(res.roomId));
+    const rId = resolveReservationRoomId(res);
+    if (ciDate && coDate && ciDate <= reportDate && coDate > reportDate && rId) {
+      reservedRoomIds.add(rId);
     }
   }
 
@@ -320,23 +400,28 @@ export function buildDailyOperationsReport(input: DailyOpsAggregationInput): Dai
 
   for (const room of rooms) {
     const roomId = String(room.id || "");
-    const rawStatus = String(room.status || "").toLowerCase();
-    const hkStatus = String(room.housekeepingStatus || "").toLowerCase();
+    const rawStatus = normalizeStatusToken(room.status);
+    const hkStatus = normalizeStatusToken(room.housekeepingStatus);
 
-    const isOccupied =
-      occupiedRoomIds.has(roomId) ||
-      (rawStatus === "occupied" && inHouseReservations.length === 0 && false); // Reuse Dashboard's authoritative in-house reservation match
-    const isOutOfOrder = rawStatus === "out_of_order" || rawStatus === "out_of_service";
-    const isMaintenance = rawStatus === "maintenance";
-    const isBlocked = activeBlockedRoomIds.has(roomId);
-    const isReserved = !isOccupied && !isOutOfOrder && !isMaintenance && !isBlocked && (reservedRoomIds.has(roomId) || rawStatus === "reserved");
+    const isOccupied = occupiedRoomIds.has(roomId);
+    const occupiedAfterReportDate = !isOccupied && currentlyCheckedInRoomIds.has(roomId);
+    const isOutOfOrder = !isOccupied && (rawStatus === "out_of_order" || rawStatus === "out_of_service");
+    const isMaintenance = !isOccupied && rawStatus === "maintenance";
+    const isBlocked = !isOccupied && activeBlockedRoomIds.has(roomId);
+    const isReserved =
+      !isOccupied &&
+      !isOutOfOrder &&
+      !isMaintenance &&
+      !isBlocked &&
+      (reservedRoomIds.has(roomId) || rawStatus === "reserved");
 
     // Server-safe display status matching src/utils/roomUtils.ts precedence
     const displayStatus = resolveRoomDisplayStatusReadOnly(
       room,
       isOccupied,
       isBlocked,
-      isReserved
+      isReserved,
+      occupiedAfterReportDate
     );
 
     if (isOccupied) {
@@ -350,23 +435,46 @@ export function buildDailyOperationsReport(input: DailyOpsAggregationInput): Dai
     if (isBlocked) blockedRoomsCount++;
     if (isReserved) reservedRoomsCount++;
 
+    // Only vacant, operational rooms (not occupied, maintenance, OOO, or blocked)
+    // are classified into housekeeping readiness buckets — matches Dashboard.tsx & Rooms.tsx
+    // so an occupied room is NEVER double-counted as dirty, awaiting cleaning, or available.
+    const isVacantOperational = !isOccupied && !isOutOfOrder && !isMaintenance && !isBlocked;
+
+    const isAwaitingInspection =
+      isVacantOperational &&
+      (hkStatus === "awaiting_inspection" ||
+        (rawStatus === "inspected" && hkStatus !== "inspected" && hkStatus !== "ready"));
+    const isCleaning =
+      isVacantOperational &&
+      !isAwaitingInspection &&
+      (hkStatus === "cleaning" || rawStatus === "cleaning" || displayStatus === "cleaning");
     const isDirty =
-      hkStatus === "dirty" ||
-      hkStatus === "failed" ||
-      rawStatus === "dirty" ||
-      displayStatus === "dirty";
-    const isAwaitingInspection = hkStatus === "awaiting_inspection";
-    const isCleaning = hkStatus === "cleaning" || rawStatus === "cleaning" || displayStatus === "cleaning";
+      isVacantOperational &&
+      !isAwaitingInspection &&
+      !isCleaning &&
+      (rawStatus === "dirty" ||
+        displayStatus === "dirty" ||
+        hkStatus === "dirty" ||
+        hkStatus === "failed");
     const isInspected =
-      hkStatus === "inspected" ||
-      hkStatus === "ready" ||
-      rawStatus === "inspected" ||
-      displayStatus === "inspected";
-    const isClean =
+      isVacantOperational &&
       !isDirty &&
       !isAwaitingInspection &&
       !isCleaning &&
-      (rawStatus === "clean" || rawStatus === "vacant" || isInspected || displayStatus === "clean" || displayStatus === "vacant");
+      (hkStatus === "inspected" ||
+        hkStatus === "ready" ||
+        rawStatus === "inspected" ||
+        displayStatus === "inspected");
+    const isClean =
+      isVacantOperational &&
+      !isDirty &&
+      !isAwaitingInspection &&
+      !isCleaning &&
+      (rawStatus === "clean" ||
+        rawStatus === "vacant" ||
+        isInspected ||
+        displayStatus === "clean" ||
+        displayStatus === "vacant");
 
     if (isDirty) {
       dirtyRoomsCount++;
@@ -381,10 +489,7 @@ export function buildDailyOperationsReport(input: DailyOpsAggregationInput): Dai
     if (isClean) cleanRoomsCount++;
 
     const isReleasedReady =
-      !isOccupied &&
-      !isOutOfOrder &&
-      !isMaintenance &&
-      !isBlocked &&
+      isVacantOperational &&
       !isDirty &&
       !isAwaitingInspection &&
       !isCleaning &&
@@ -496,18 +601,29 @@ export function buildDailyOperationsReport(input: DailyOpsAggregationInput): Dai
 
   for (const res of uniqueReservations) {
     const id = String(res.id);
-    const status = String(res.status || "").toLowerCase();
+    const status = normalizeStatusToken(res.status);
     const scheduledCheckInDate = extractLocalDateStr(res.checkIn, timezone);
     const scheduledCheckOutDate = extractLocalDateStr(res.checkOut, timezone);
-    const createdInWindow = isTimestampWithinWindow(res.createdAt, periodStartUtc, periodEndUtc);
+    const createdInWindow = isTimestampWithinWindow(
+      res.createdAt || res.bookedAt || res.timestamp,
+      periodStartUtc,
+      periodEndUtc,
+      reportDate
+    );
 
     if (createdInWindow) {
       createdIds.add(id);
       if (status === "confirmed") confirmedIds.add(id);
       if (status === "pending") pendingIds.add(id);
     } else {
-      // Also count confirmed/pending reservations arriving on the reporting date
-      if (scheduledCheckInDate === reportDate) {
+      // Also count confirmed/pending reservations arriving on or spanning the reporting date
+      const spansReportDate = Boolean(
+        scheduledCheckInDate &&
+          scheduledCheckOutDate &&
+          scheduledCheckInDate <= reportDate &&
+          scheduledCheckOutDate > reportDate
+      );
+      if (scheduledCheckInDate === reportDate || spansReportDate) {
         if (status === "confirmed") confirmedIds.add(id);
         if (status === "pending") pendingIds.add(id);
       }
@@ -529,7 +645,7 @@ export function buildDailyOperationsReport(input: DailyOpsAggregationInput): Dai
       status !== "cancelled" &&
       status !== "no_show" &&
       (checkinEventResIds.has(id) ||
-        (actualCiTs && isTimestampWithinWindow(actualCiTs, periodStartUtc, periodEndUtc)) ||
+        (actualCiTs && isTimestampWithinWindow(actualCiTs, periodStartUtc, periodEndUtc, reportDate)) ||
         (!actualCiTs &&
           (status === "checked_in" || status === "checked_out") &&
           scheduledCheckInDate === reportDate));
@@ -570,7 +686,7 @@ export function buildDailyOperationsReport(input: DailyOpsAggregationInput): Dai
     const checkedOutInWindow =
       status === "checked_out" &&
       (checkoutEventResIds.has(id) ||
-        (actualCoTs && isTimestampWithinWindow(actualCoTs, periodStartUtc, periodEndUtc)) ||
+        (actualCoTs && isTimestampWithinWindow(actualCoTs, periodStartUtc, periodEndUtc, reportDate)) ||
         (!actualCoTs && scheduledCheckOutDate === reportDate));
 
     if (checkedOutInWindow) {
@@ -604,7 +720,7 @@ export function buildDailyOperationsReport(input: DailyOpsAggregationInput): Dai
     if (status === "no_show") {
       const noShowTs = res.noShowAt || res.updatedAt;
       const markedInWindow =
-        (noShowTs && isTimestampWithinWindow(noShowTs, periodStartUtc, periodEndUtc)) ||
+        (noShowTs && isTimestampWithinWindow(noShowTs, periodStartUtc, periodEndUtc, reportDate)) ||
         scheduledCheckInDate === reportDate;
       if (markedInWindow) {
         noShowIds.add(id);
@@ -616,7 +732,7 @@ export function buildDailyOperationsReport(input: DailyOpsAggregationInput): Dai
     if (status === "cancelled") {
       const cancelTs = res.cancelledAt || res.updatedAt;
       const cancelledInWindow =
-        (cancelTs && isTimestampWithinWindow(cancelTs, periodStartUtc, periodEndUtc)) ||
+        (cancelTs && isTimestampWithinWindow(cancelTs, periodStartUtc, periodEndUtc, reportDate)) ||
         (!cancelTs && scheduledCheckInDate === reportDate);
       if (cancelledInWindow) {
         cancelledIds.add(id);
@@ -785,7 +901,9 @@ export function buildDailyOperationsReport(input: DailyOpsAggregationInput): Dai
     hotelId,
     hotelName,
     reportDate,
-    periodLabel: `${formatReportDateLabel(reportDate)} (12:00 AM – 11:59 PM ${timezone})`,
+    periodLabel: isLiveSnapshotDay
+      ? `${formatReportDateLabel(reportDate)} (Live Operational Summary · ${timezone})`
+      : `${formatReportDateLabel(reportDate)} (12:00 AM – 11:59 PM ${timezone})`,
     periodStartIso: periodStartUtc.toISOString(),
     periodEndIso: periodEndUtc.toISOString(),
     timezone,

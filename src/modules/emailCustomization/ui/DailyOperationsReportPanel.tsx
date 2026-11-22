@@ -862,7 +862,7 @@ export function DailyOperationsReportPanel({
               <div>
                 <h2 className="text-sm font-bold text-zinc-100">Preview &amp; Test Delivery</h2>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  Inspect live operational figures for the preceding calendar day (or a specific date) and send a safe test email without affecting scheduled runs.
+                  Inspect live operational figures for today (or any specific date) and send a safe test email without affecting scheduled midnight runs.
                 </p>
               </div>
             </div>
@@ -878,7 +878,7 @@ export function DailyOperationsReportPanel({
                   onChange={(e) => setPreviewDate(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500/60"
                 />
-                <p className="text-[10px] text-zinc-500 mt-1">Leave blank for preceding calendar day.</p>
+                <p className="text-[10px] text-zinc-500 mt-1">Leave blank for today&apos;s live summary.</p>
               </div>
 
               <div className="sm:col-span-5">

@@ -12,6 +12,7 @@ import { sendEmail, type SendEmailParams, type SendEmailResult } from "../../../
 import { isSafeIdentifier } from "../../../utils/serverSecurity.ts";
 import {
   computeCalendarDayWindow,
+  computeCurrentCalendarDayWindow,
   computeNextScheduledDelivery,
   computePreviousCalendarDayWindow,
   createDefaultDailyOpsConfig,
@@ -368,6 +369,7 @@ export async function getDailyOpsRun(
 export async function generateDailyOpsReportForHotel(params: {
   hotelId: string;
   reportDate?: string;
+  defaultToCurrentDay?: boolean;
   timezoneOverride?: string;
   sectionsOverride?: Partial<DailyOpsReportSectionsConfig>;
   bearerToken?: string;
@@ -376,7 +378,7 @@ export async function generateDailyOpsReportForHotel(params: {
   rendered: RenderedDailyOpsEmail;
   config: DailyOpsReportConfig;
 }> {
-  const { hotelId, bearerToken } = params;
+  const { hotelId, bearerToken, defaultToCurrentDay = false } = params;
 
   const [hotelDoc, emailSettings] = await Promise.all([
     readDoc(`hotels/${hotelId}`, bearerToken).catch(() => null),
@@ -388,11 +390,25 @@ export async function generateDailyOpsReportForHotel(params: {
   const window =
     params.reportDate && isValidReportDate(params.reportDate)
       ? computeCalendarDayWindow(params.reportDate, timezone)
-      : computePreviousCalendarDayWindow(new Date(), timezone);
+      : defaultToCurrentDay
+        ? computeCurrentCalendarDayWindow(new Date(), timezone)
+        : computePreviousCalendarDayWindow(new Date(), timezone);
 
   // Read authoritative tenant-scoped PMS collections in parallel (strictly read-only)
-  const safeList = (sub: string) =>
-    listCollectionAll(`hotels/${hotelId}/${sub}`, bearerToken).catch(() => []);
+  const readLimitations: string[] = [];
+  const safeList = (sub: string, critical = false) =>
+    listCollectionAll(`hotels/${hotelId}/${sub}`, bearerToken).catch((err: any) => {
+      console.warn(
+        `[DailyOpsReport] Failed to read hotels/${hotelId}/${sub}:`,
+        err?.message || err
+      );
+      if (critical) {
+        readLimitations.push(
+          `Could not load live "${sub}" records due to a data-read error; figures may be incomplete.`
+        );
+      }
+      return [];
+    });
 
   const [
     rooms,
@@ -408,8 +424,8 @@ export async function generateDailyOpsReportForHotel(params: {
     checkoutHistory,
     guests,
   ] = await Promise.all([
-    safeList("rooms"),
-    safeList("reservations"),
+    safeList("rooms", true),
+    safeList("reservations", true),
     safeList("room_blockings"),
     safeList("maintenance"),
     safeList("housekeeping_cleanings"),
@@ -441,6 +457,7 @@ export async function generateDailyOpsReportForHotel(params: {
     periodStartUtc: window.periodStartUtc,
     periodEndUtc: window.periodEndUtc,
     timezone,
+    initialLimitations: readLimitations,
   });
 
   const brand = resolveHotelBrand(hotelDoc, emailSettings as any);
@@ -992,6 +1009,7 @@ export async function sendDailyOpsTestReport(params: {
   const generated = await generateDailyOpsReportForHotel({
     hotelId,
     reportDate,
+    defaultToCurrentDay: true,
     bearerToken,
   });
 

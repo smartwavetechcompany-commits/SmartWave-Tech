@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import {
   computeCalendarDayWindow,
+  computeCurrentCalendarDayWindow,
   computeNextScheduledDelivery,
   computePreviousCalendarDayWindow,
   DEFAULT_DAILY_OPS_TIMEZONE,
@@ -453,6 +454,163 @@ test("14. Multi-tenant isolation: Hotel B report contains strictly Hotel B data 
   const renderedB = renderDailyOperationsReportEmail(reportB, { hotelName: "Emerald Bay Suites" });
   assert.equal(renderedB.subject, "Daily Hotel Operations Report – Emerald Bay Suites – 2026-11-21");
   assert.ok(!renderedB.html.includes("Grand Sapphire"));
+});
+
+test("15. Live today test report matches exact PMS counts (1 occupied, 1 available, 32 dirty — never 33 dirty / 0 in-house)", () => {
+  const nowRef = new Date("2026-11-22T14:00:00.000Z"); // 15:00 WAT on Nov 22
+  const winToday = computeCurrentCalendarDayWindow(nowRef, "Africa/Lagos");
+  assert.equal(winToday.reportDate, "2026-11-22");
+
+  const rooms34: Array<Record<string, any>> = [
+    // 1 occupied room (even with stale housekeepingStatus="dirty", MUST stay occupied and NEVER count as dirty)
+    { id: "r_occ", roomNumber: "101", status: "occupied", housekeepingStatus: "dirty" },
+    // 1 available & ready room
+    { id: "r_avail", roomNumber: "102", status: "clean", housekeepingStatus: "ready" },
+    // 32 dirty rooms
+    ...Array.from({ length: 32 }, (_, idx) => ({
+      id: `r_dirty_${idx + 1}`,
+      roomNumber: String(200 + idx + 1),
+      status: "dirty",
+      housekeepingStatus: "dirty",
+    })),
+  ];
+
+  const liveReport = buildDailyOperationsReport({
+    hotelId: "hotel_live",
+    hotelDoc: { id: "hotel_live", name: "Tide Hotel" },
+    rooms: rooms34,
+    reservations: [
+      {
+        id: "res_live_1",
+        roomId: "r_occ",
+        roomNumber: "101",
+        guestName: "Live Guest",
+        checkIn: "2026-11-22",
+        checkOut: "2026-11-24",
+        actualCheckIn: "2026-11-22T12:00:00.000Z",
+        status: "checked_in",
+        adults: 1,
+        createdAt: "2026-11-22T11:30:00.000Z",
+      },
+    ],
+    roomBlockings: [],
+    maintenance: [],
+    housekeepingCleanings: [],
+    housekeepingInspections: [],
+    housekeepingRequests: [],
+    tasks: [],
+    activityLogs: [],
+    checkinHistory: [],
+    checkoutHistory: [],
+    guests: [],
+    reportDate: winToday.reportDate,
+    periodStartUtc: winToday.periodStartUtc,
+    periodEndUtc: winToday.periodEndUtc,
+    timezone: "Africa/Lagos",
+    generatedAt: nowRef.toISOString(),
+  });
+
+  const snap = liveReport.roomStatus.endOfDaySnapshot;
+  assert.equal(snap.totalRooms, 34);
+  assert.equal(snap.occupied, 1);
+  assert.equal(snap.vacant, 33);
+  assert.equal(snap.available, 1);
+  assert.equal(snap.dirty, 32);
+  assert.equal(snap.awaitingCleaning, 32);
+  assert.equal(liveReport.occupancy.occupiedRooms, 1);
+  assert.equal(liveReport.occupancy.occupancyPercentage, 3); // Math.round(1/34 * 100)
+  assert.equal(liveReport.occupancy.currentInHouseGuests, 1);
+  assert.equal(liveReport.reservations.checkedIn, 1);
+  assert.equal(liveReport.reservations.totalCreated, 1);
+});
+
+test("16. Historical previous-day report does NOT convert a today-occupied room into a phantom dirty room", () => {
+  const nowRef = new Date("2026-11-22T14:00:00.000Z");
+  const winYesterday = computePreviousCalendarDayWindow(nowRef, "Africa/Lagos");
+  assert.equal(winYesterday.reportDate, "2026-11-21");
+
+  const rooms34: Array<Record<string, any>> = [
+    { id: "r_occ", roomNumber: "101", status: "occupied", housekeepingStatus: "ready" },
+    { id: "r_avail", roomNumber: "102", status: "clean", housekeepingStatus: "ready" },
+    ...Array.from({ length: 32 }, (_, idx) => ({
+      id: `r_dirty_${idx + 1}`,
+      roomNumber: String(200 + idx + 1),
+      status: "dirty",
+      housekeepingStatus: "dirty",
+    })),
+  ];
+
+  const yesterdayReport = buildDailyOperationsReport({
+    hotelId: "hotel_live",
+    hotelDoc: { id: "hotel_live", name: "Tide Hotel" },
+    rooms: rooms34,
+    reservations: [
+      {
+        id: "res_today_only",
+        roomId: "r_occ",
+        roomNumber: "101",
+        guestName: "Today Guest",
+        checkIn: "2026-11-22",
+        checkOut: "2026-11-24",
+        actualCheckIn: "2026-11-22T12:00:00.000Z",
+        status: "checked_in",
+        adults: 1,
+        createdAt: "2026-11-22T11:30:00.000Z",
+      },
+    ],
+    roomBlockings: [],
+    maintenance: [],
+    housekeepingCleanings: [],
+    housekeepingInspections: [],
+    housekeepingRequests: [],
+    tasks: [],
+    activityLogs: [],
+    checkinHistory: [],
+    checkoutHistory: [],
+    guests: [],
+    reportDate: winYesterday.reportDate,
+    periodStartUtc: winYesterday.periodStartUtc,
+    periodEndUtc: winYesterday.periodEndUtc,
+    timezone: "Africa/Lagos",
+    generatedAt: nowRef.toISOString(),
+  });
+
+  // Yesterday had 0 occupied, and r_occ MUST NOT be turned into a phantom 33rd dirty room
+  assert.equal(yesterdayReport.roomStatus.endOfDaySnapshot.occupied, 0);
+  assert.equal(yesterdayReport.roomStatus.endOfDaySnapshot.dirty, 32);
+});
+
+test("17. Awaiting-inspection room (status=inspected, housekeepingStatus=awaiting_inspection) is not double-counted as inspected or available", () => {
+  const report = buildDailyOperationsReport({
+    hotelId: "hotel_hk",
+    hotelDoc: { id: "hotel_hk", name: "HK Test Hotel" },
+    rooms: [
+      { id: "r1", roomNumber: "101", status: "inspected", housekeepingStatus: "awaiting_inspection" },
+      { id: "r2", roomNumber: "102", status: "clean", housekeepingStatus: "ready" },
+    ],
+    reservations: [],
+    roomBlockings: [],
+    maintenance: [],
+    housekeepingCleanings: [],
+    housekeepingInspections: [],
+    housekeepingRequests: [],
+    tasks: [],
+    activityLogs: [],
+    checkinHistory: [],
+    checkoutHistory: [],
+    guests: [],
+    reportDate: winNov21.reportDate,
+    periodStartUtc: winNov21.periodStartUtc,
+    periodEndUtc: winNov21.periodEndUtc,
+    timezone: "Africa/Lagos",
+    generatedAt: "2026-11-21T20:00:00.000Z",
+  });
+
+  const snap = report.roomStatus.endOfDaySnapshot;
+  assert.equal(snap.awaitingInspection, 1);
+  assert.equal(snap.inspected, 1); // Only r2 (ready)
+  assert.equal(snap.available, 1); // Only r2
+  assert.equal(snap.dirty, 0);
 });
 
 console.log(`\nSummary: ${passed} passed, ${failed} failed\n`);

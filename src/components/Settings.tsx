@@ -916,6 +916,8 @@ export function Settings() {
       const collectionsToClear = [
         'reservations',
         'guests',
+        'loyaltyAccounts',
+        'loyaltyTransactions',
         'ledger',
         'finance',
         'outstanding_debt_ledger',
@@ -3217,7 +3219,7 @@ export function Settings() {
                   <div>
                     <h4 className="font-bold text-red-500 text-base">Complete System Reset</h4>
                     <p className="text-sm text-zinc-500 mt-1 leading-relaxed">
-                      Permanently wipe all operational data including reservations, guest directories, all transactions even under the debt ledger, inventory logs, and reset all rooms. This action cannot be undone.
+                      Permanently wipe all operational data including reservations, guest directories, guest loyalty accounts and points history, all transactions even under the debt ledger, inventory logs, and reset all rooms. This action cannot be undone.
                     </p>
                   </div>
                 </div>
@@ -3251,7 +3253,7 @@ export function Settings() {
               <ConfirmModal
                 isOpen={showConfirmSystemReset}
                 title="CRITICAL: Complete System Reset"
-                message="Are you sure you want to clear ALL system data? This will delete all reservations, guest history, financial records, all debt ledger transactions, and reset all rooms. This action is PERMANENT and cannot be undone."
+                message="Are you sure you want to clear ALL system data? This will delete all reservations, guest history, guest loyalty accounts and points history, financial records, all debt ledger transactions, and reset all rooms. This action is PERMANENT and cannot be undone."
                 onConfirm={handleSystemReset}
                 onCancel={() => setShowConfirmSystemReset(false)}
                 type="danger"
