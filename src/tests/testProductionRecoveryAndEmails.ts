@@ -81,8 +81,7 @@ runTest("Phase 2.1: All 38 automated email events are registered and render clea
     assert.ok(entry, `Catalog entry missing for ${eventType}`);
 
     for (const lang of ["en", "de"] as const) {
-      const variant = buildDefaultTemplateVariant(eventType, {
-        language: lang,
+      const variant = buildDefaultTemplateVariant(eventType, lang, {
         primaryColor: "#059669",
         secondaryColor: "#18181b",
       });
@@ -143,15 +142,15 @@ runTest("Phase 2.2: Security-critical staff activation & password reset preserve
   const ctx: EmailRenderContext = {
     hotelId: "hotel-sec",
     hotelName: "Crown Suites",
+    currencyCode: "NGN",
     appUrl: "https://tidehotels.de",
     staffName: "Chidi Okafor",
-    actionedBy: "admin@crownsuites.example",
     actionLink: "https://tidehotels.de/activate-account?token=sec_tok_123",
     expiryDate: "24 hours",
   };
 
   for (const ev of ["staff_account_activation", "staff_password_reset"] as const) {
-    const variant = buildDefaultTemplateVariant(ev, { language: "en" });
+    const variant = buildDefaultTemplateVariant(ev, "en");
     const rendered = renderEmailTemplate({ variant, context: ctx, language: "en" });
     assert.ok(
       rendered.html.includes(ctx.actionLink!),
@@ -170,7 +169,7 @@ runTest("Phase 2.3: Multi-tenant fallback & emailService builders never inject P
     { name: "Seaside Resort", email: "info@seaside.example" },
     "https://tidehotels.de"
   );
-  assert.equal(brand.website, undefined, "brand.website must NOT fall back to PMS appUrl");
+  assert.equal(brand.website, "", "brand.website must NOT fall back to PMS appUrl");
 
   const mt = renderMultiTenantEmail("payment.received", brand, {
     recipientName: "Ada Lovelace",
@@ -183,10 +182,9 @@ runTest("Phase 2.3: Multi-tenant fallback & emailService builders never inject P
     hotelName: "Seaside Resort",
     guestName: "Ada Lovelace",
     bookingRef: "ABC12345",
-    roomType: "Deluxe King",
+    roomLabel: "Deluxe King (Room 204)",
     checkIn: "2026-12-01",
     checkOut: "2026-12-03",
-    totalAmount: "NGN 120,000",
     appUrl: "https://tidehotels.de",
   });
   assert.equal(confirm.html.includes("tidehotels.de"), false, "Booking confirmation leaked PMS URL");
@@ -196,7 +194,7 @@ runTest("Phase 2.3: Multi-tenant fallback & emailService builders never inject P
     hotelName: "Seaside Resort",
     guestName: "Ada Lovelace",
     bookingRef: "ABC12345",
-    roomType: "Deluxe King",
+    roomLabel: "Deluxe King (Room 204)",
     checkIn: "2026-12-01",
     checkOut: "2026-12-03",
     appUrl: "https://tidehotels.de",
@@ -243,35 +241,34 @@ runTest("Phase 3.1: Fully settled discounted stay (100,000 - 20,000 discount, 80
 
   assert.equal(breakdown.originalAmount, 100000);
   assert.equal(breakdown.discountAmount, 20000);
-  assert.equal(breakdown.netPayable, 80000);
+  assert.equal(breakdown.netPayableAmount, 80000);
   assert.equal(breakdown.amountPaid, 80000);
   assert.equal(breakdown.remainingBalance, 0, "Discount must NEVER appear as remaining balance");
-  assert.equal(breakdown.isFullySettled, true);
-  assert.equal(breakdown.paymentStatusLabel, "Fully Settled");
+  assert.equal(breakdown.paymentStatus, "Fully Settled");
 
   // Also verify rendered payment_receipt template reflects 0 balance and discount granted
-  const variant = buildDefaultTemplateVariant("payment_receipt", { language: "en" });
+  const variant = buildDefaultTemplateVariant("payment_receipt", "en");
   const rendered = renderEmailTemplate({
     variant,
     context: {
       hotelId: "hotel-1",
       hotelName: "Lagos Grand",
       appUrl: "https://tidehotels.de",
-      currency: "NGN",
+      currencyCode: "NGN",
       guestName: "Tunde Bakare",
-      bookingRef: "RES8899",
+      bookingReference: "RES8899",
       originalAmount: breakdown.originalAmount,
       discountAmount: breakdown.discountAmount,
       amountPaid: breakdown.amountPaid,
       balanceDue: breakdown.remainingBalance,
-      paymentStatus: breakdown.paymentStatusLabel,
+      paymentStatus: breakdown.paymentStatus,
       paymentMethod: "CARD",
     },
     language: "en",
   });
   assert.ok(rendered.text.includes("Original Amount: NGN 100,000"), "Should show original amount");
   assert.ok(rendered.text.includes("Discount Granted: NGN 20,000"), "Should show discount granted");
-  assert.ok(rendered.text.includes("Amount Paid: NGN 80,000"), "Should show amount paid");
+  assert.ok(rendered.text.includes("Amount Paid / Settled: NGN 80,000"), "Should show amount paid / settled");
   assert.ok(rendered.text.includes("Remaining Balance: NGN 0"), "Should show NGN 0 remaining balance");
   assert.ok(rendered.text.includes("Payment Status: Fully Settled"), "Should show Fully Settled");
   assert.equal(rendered.html.includes("tidehotels.de"), false, "Receipt email must not leak PMS URL");
@@ -290,11 +287,10 @@ runTest("Phase 3.2: Partially settled discounted stay (100,000 - 20,000 discount
 
   assert.equal(breakdown.originalAmount, 100000);
   assert.equal(breakdown.discountAmount, 20000);
-  assert.equal(breakdown.netPayable, 80000);
+  assert.equal(breakdown.netPayableAmount, 80000);
   assert.equal(breakdown.amountPaid, 50000);
   assert.equal(breakdown.remainingBalance, 30000);
-  assert.equal(breakdown.isFullySettled, false);
-  assert.equal(breakdown.paymentStatusLabel, "Partially Paid");
+  assert.equal(breakdown.paymentStatus, "Partially Paid");
 });
 
 runTest("Phase 3.3: No-Show reservation without penalty shows 0 remaining balance", () => {
@@ -306,7 +302,7 @@ runTest("Phase 3.3: No-Show reservation without penalty shows 0 remaining balanc
     },
   });
   assert.equal(breakdown.remainingBalance, 0);
-  assert.equal(breakdown.isFullySettled, true);
+  assert.equal(breakdown.paymentStatus, "No Balance Due");
 });
 
 // ---------------------------------------------------------------------------
@@ -314,7 +310,7 @@ runTest("Phase 3.3: No-Show reservation without penalty shows 0 remaining balanc
 // ---------------------------------------------------------------------------
 
 runTest("Phase 4.1: Deposit Received template renders guest name, hotel name, amount, date, reference, updated balance & zero PMS URL", () => {
-  const variant = buildDefaultTemplateVariant("deposit_received", { language: "en" });
+  const variant = buildDefaultTemplateVariant("deposit_received", "en");
   const rendered = renderEmailTemplate({
     variant,
     context: {
@@ -322,11 +318,11 @@ runTest("Phase 4.1: Deposit Received template renders guest name, hotel name, am
       hotelName: "Eko Palm Suites",
       hotelEmail: "billing@ekopalm.example",
       appUrl: "https://tidehotels.de",
-      currency: "NGN",
+      currencyCode: "NGN",
       guestName: "Amaka Nwosu",
       depositAmount: 150000,
-      depositDate: "Nov 22, 2026, 10:15 AM",
-      depositReference: "DEP-2026-0091",
+      transactionDate: "2026-11-22",
+      transactionReference: "DEP-2026-0091",
       paymentMethod: "BANK TRANSFER",
       depositBalance: 225000,
     },
@@ -337,7 +333,7 @@ runTest("Phase 4.1: Deposit Received template renders guest name, hotel name, am
   assert.ok(rendered.text.includes("Amaka Nwosu"), "Must include guest name");
   assert.ok(rendered.text.includes("Eko Palm Suites"), "Must include hotel name");
   assert.ok(rendered.text.includes("NGN 150,000"), "Must include deposit amount");
-  assert.ok(rendered.text.includes("Nov 22, 2026, 10:15 AM"), "Must include deposit date");
+  assert.ok(rendered.text.includes("2026-11-22"), "Must include deposit date");
   assert.ok(rendered.text.includes("DEP-2026-0091"), "Must include deposit reference");
   assert.ok(rendered.text.includes("NGN 225,000"), "Must include updated deposit balance");
   assert.equal(rendered.html.includes("tidehotels.de"), false, "Deposit email must NOT contain PMS URL");
@@ -456,7 +452,7 @@ runTest("Phase 5.3: Discount above hotel-configured threshold dynamically reflec
 runTest("Phase 5.4: Locked invoice after checkout, room block duration, dirty-to-clean & guest edit restriction all return structured details", () => {
   const hotel = makeHotel({
     financial: { lockInvoicesAfterCheckout: true },
-    roomBlocking: { allowBlocking: true, maxBlockDuration: 7 },
+    roomBlocking: { allowBlocking: true, allowMaintenanceBlocks: true, maxBlockDuration: 7 },
     housekeeping: { allowStatusUpdates: true, allowDirtyToCleanChanges: false },
     guests: { allowProfileEditing: false },
   });

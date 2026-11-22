@@ -214,7 +214,7 @@ async function run() {
       assert.ok(modular.html.includes("Room 204"), `Room missing for ${pair.customEvent}`);
       assert.ok(modular.html.includes("2026-11-24"), `Check-in missing for ${pair.customEvent}`);
       assert.ok(modular.html.includes("2026-11-27"), `Check-out missing for ${pair.customEvent}`);
-      assert.ok(modular.html.includes("https://tidehotels.de"), `APP_URL missing for ${pair.customEvent}`);
+      assert.ok(!modular.html.includes("https://tidehotels.de"), `Guest email must NOT auto-expose PMS URL for ${pair.customEvent}`);
       assert.ok(!modular.html.includes("undefined"), `Found literal undefined in ${pair.customEvent}`);
       assert.ok(modular.text.includes("RES8A4F2"), `Plain text missing ref for ${pair.customEvent}`);
     }
@@ -571,17 +571,24 @@ async function run() {
     assert.ok(withLoyalty.html.includes("Gold"));
   });
 
-  // 11. Custom portal URL used; no custom URL falls back to APP_URL (no trailing slash)
-  await test("11. Custom hotel portal URL overrides APP_URL, and fallback strips trailing slash", () => {
+  // 11. Custom hotel portal URL renders when explicitly configured, and PMS APP_URL is NEVER auto-injected into guest emails
+  await test("11. Custom hotel portal URL renders cleanly, and PMS APP_URL is not auto-leaked to guests", () => {
     const variant = buildDefaultTemplateVariant("booking_confirmation", "en");
+    variant.blocks.push({
+      id: "explicit_cta",
+      type: "button",
+      label: "Visit Hotel Website",
+      url: "{{portal_link}}",
+      align: "left",
+      displayStyle: "solid",
+    });
 
     const fallbackRender = renderHotelEmailServerSide({
       variant,
       context: { ...BASE_CONTEXT, appUrl: "https://tidehotels.de///" },
       settings: { ...DEFAULT_HOTEL_EMAIL_SETTINGS, portalUrl: "" },
     });
-    assert.ok(fallbackRender.html.includes('href="https://tidehotels.de"'));
-    assert.ok(!fallbackRender.html.includes('href="https://tidehotels.de/"'));
+    assert.ok(!fallbackRender.html.includes("tidehotels.de"), "PMS URL must not auto-inject into guest emails");
 
     const customSettings: HotelEmailSettings = {
       ...DEFAULT_HOTEL_EMAIL_SETTINGS,
@@ -1532,11 +1539,15 @@ async function run() {
       variant: v2AllBlocks,
       context: {
         ...BASE_CONTEXT,
+        hotelWebsite: "https://harborview.example",
         loyaltyTier: "Gold",
         loyaltyPointsBalance: 2400,
         loyaltyPointsEarned: 450,
       },
-      settings: DEFAULT_HOTEL_EMAIL_SETTINGS,
+      settings: {
+        ...DEFAULT_HOTEL_EMAIL_SETTINGS,
+        portalUrl: "https://harborview.example/bookings",
+      },
       language: "en",
       usedDefaultLayout: false,
     });

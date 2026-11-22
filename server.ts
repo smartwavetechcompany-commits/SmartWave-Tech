@@ -58,7 +58,10 @@ import { startDailyOpsBackgroundScheduler } from "./src/modules/emailCustomizati
 import { computeEmailFinancialBreakdown } from "./src/modules/emailCustomization/shared/financialEmailBreakdown.ts";
 import { resolveEffectiveTemplate } from "./src/modules/emailCustomization/server/resolver.ts";
 import { renderHotelEmailServerSide } from "./src/modules/emailCustomization/server/renderer.ts";
-import { normalizeHotelEmailEvent } from "./src/modules/emailCustomization/server/templateRegistry.ts";
+import {
+  isCustomizableEvent,
+  normalizeHotelEmailEvent,
+} from "./src/modules/emailCustomization/server/templateRegistry.ts";
 import type { EmailRenderContext } from "./src/modules/emailCustomization/shared/types.ts";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -901,21 +904,20 @@ async function startServer() {
         hotelName: params.hotelName || brand.hotelName,
         hotelAddress: brand.address,
         hotelPhone: brand.phone,
-        hotelEmail: brand.contactEmail || params.adminEmail,
+        hotelEmail: brand.supportEmail || brand.replyTo || params.adminEmail,
         hotelWebsite: brand.website,
         hotelLogoUrl: brand.logoUrl,
         hotelPrimaryColor: brand.primaryColor,
         hotelSecondaryColor: brand.secondaryColor,
         hotelFooterNotes: brand.footerNotes,
+        currencyCode: brand.currency || "NGN",
         appUrl,
         guestName: params.targetName || params.targetEmail,
         guestEmail: params.targetEmail,
         staffName: params.targetName || params.targetEmail,
-        actionedBy: params.adminName || params.adminEmail,
         actionLink: params.actionLink,
         expiryDate: params.expiryInfo,
         reason: params.note,
-        details: params.note,
       };
 
       const rendered = renderHotelEmailServerSide({
@@ -1581,7 +1583,6 @@ async function startServer() {
             ? `[ACTION REQUIRED] Activate your Administrator account - ${hotelName}`
             : `[ACTION REQUIRED] Activate your staff account - ${hotelName}`),
         html: emailHtml,
-        text: customActivationEmail1?.text,
         fromName: customActivationEmail1?.fromName || `${hotelName} Administration`,
         replyTo:
           customActivationEmail1?.replyTo ||
@@ -1893,7 +1894,6 @@ async function startServer() {
           customActivationEmail2?.subject ||
           `[ACTION REQUIRED] Activate your staff account - ${hotelName}`,
         html: emailHtml,
-        text: customActivationEmail2?.text,
         fromName: customActivationEmail2?.fromName || `${hotelName} Administration`,
         replyTo:
           customActivationEmail2?.replyTo ||
@@ -2987,7 +2987,6 @@ async function startServer() {
           customActivationEmail3?.subject ||
           `[ACTION REQUIRED] Activate your staff account - ${hotelName}`,
         html: htmlContent,
-        text: customActivationEmail3?.text,
         fromName: customActivationEmail3?.fromName || `${hotelName} Administration`,
         replyTo:
           customActivationEmail3?.replyTo ||
@@ -3243,7 +3242,6 @@ async function startServer() {
           customResetEmail?.subject ||
           `[ACTION REQUIRED] Password Reset for ${targetEmail} - ${hotelName}`,
         html: customResetEmail?.html || htmlContent,
-        text: customResetEmail?.text,
         fromName: customResetEmail?.fromName || `${hotelName} Security`,
         replyTo:
           customResetEmail?.replyTo ||
@@ -4958,7 +4956,7 @@ async function startServer() {
         paymentAmount: meta.amount !== undefined ? Number(meta.amount) : undefined,
         fallbackOutstandingBalance:
           meta.outstandingBalance !== undefined ? Number(meta.outstandingBalance) : undefined,
-        discountAmountOverride:
+        fallbackDiscountAmount:
           meta.discountAmount !== undefined ? Number(meta.discountAmount) : undefined,
       });
 
@@ -5067,7 +5065,7 @@ async function startServer() {
                   },
                   {
                     label: "Payment Status",
-                    value: financialBreakdown.paymentStatusLabel,
+                    value: financialBreakdown.paymentStatus,
                   },
                 ]
               : []),
@@ -5543,8 +5541,10 @@ async function startServer() {
           replyTo?: string;
         } | null = null;
 
-        let mappedEvent =
+        const rawMappedEvent =
           plan.audience !== "platform_superadmin" ? normalizeHotelEmailEvent(typedEvent) : null;
+        let mappedEvent =
+          rawMappedEvent && isCustomizableEvent(rawMappedEvent) ? rawMappedEvent : null;
 
         if (mappedEvent) {
           // For fully settled discounted payments, prefer discount_settlement_confirmation when explicitly customized
@@ -5600,19 +5600,19 @@ async function startServer() {
               hotelName: plan.brand.hotelName,
               hotelAddress: plan.brand.address,
               hotelPhone: plan.brand.phone,
-              hotelEmail: plan.brand.contactEmail,
+              hotelEmail: plan.brand.supportEmail || plan.brand.replyTo,
               hotelWebsite: plan.brand.website,
               hotelLogoUrl: plan.brand.logoUrl,
               hotelPrimaryColor: plan.brand.primaryColor,
               hotelSecondaryColor: plan.brand.secondaryColor,
               hotelFooterNotes: plan.brand.footerNotes,
+              currencyCode: plan.brand.currency || "NGN",
               // Never pass PMS appUrl as a clickable link for guest or corporate audiences
               appUrl: isInternalAudience ? appUrl : "",
-              currency: plan.brand.currency,
               guestName: plan.recipientName || resolvedGuestName,
               guestEmail: resolvedGuestEmail || undefined,
-              guestPhone: guestDoc?.phone ? String(guestDoc.phone) : undefined,
-              bookingRef: safeResId ? safeResId.slice(0, 8).toUpperCase() : undefined,
+              bookingReference: safeResId ? safeResId.slice(0, 8).toUpperCase() : undefined,
+              roomName: roomStr,
               roomType: reservationDoc?.roomType ? String(reservationDoc.roomType) : undefined,
               roomNumber:
                 (reservationDoc?.roomNumber ? String(reservationDoc.roomNumber) : undefined) ||
@@ -5628,8 +5628,8 @@ async function startServer() {
                   ? financialBreakdown.discountAmount
                   : undefined,
               totalAmount:
-                financialBreakdown.netPayable > 0
-                  ? financialBreakdown.netPayable
+                financialBreakdown.netPayableAmount > 0
+                  ? financialBreakdown.netPayableAmount
                   : meta.amount !== undefined
                     ? Number(meta.amount)
                     : undefined,
@@ -5650,12 +5650,16 @@ async function startServer() {
               paymentStatus:
                 typedEvent === "refund.processed"
                   ? "Refund Processed"
-                  : financialBreakdown.paymentStatusLabel,
+                  : financialBreakdown.paymentStatus,
               paymentMethod: cleanMetaStr("paymentMethod")?.toUpperCase(),
-              referenceCode:
+              transactionReference:
                 cleanMetaStr("reference") ||
                 cleanMetaStr("billNumber") ||
                 (safeEntityId || undefined),
+              transactionDate:
+                typedEvent === "deposit.received"
+                  ? depositDateFormatted
+                  : cleanMetaStr("transactionDate") || depositDateFormatted,
               depositAmount:
                 typedEvent === "deposit.received" && meta.amount !== undefined
                   ? Number(meta.amount)
@@ -5664,42 +5668,36 @@ async function startServer() {
                 meta.depositBalanceAfter !== undefined
                   ? Number(meta.depositBalanceAfter)
                   : undefined,
-              depositDate: typedEvent === "deposit.received" ? depositDateFormatted : undefined,
-              depositReference:
-                typedEvent === "deposit.received"
-                  ? cleanMetaStr("reference") || safeEntityId || undefined
-                  : undefined,
               refundAmount:
                 typedEvent === "refund.processed" && meta.amount !== undefined
                   ? Number(meta.amount)
                   : undefined,
-              loyaltyPoints:
-                cleanMetaStr("updatedBalanceFormatted") ||
-                (meta.updatedBalance !== undefined ? String(meta.updatedBalance) : undefined),
-              loyaltyTier: cleanMetaStr("membershipLevel"),
-              loyaltyPointsDelta: cleanMetaStr("pointsFormatted"),
-              loyaltyPreviousTier: cleanMetaStr("previousTier"),
-              loyaltyRedemptionValue: cleanMetaStr("monetaryValueFormatted"),
-              loyaltyExpiryDate: cleanMetaStr("expiryDate"),
+              loyaltyPointsFormatted: cleanMetaStr("pointsFormatted") || null,
+              loyaltyPointsBalance:
+                meta.updatedBalance !== undefined && Number.isFinite(Number(meta.updatedBalance))
+                  ? Number(meta.updatedBalance)
+                  : null,
+              loyaltyTier: cleanMetaStr("membershipLevel") || null,
+              previousTier: cleanMetaStr("previousTier") || null,
+              redemptionValueFormatted: cleanMetaStr("monetaryValueFormatted") || null,
+              expiryDate: cleanMetaStr("expiryDate") || null,
               corporateName: String(corporateDoc?.name || cleanMetaStr("corporateName") || "") || undefined,
-              corporateBalance:
-                corporateDoc?.currentBalance !== undefined
-                  ? Number(corporateDoc.currentBalance)
-                  : undefined,
               outletName: cleanMetaStr("outletName"),
               billNumber: cleanMetaStr("billNumber"),
-              issueTitle: cleanMetaStr("issue") || cleanMetaStr("item"),
+              issueSummary:
+                cleanMetaStr("issue") ||
+                cleanMetaStr("item") ||
+                cleanMetaStr("summary", 240) ||
+                cleanMetaStr("details", 240),
               priority: cleanMetaStr("priority")?.toUpperCase(),
-              inspectionScore: meta.score !== undefined ? `${meta.score}%` : undefined,
-              statusLabel: cleanMetaStr("status") || String(verifiedStaffDoc?.status || "") || undefined,
+              staffStatus:
+                cleanMetaStr("status") || String(verifiedStaffDoc?.status || "") || undefined,
               staffName:
                 String(verifiedStaffDoc?.displayName || verifiedStaffDoc?.name || "") || undefined,
-              actionedBy: caller.email || caller.uid,
-              reason: cleanMetaStr("reason", 240) || cleanMetaStr("remarks", 240),
-              summary: cleanMetaStr("summary", 240),
-              details: cleanMetaStr("details", 300) || cleanMetaStr("notes", 300),
-              transactionDate: cleanMetaStr("transactionDate") || depositDateFormatted,
-              expiryDate: cleanMetaStr("expiryDate"),
+              reason:
+                cleanMetaStr("reason", 240) ||
+                cleanMetaStr("remarks", 240) ||
+                cleanMetaStr("notes", 240),
             };
 
             const out = renderHotelEmailServerSide({
