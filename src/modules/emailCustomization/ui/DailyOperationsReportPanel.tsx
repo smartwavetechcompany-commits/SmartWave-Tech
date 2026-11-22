@@ -128,6 +128,7 @@ export function DailyOperationsReportPanel({
   const [editingRecipientId, setEditingRecipientId] = useState<string | null>(null);
   const [editRecipientEmail, setEditRecipientEmail] = useState("");
   const [editRecipientName, setEditRecipientName] = useState("");
+  const [savingRecipient, setSavingRecipient] = useState(false);
 
   // Preview & Test Send state
   const [previewDate, setPreviewDate] = useState("");
@@ -231,9 +232,49 @@ export function DailyOperationsReportPanel({
     }
   };
 
-  const handleAddRecipient = (e: React.FormEvent) => {
+  const persistRecipientsUpdate = async (
+    nextConfig: DailyOpsReportConfig,
+    previousConfig: DailyOpsReportConfig,
+    successMessage: string
+  ): Promise<boolean> => {
+    if (nextConfig.enabled && nextConfig.recipients.filter((r) => r.enabled).length === 0) {
+      toast.error(
+        "At least one enabled recipient is required while automated daily delivery is enabled. Disable automation first or keep one active recipient."
+      );
+      return false;
+    }
+
+    setConfig(nextConfig);
+    setSavingRecipient(true);
+    try {
+      const res = await emailCustomizationApi.saveDailyOpsConfig(
+        {
+          enabled: nextConfig.enabled,
+          scheduledTime: nextConfig.scheduledTime,
+          timezone: nextConfig.timezone,
+          recipients: nextConfig.recipients,
+          sections: nextConfig.sections,
+        },
+        hotelId
+      );
+      setConfig(res.config);
+      setNextScheduled(res.nextScheduledDelivery);
+      setTimezoneFallbackUsed(false);
+      setDirty(false);
+      toast.success(successMessage);
+      return true;
+    } catch (err: any) {
+      setConfig(previousConfig);
+      toast.error(err?.message || "Failed to save recipient changes.");
+      return false;
+    } finally {
+      setSavingRecipient(false);
+    }
+  };
+
+  const handleAddRecipient = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canManage || !config) return;
+    if (!canManage || !config || savingRecipient) return;
 
     const emailClean = newRecipientEmail.trim().toLowerCase();
     const nameClean = newRecipientName.trim().slice(0, 120);
@@ -259,11 +300,16 @@ export function DailyOperationsReportPanel({
       ...config,
       recipients: [...config.recipients, nextRecipient],
     };
-    setConfig(nextConfig);
-    setNewRecipientEmail("");
-    setNewRecipientName("");
-    setDirty(true);
-    toast.success(`Added ${emailClean}. Click "Save Configuration" to persist.`);
+
+    const saved = await persistRecipientsUpdate(
+      nextConfig,
+      config,
+      `Recipient ${emailClean} added and saved.`
+    );
+    if (saved) {
+      setNewRecipientEmail("");
+      setNewRecipientName("");
+    }
   };
 
   const handleStartEditRecipient = (r: DailyOpsRecipient) => {
@@ -272,8 +318,8 @@ export function DailyOperationsReportPanel({
     setEditRecipientName(r.name || "");
   };
 
-  const handleSaveEditRecipient = (id: string) => {
-    if (!config) return;
+  const handleSaveEditRecipient = async (id: string) => {
+    if (!config || !canManage || savingRecipient) return;
     const emailClean = editRecipientEmail.trim().toLowerCase();
     const nameClean = editRecipientName.trim().slice(0, 120);
     if (!validateDailyOpsEmail(emailClean)) {
@@ -284,9 +330,9 @@ export function DailyOperationsReportPanel({
       toast.error("Another recipient already uses this email address.");
       return;
     }
-    updateLocalConfig((prev) => ({
-      ...prev,
-      recipients: prev.recipients.map((r) =>
+    const nextConfig: DailyOpsReportConfig = {
+      ...config,
+      recipients: config.recipients.map((r) =>
         r.id === id
           ? {
               ...r,
@@ -296,26 +342,47 @@ export function DailyOperationsReportPanel({
             }
           : r
       ),
-    }));
-    setEditingRecipientId(null);
+    };
+    const saved = await persistRecipientsUpdate(
+      nextConfig,
+      config,
+      `Recipient ${emailClean} updated and saved.`
+    );
+    if (saved) {
+      setEditingRecipientId(null);
+    }
   };
 
-  const handleToggleRecipient = (id: string) => {
-    if (!canManage) return;
-    updateLocalConfig((prev) => ({
-      ...prev,
-      recipients: prev.recipients.map((r) =>
-        r.id === id ? { ...r, enabled: !r.enabled, updatedAt: new Date().toISOString() } : r
+  const handleToggleRecipient = async (id: string) => {
+    if (!canManage || !config || savingRecipient) return;
+    const target = config.recipients.find((r) => r.id === id);
+    if (!target) return;
+    const nextEnabled = !target.enabled;
+    const nextConfig: DailyOpsReportConfig = {
+      ...config,
+      recipients: config.recipients.map((r) =>
+        r.id === id ? { ...r, enabled: nextEnabled, updatedAt: new Date().toISOString() } : r
       ),
-    }));
+    };
+    await persistRecipientsUpdate(
+      nextConfig,
+      config,
+      `${target.email} ${nextEnabled ? "enabled" : "paused"} and saved.`
+    );
   };
 
-  const handleRemoveRecipient = (id: string) => {
-    if (!canManage) return;
-    updateLocalConfig((prev) => ({
-      ...prev,
-      recipients: prev.recipients.filter((r) => r.id !== id),
-    }));
+  const handleRemoveRecipient = async (id: string) => {
+    if (!canManage || !config || savingRecipient) return;
+    const target = config.recipients.find((r) => r.id === id);
+    const nextConfig: DailyOpsReportConfig = {
+      ...config,
+      recipients: config.recipients.filter((r) => r.id !== id),
+    };
+    await persistRecipientsUpdate(
+      nextConfig,
+      config,
+      target ? `Removed ${target.email} from report recipients.` : "Recipient removed."
+    );
   };
 
   const handlePreviewReport = async () => {
@@ -730,9 +797,11 @@ export function DailyOperationsReportPanel({
                 <div className="sm:col-span-3">
                   <button
                     type="submit"
-                    className="w-full h-full px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-bold text-zinc-100 inline-flex items-center justify-center gap-1.5 transition-colors"
+                    disabled={savingRecipient}
+                    className="w-full h-full px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 border border-zinc-700 text-xs font-bold text-zinc-100 inline-flex items-center justify-center gap-1.5 transition-colors"
                   >
-                    <Plus size={13} /> Add Recipient
+                    {savingRecipient ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                    {savingRecipient ? "Saving..." : "Add Recipient"}
                   </button>
                 </div>
               </form>
@@ -740,7 +809,7 @@ export function DailyOperationsReportPanel({
 
             {config.recipients.length === 0 ? (
               <div className="py-8 text-center rounded-lg border border-dashed border-zinc-800 bg-zinc-950/50 text-xs text-zinc-500">
-                No recipients configured yet. Add one or more email addresses above, then save configuration.
+                No recipients configured yet. Add one or more email addresses above — recipients are saved automatically.
               </div>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-950/60">
@@ -786,13 +855,13 @@ export function DailyOperationsReportPanel({
                           <td className="py-2.5 px-3">
                             <button
                               type="button"
-                              disabled={!canManage}
-                              onClick={() => handleToggleRecipient(rcpt.id)}
+                              disabled={!canManage || savingRecipient}
+                              onClick={() => void handleToggleRecipient(rcpt.id)}
                               className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors ${
                                 rcpt.enabled
                                   ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
                                   : "bg-zinc-800 text-zinc-400 border-zinc-700"
-                              } ${!canManage ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
+                              } ${!canManage || savingRecipient ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
                             >
                               {rcpt.enabled ? "Enabled" : "Paused"}
                             </button>
@@ -803,16 +872,18 @@ export function DailyOperationsReportPanel({
                                 <div className="inline-flex items-center gap-1">
                                   <button
                                     type="button"
-                                    onClick={() => handleSaveEditRecipient(rcpt.id)}
-                                    className="p-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white"
+                                    disabled={savingRecipient}
+                                    onClick={() => void handleSaveEditRecipient(rcpt.id)}
+                                    className="p-1.5 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white"
                                     title="Save changes"
                                   >
                                     <Check size={12} />
                                   </button>
                                   <button
                                     type="button"
+                                    disabled={savingRecipient}
                                     onClick={() => setEditingRecipientId(null)}
-                                    className="p-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                                    className="p-1.5 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-300"
                                     title="Cancel"
                                   >
                                     <X size={12} />
@@ -822,16 +893,18 @@ export function DailyOperationsReportPanel({
                                 <div className="inline-flex items-center gap-1">
                                   <button
                                     type="button"
+                                    disabled={savingRecipient}
                                     onClick={() => handleStartEditRecipient(rcpt)}
-                                    className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100"
+                                    className="p-1.5 rounded hover:bg-zinc-800 disabled:opacity-50 text-zinc-400 hover:text-zinc-100"
                                     title="Edit recipient"
                                   >
                                     <Pencil size={12} />
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => handleRemoveRecipient(rcpt.id)}
-                                    className="p-1.5 rounded hover:bg-rose-500/15 text-zinc-400 hover:text-rose-400"
+                                    disabled={savingRecipient}
+                                    onClick={() => void handleRemoveRecipient(rcpt.id)}
+                                    className="p-1.5 rounded hover:bg-rose-500/15 disabled:opacity-50 text-zinc-400 hover:text-rose-400"
                                     title="Remove recipient"
                                   >
                                     <Trash2 size={12} />

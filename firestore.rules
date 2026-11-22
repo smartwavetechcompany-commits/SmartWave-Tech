@@ -153,6 +153,10 @@ service cloud.firestore {
       let hasCustomRoleDoc = roleId is string && roleId != '' && exists(/databases/$(database)/documents/hotels/$(hotelId)/customRoles/$(roleId));
       return isAuthenticated() && (
         isSuperAdmin() ||
+        (exists(/databases/$(database)/documents/hotels/$(hotelId)) &&
+         get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs != null &&
+         get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs is list &&
+         get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid])) ||
         (sameHotel(hotelId) && data != null && data.get('status', 'active') != "suspended" && data.get('status', 'active') != "inactive" && (
           data.role == "hotelAdmin" ||
           data.role == "admin" ||

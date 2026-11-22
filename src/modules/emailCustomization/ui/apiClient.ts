@@ -107,6 +107,7 @@ async function apiFetch<T>(
 
   const resp = await fetch(url, {
     method: options.method || "GET",
+    cache: "no-store",
     headers: {
       Authorization: `Bearer ${token}`,
       ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
