@@ -200,6 +200,28 @@ export async function depositToGuestAccount(
     },
   });
 
+  // Additive: Trigger guest account deposit confirmation email ONLY after the deposit commits successfully.
+  // Deduplicated via txRef.id and non-blocking so email delivery issues never affect deposit completion.
+  try {
+    void notifyPlatformEvent({
+      hotelId,
+      eventType: 'deposit.received',
+      entityId: txRef.id,
+      guestId,
+      idempotencyKey: txRef.id,
+      metadata: {
+        amount: cleanAmount,
+        paymentMethod,
+        reference: options?.referenceCode?.trim() || txRef.id,
+        depositBalanceAfter: balanceAfter,
+        transactionDate: nowISO,
+        guestName: guestData.name || 'Guest',
+      },
+    });
+  } catch {
+    // Non-blocking
+  }
+
   return { transaction: txRecord, balanceBefore, balanceAfter };
 }
 

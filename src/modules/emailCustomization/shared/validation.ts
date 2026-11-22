@@ -1999,24 +1999,43 @@ export function buildTemplateVariablesMap(
     return res.valid && res.normalized ? res.normalized : "";
   };
 
+  const isSameOriginAsPmsApp = (url: string): boolean => {
+    if (!url || !cleanAppUrl) return false;
+    try {
+      return new URL(url).origin.toLowerCase() === new URL(cleanAppUrl).origin.toLowerCase();
+    } catch {
+      return url.replace(/\/+$/, "").toLowerCase() === cleanAppUrl.toLowerCase();
+    }
+  };
+
   const dl = settings.defaultLinks;
 
-  const portalLink =
+  // NEVER auto-fallback guest links (portal_link, hotel_website, booking_link) to the PMS application URL.
+  // Links only appear when explicitly configured by the hotel (and not pointing to the internal PMS origin).
+  const rawPortalCandidate =
     resolveSafeLink(portalUrlOverride) ||
     resolveLocalizedLink(dl?.portal, language, hotelDefaultLang) ||
-    resolveSafeLink(settings.portalUrl) ||
-    cleanAppUrl;
+    resolveSafeLink(settings.portalUrl);
+  const portalLink =
+    rawPortalCandidate && (!isSameOriginAsPmsApp(rawPortalCandidate) || Boolean(portalUrlOverride))
+      ? rawPortalCandidate
+      : "";
 
-  const hotelWebsite =
+  const rawWebsiteCandidate =
     resolveLocalizedLink(dl?.website, language, hotelDefaultLang) ||
     resolveSafeLink(settings.contactOverrides?.website) ||
-    resolveSafeLink(ctx.hotelWebsite) ||
-    portalLink;
+    resolveSafeLink(ctx.hotelWebsite);
+  const hotelWebsite =
+    rawWebsiteCandidate && !isSameOriginAsPmsApp(rawWebsiteCandidate) ? rawWebsiteCandidate : "";
 
-  const bookingLink =
+  const rawBookingCandidate =
     resolveLocalizedLink(dl?.booking, language, hotelDefaultLang) ||
-    resolveSafeLink(settings.bookingUrl) ||
-    portalLink;
+    resolveSafeLink(settings.bookingUrl);
+  const bookingLink =
+    rawBookingCandidate && !isSameOriginAsPmsApp(rawBookingCandidate) ? rawBookingCandidate : "";
+
+  // Legitimate security action link (e.g., password reset / staff activation) — allowed even on PMS origin
+  const actionLink = resolveSafeLink(ctx.actionLink);
 
   // Optional hotel links: resolve to "" when not configured (never fall back to portal_link or "undefined")
   const reviewLink = resolveLocalizedLink(dl?.review, language, hotelDefaultLang);
@@ -2038,19 +2057,40 @@ export function buildTemplateVariablesMap(
   const checkInTime = formatEmailTime(ctx.checkInTime, settings.timeFormat);
   const checkOutDate = formatEmailDate(ctx.checkOutDate, settings.dateFormat, settings.timeZone, language);
   const checkOutTime = formatEmailTime(ctx.checkOutTime, settings.timeFormat);
+  const transactionDate = formatEmailDate(
+    ctx.transactionDate,
+    settings.dateFormat,
+    settings.timeZone,
+    language
+  );
+  const expiryDate = formatEmailDate(
+    ctx.expiryDate || undefined,
+    settings.dateFormat,
+    settings.timeZone,
+    language
+  );
 
-  const totalAmount =
-    ctx.totalAmount !== undefined && ctx.totalAmount !== null && Number(ctx.totalAmount) > 0
-      ? formatEmailCurrency(ctx.totalAmount, ctx.currencyCode, settings.currencyDisplay)
-      : "";
-  const depositAmount =
-    ctx.depositAmount !== undefined && ctx.depositAmount !== null && Number(ctx.depositAmount) > 0
-      ? formatEmailCurrency(ctx.depositAmount, ctx.currencyCode, settings.currencyDisplay)
-      : "";
-  const balanceDue =
-    ctx.balanceDue !== undefined && ctx.balanceDue !== null && Number.isFinite(Number(ctx.balanceDue))
-      ? formatEmailCurrency(Math.max(0, Number(ctx.balanceDue)), ctx.currencyCode, settings.currencyDisplay)
-      : "";
+  const fmtMoney = (val: number | undefined | null, allowZero = false): string => {
+    if (val === undefined || val === null || !Number.isFinite(Number(val))) return "";
+    const n = Number(val);
+    if (!allowZero && n <= 0) return "";
+    return formatEmailCurrency(Math.max(0, n), ctx.currencyCode, settings.currencyDisplay);
+  };
+
+  const originalAmountVal =
+    ctx.originalAmount !== undefined && ctx.originalAmount !== null
+      ? ctx.originalAmount
+      : ctx.totalAmount;
+  const totalAmount = fmtMoney(ctx.totalAmount);
+  const originalAmount = fmtMoney(originalAmountVal);
+  const discountAmount = fmtMoney(ctx.discountAmount);
+  const amountPaidVal =
+    ctx.amountPaid !== undefined && ctx.amountPaid !== null ? ctx.amountPaid : ctx.depositAmount;
+  const amountPaid = fmtMoney(amountPaidVal, ctx.amountPaid === 0);
+  const depositAmount = fmtMoney(ctx.depositAmount);
+  const depositBalance = fmtMoney(ctx.depositBalance, true);
+  const refundAmount = fmtMoney(ctx.refundAmount);
+  const balanceDue = fmtMoney(ctx.balanceDue, true);
 
   // Loyalty: ONLY populate if actual loyalty data exists; NEVER invent or compute points
   const hasEarned =
@@ -2063,9 +2103,15 @@ export function buildTemplateVariablesMap(
     Number.isFinite(Number(ctx.loyaltyPointsBalance));
   const hasTier =
     typeof ctx.loyaltyTier === "string" && ctx.loyaltyTier.trim().length > 0;
-  const hasLoyalty = hasEarned || hasBalance || hasTier;
+  const hasFormattedPts =
+    typeof ctx.loyaltyPointsFormatted === "string" && ctx.loyaltyPointsFormatted.trim().length > 0;
+  const hasLoyalty = hasEarned || hasBalance || hasTier || hasFormattedPts;
 
   const legalImprint = stripDangerousMarkup(settings.legalImprint || "").trim();
+  const bookingRef = String(ctx.bookingReference || "").trim();
+  const roomNameStr = String(ctx.roomName || "").trim();
+  const roomNumberStr =
+    String(ctx.roomNumber || "").trim() || roomNameStr.replace(/^Room\s+/i, "").trim();
 
   const variables: Record<AllowedTemplateVariable, string> = {
     guest_name: guestName,
@@ -2076,20 +2122,51 @@ export function buildTemplateVariablesMap(
     hotel_email: hotelEmail,
     hotel_website: hotelWebsite,
     legal_imprint: legalImprint,
-    room_name: String(ctx.roomName || "").trim(),
+    room_name: roomNameStr,
+    room_number: roomNumberStr,
     room_type: String(ctx.roomType || "").trim(),
     check_in_date: checkInDate,
     check_in_time: checkInTime,
     check_out_date: checkOutDate,
     check_out_time: checkOutTime,
     nights: ctx.nights !== undefined && ctx.nights !== null && Number(ctx.nights) > 0 ? String(ctx.nights) : "",
-    booking_reference: String(ctx.bookingReference || "").trim(),
+    booking_reference: bookingRef,
+    reservation_number: bookingRef,
     total_amount: totalAmount,
+    original_amount: originalAmount,
+    discount_amount: discountAmount,
+    amount_paid: amountPaid,
     deposit_amount: depositAmount,
+    deposit_balance: depositBalance,
+    refund_amount: refundAmount,
     balance_due: balanceDue,
+    remaining_balance: balanceDue,
+    payment_status: String(ctx.paymentStatus || "").trim(),
+    payment_method: String(ctx.paymentMethod || "").trim(),
+    transaction_reference: String(ctx.transactionReference || "").trim(),
+    transaction_date: transactionDate,
+    loyalty_points: hasFormattedPts
+      ? String(ctx.loyaltyPointsFormatted).trim()
+      : hasEarned
+        ? String(ctx.loyaltyPointsEarned)
+        : "",
     loyalty_points_earned: hasEarned ? String(ctx.loyaltyPointsEarned) : "",
     loyalty_points_balance: hasBalance ? String(ctx.loyaltyPointsBalance) : "",
+    points_balance: hasBalance ? `${Number(ctx.loyaltyPointsBalance).toLocaleString("en-US")} pts` : "",
     loyalty_tier: hasTier ? String(ctx.loyaltyTier).trim() : "",
+    previous_tier: typeof ctx.previousTier === "string" ? ctx.previousTier.trim() : "",
+    redemption_value:
+      typeof ctx.redemptionValueFormatted === "string" ? ctx.redemptionValueFormatted.trim() : "",
+    expiry_date: expiryDate,
+    reason: String(ctx.reason || "").trim(),
+    staff_name: String(ctx.staffName || "").trim(),
+    staff_status: String(ctx.staffStatus || "").trim(),
+    corporate_name: String(ctx.corporateName || "").trim(),
+    outlet_name: String(ctx.outletName || "").trim(),
+    bill_number: String(ctx.billNumber || "").trim(),
+    issue_summary: String(ctx.issueSummary || "").trim(),
+    priority: String(ctx.priority || "").trim(),
+    action_link: actionLink,
     booking_link: bookingLink,
     portal_link: portalLink,
     app_url: cleanAppUrl,

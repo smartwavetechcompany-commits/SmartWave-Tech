@@ -8,8 +8,6 @@
  */
 
 import crypto from "crypto";
-import { getApps as getAdminApps } from "firebase-admin/app";
-import { getFirestore as getAdminFirestore } from "firebase-admin/firestore";
 import { sendEmail, type SendEmailParams, type SendEmailResult } from "../../../services/emailService.ts";
 import { isSafeIdentifier } from "../../../utils/serverSecurity.ts";
 import {
@@ -49,21 +47,29 @@ export type DailyOpsEmailSender = (params: SendEmailParams) => Promise<SendEmail
 const CONFIG_DOC_ID = "default";
 const MAX_COLLECTION_READ = 2000;
 
+let cachedAdminDb: any | null | undefined = undefined;
+
 /**
- * Returns Firebase Admin Firestore ONLY if an Admin App was already initialized
- * (e.g., via FIREBASE_SERVICE_ACCOUNT_KEY in server.ts). Otherwise returns null
- * so interactive routes cleanly use the caller's Firebase ID token via Firestore REST.
+ * Returns Firebase Admin Firestore ONLY if firebase-admin is installed AND an Admin App
+ * was already initialized (e.g., via FIREBASE_SERVICE_ACCOUNT_KEY in server.ts).
+ * Uses dynamic import inside try/catch so production installs without devDependencies
+ * never fail to boot.
  */
-function getOptionalAdminFirestore() {
+async function getOptionalAdminFirestore(): Promise<any | null> {
+  if (cachedAdminDb !== undefined) return cachedAdminDb;
   try {
+    const { getApps: getAdminApps } = await import("firebase-admin/app");
     const apps = getAdminApps();
     if (apps.length > 0) {
-      return getAdminFirestore(apps[0]);
+      const { getFirestore: getAdminFirestore } = await import("firebase-admin/firestore");
+      cachedAdminDb = getAdminFirestore(apps[0]);
+      return cachedAdminDb;
     }
+    return null;
   } catch {
-    // Admin SDK not initialized in this runtime
+    cachedAdminDb = null;
+    return null;
   }
-  return null;
 }
 
 async function readDoc(
@@ -71,7 +77,7 @@ async function readDoc(
   bearerToken?: string
 ): Promise<Record<string, any> | null> {
   if (!bearerToken) {
-    const adminDb = getOptionalAdminFirestore();
+    const adminDb = await getOptionalAdminFirestore();
     if (adminDb) {
       const snap = await adminDb.doc(docPath).get();
       if (!snap.exists) return null;
@@ -87,7 +93,7 @@ async function writeDoc(
   bearerToken?: string
 ): Promise<{ ok: boolean; error?: string }> {
   if (!bearerToken) {
-    const adminDb = getOptionalAdminFirestore();
+    const adminDb = await getOptionalAdminFirestore();
     if (adminDb) {
       await adminDb.doc(docPath).set(stripUndefinedDeep(data));
       return { ok: true };
@@ -103,10 +109,10 @@ async function listCollectionAll(
   maxDocs = MAX_COLLECTION_READ
 ): Promise<Array<Record<string, any> & { id: string }>> {
   if (!bearerToken) {
-    const adminDb = getOptionalAdminFirestore();
+    const adminDb = await getOptionalAdminFirestore();
     if (adminDb) {
       const snap = await adminDb.collection(collectionPath).limit(maxDocs).get();
-      return snap.docs.map((d) => ({ ...(d.data() as Record<string, any>), id: d.id }));
+      return snap.docs.map((d: any) => ({ ...(d.data() as Record<string, any>), id: d.id }));
     }
   }
 
@@ -1130,7 +1136,7 @@ let schedulerStarted = false;
 let schedulerInFlight = false;
 let loggedMissingAdminNotice = false;
 
-export function startDailyOpsBackgroundScheduler(intervalMs = 60_000): void {
+export function startDailyOpsBackgroundScheduler(intervalMs = 300_000): void {
   if (schedulerStarted) return;
   schedulerStarted = true;
 
@@ -1138,7 +1144,7 @@ export function startDailyOpsBackgroundScheduler(intervalMs = 60_000): void {
     if (schedulerInFlight) return;
     // Unattended background Firestore reads require Firebase Admin SDK credentials
     // when Firestore security rules enforce strict multi-tenant authentication.
-    const adminDb = getOptionalAdminFirestore();
+    const adminDb = await getOptionalAdminFirestore();
     if (!adminDb) {
       if (!loggedMissingAdminNotice) {
         loggedMissingAdminNotice = true;

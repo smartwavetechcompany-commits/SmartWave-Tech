@@ -15,8 +15,9 @@ export type MultiTenantEmailEventType =
   | "reservation.checked_out"
   | "reservation.cancelled"
   | "reservation.no_show"
-  // Payments, Invoices, Receipts & Refunds
+  // Payments, Deposits, Invoices, Receipts & Refunds
   | "payment.received"
+  | "deposit.received"
   | "invoice.issued"
   | "receipt.sent"
   | "refund.processed"
@@ -238,10 +239,13 @@ export function resolveHotelBrandContext(
     (typeof hotelDoc?.address === "string" && hotelDoc.address.trim()) ||
     undefined;
 
+  const rawConfiguredWebsite =
+    sanitizeHttpUrl(branding.website) || sanitizeHttpUrl(hotelDoc?.website) || "";
   const website =
-    sanitizeHttpUrl(branding.website) ||
-    sanitizeHttpUrl(hotelDoc?.website) ||
-    cleanAppUrl;
+    rawConfiguredWebsite &&
+    rawConfiguredWebsite.replace(/\/+$/, "").toLowerCase() !== cleanAppUrl.toLowerCase()
+      ? rawConfiguredWebsite
+      : "";
 
   const logoUrl = sanitizeHttpUrl(branding.logoUrl);
 
@@ -446,6 +450,7 @@ export function getOperationalRoutingTarget(eventType: MultiTenantEmailEventType
     case "guest.blacklisted":
       return { department: "frontDesk", roles: ["hotelAdmin", "admin", "manager", "frontDesk", "receptionist"] };
     case "payment.received":
+    case "deposit.received":
     case "invoice.issued":
     case "receipt.sent":
     case "refund.processed":
@@ -606,6 +611,12 @@ function getDefaultMetaForEvent(
         subjectPrefix: `Payment Confirmation - ${name}`,
         heading: "Payment Received",
         defaultIntro: `A payment has been recorded at ${name}. Transaction details are provided below.`,
+      };
+    case "deposit.received":
+      return {
+        subjectPrefix: `Deposit Received – ${name}`,
+        heading: "Deposit Received",
+        defaultIntro: `Thank you! Your deposit has been received and credited to your guest account at ${name}. Below are your deposit confirmation details.`,
       };
     case "invoice.issued":
       return {
@@ -807,9 +818,9 @@ export function renderMultiTenantEmail(
     payload.subjectOverride || defaults.subjectPrefix,
     defaults.subjectPrefix
   );
-  const cleanWebsite = brand.website.replace(/\/+$/, "");
-  const ctaUrl = sanitizeHttpUrl(payload.ctaUrl) || cleanWebsite;
-  const ctaLabel = payload.ctaLabel || "Open Portal";
+  const cleanWebsite = brand.website ? brand.website.replace(/\/+$/, "") : "";
+  const ctaUrl = sanitizeHttpUrl(payload.ctaUrl) || (brand.isPlatformScope ? cleanWebsite : "");
+  const ctaLabel = payload.ctaLabel || (brand.isPlatformScope ? "Admin Portal" : "Hotel Website");
   const rows = payload.rows.filter(
     (r) => r && typeof r.label === "string" && typeof r.value === "string" && r.value.trim().length > 0
   );
@@ -876,7 +887,7 @@ export function renderMultiTenantEmail(
       <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.6; color: #27272a;">${escapeHtml(intro)}</p>
       ${rowsHtml}
       ${noteHtml}
-      <p style="margin: 22px 0 0; font-size: 14px;">${escapeHtml(ctaLabel)}: <a href="${escapeHtml(ctaUrl)}" style="color: ${escapeHtml(brand.primaryColor)}; text-decoration: underline;">${escapeHtml(ctaUrl)}</a></p>
+      ${ctaUrl ? `<p style="margin: 22px 0 0; font-size: 14px;">${escapeHtml(ctaLabel)}: <a href="${escapeHtml(ctaUrl)}" style="color: ${escapeHtml(brand.primaryColor)}; text-decoration: underline;">${escapeHtml(ctaUrl)}</a></p>` : ""}
       ${contactHtml}
       ${footerNoteHtml}
     </div>
@@ -892,8 +903,7 @@ export function renderMultiTenantEmail(
     "",
     ...rows.map((r) => `${r.label}: ${r.value}`),
     ...(payload.note ? ["", payload.note] : []),
-    "",
-    `${ctaLabel}: ${ctaUrl}`,
+    ...(ctaUrl ? ["", `${ctaLabel}: ${ctaUrl}`] : []),
     ...(contactTextParts.length > 0 ? ["", `${brand.hotelName} Contact:`, ...contactTextParts] : []),
     ...(brand.footerNotes ? ["", brand.footerNotes] : []),
   ];

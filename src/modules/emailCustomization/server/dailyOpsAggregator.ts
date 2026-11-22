@@ -15,7 +15,6 @@
  * - Deduplicates all reservation categories to prevent double counting.
  */
 
-import { getRoomDisplayStatus } from "../../../utils/roomUtils.ts";
 import {
   formatReportDateLabel,
   getZonedDateParts,
@@ -24,6 +23,24 @@ import {
   type DailyOpsReportData,
   type DailyOpsRoomTransitionItem,
 } from "../shared/dailyOpsTypes.ts";
+
+/**
+ * Server-safe read-only room display status resolver matching src/utils/roomUtils.ts
+ * without importing frontend extensionless modules under Node native ESM.
+ */
+function resolveRoomDisplayStatusReadOnly(
+  room: Record<string, any>,
+  isOccupied: boolean,
+  isBlocked: boolean,
+  isReserved: boolean
+): string {
+  if (isOccupied) return "occupied";
+  if (isBlocked) return "maintenance";
+  if (isReserved) return "reserved";
+  const raw = String(room?.status || "").toLowerCase();
+  if (raw === "occupied") return "dirty";
+  return raw;
+}
 
 export interface DailyOpsAggregationInput {
   hotelId: string;
@@ -314,10 +331,13 @@ export function buildDailyOperationsReport(input: DailyOpsAggregationInput): Dai
     const isBlocked = activeBlockedRoomIds.has(roomId);
     const isReserved = !isOccupied && !isOutOfOrder && !isMaintenance && !isBlocked && (reservedRoomIds.has(roomId) || rawStatus === "reserved");
 
-    // Reuse existing PMS getRoomDisplayStatus helper for housekeeping/status consistency
-    const displayStatus = String(
-      getRoomDisplayStatus(room as any, inHouseReservations as any, roomBlockings as any, periodStartUtc, hotelDoc as any) || ""
-    ).toLowerCase();
+    // Server-safe display status matching src/utils/roomUtils.ts precedence
+    const displayStatus = resolveRoomDisplayStatusReadOnly(
+      room,
+      isOccupied,
+      isBlocked,
+      isReserved
+    );
 
     if (isOccupied) {
       occupiedRoomsCount++;

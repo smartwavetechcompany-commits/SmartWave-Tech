@@ -21,6 +21,7 @@ import {
   type HotelEmailEventType,
 } from "../shared/types.ts";
 import { isValidEmail } from "../shared/validation.ts";
+import { computeEmailFinancialBreakdown } from "../shared/financialEmailBreakdown.ts";
 import { EMAIL_EVENT_CATALOG, buildDefaultTemplateForHotel } from "./defaultTemplates.ts";
 import {
   fsListCollection,
@@ -145,20 +146,22 @@ function buildRenderContextFromRecords(params: {
     : roomType || (typeof reservation?.roomId === "string" ? reservation.roomId : "Assigned Room");
 
   const bookingReference = String(reservation?.id || "").slice(0, 8).toUpperCase();
-  const totalAmount =
-    typeof reservation?.totalAmount === "number" && Number.isFinite(reservation.totalAmount)
-      ? reservation.totalAmount
-      : undefined;
+  const financial = computeEmailFinancialBreakdown({
+    reservation,
+    paymentAmount,
+  });
+  const totalAmount = financial.hasFinancialData ? financial.originalAmount : undefined;
+  const originalAmount = financial.hasFinancialData ? financial.originalAmount : undefined;
+  const discountAmount = financial.discountAmount > 0 ? financial.discountAmount : undefined;
+  const amountPaid = financial.hasFinancialData ? financial.amountPaid : undefined;
   const depositAmount =
     typeof paymentAmount === "number" && Number.isFinite(paymentAmount) && paymentAmount > 0
       ? paymentAmount
-      : typeof reservation?.paidAmount === "number" && Number.isFinite(reservation.paidAmount)
-        ? reservation.paidAmount
+      : financial.amountPaid > 0
+        ? financial.amountPaid
         : undefined;
-  const balanceDue =
-    totalAmount !== undefined
-      ? Math.max(0, totalAmount - (typeof reservation?.paidAmount === "number" ? reservation.paidAmount : 0))
-      : undefined;
+  const balanceDue = financial.hasFinancialData ? financial.remainingBalance : undefined;
+  const paymentStatus = financial.hasFinancialData ? financial.paymentStatus : undefined;
 
   // Read REAL loyalty fields ONLY if they exist on guest or reservation; NEVER invent points
   const rawEarned =
@@ -214,6 +217,7 @@ function buildRenderContextFromRecords(params: {
       (typeof reservation?.guestLanguage === "string" && reservation.guestLanguage.trim()) ||
       undefined,
     roomName,
+    roomNumber: roomNumber || undefined,
     roomType: roomType || undefined,
     checkInDate: typeof reservation?.checkIn === "string" ? reservation.checkIn : undefined,
     checkInTime: typeof reservation?.checkInTime === "string" ? reservation.checkInTime : undefined,
@@ -225,8 +229,12 @@ function buildRenderContextFromRecords(params: {
         : computeNights(reservation?.checkIn, reservation?.checkOut),
     bookingReference,
     totalAmount,
+    originalAmount,
+    discountAmount,
+    amountPaid,
     depositAmount,
     balanceDue,
+    paymentStatus,
     loyaltyPointsEarned:
       rawEarned !== null && rawEarned !== undefined && Number.isFinite(Number(rawEarned))
         ? Number(rawEarned)

@@ -539,6 +539,7 @@ export interface BookingEmailTemplateData {
   hotelEmail?: string;
   hotelPhone?: string;
   hotelAddress?: string;
+  hotelWebsite?: string;
   appUrl: string;
 }
 
@@ -584,7 +585,7 @@ export function buildBookingConfirmationEmail(data: BookingEmailTemplateData): {
   html: string;
   text: string;
 } {
-  const cleanUrl = data.appUrl.replace(/\/+$/, "");
+  const cleanWebsite = data.hotelWebsite ? data.hotelWebsite.trim().replace(/\/+$/, "") : "";
   const contact = buildHotelContactBlock(data);
   const subject = `Booking Confirmation - ${data.hotelName} (${data.bookingRef})`;
 
@@ -604,7 +605,7 @@ export function buildBookingConfirmationEmail(data: BookingEmailTemplateData): {
       <tr style="border-bottom: 1px solid #e4e4e7;"><td style="color: #71717a;">Check-In</td><td>${escapeHtml(data.checkIn)}</td></tr>
       <tr><td style="color: #71717a;">Check-Out</td><td>${escapeHtml(data.checkOut)}</td></tr>
     </table>
-    <p style="margin: 20px 0 0; font-size: 14px;">Portal: <a href="${escapeHtml(cleanUrl)}" style="color: #059669;">${escapeHtml(cleanUrl)}</a></p>
+    ${cleanWebsite ? `<p style="margin: 20px 0 0; font-size: 14px;">Website: <a href="${escapeHtml(cleanWebsite)}" style="color: #059669;">${escapeHtml(cleanWebsite)}</a></p>` : ""}
     ${contact.html}
   </div>
 </body>
@@ -622,8 +623,7 @@ export function buildBookingConfirmationEmail(data: BookingEmailTemplateData): {
     `Room: ${data.roomLabel}`,
     `Check-In: ${data.checkIn}`,
     `Check-Out: ${data.checkOut}`,
-    ``,
-    `Website: ${cleanUrl}`,
+    ...(cleanWebsite ? [``, `Website: ${cleanWebsite}`] : []),
     contact.text,
   ].join("\n").trim();
 
@@ -635,7 +635,7 @@ export function buildBookingCancellationEmail(data: BookingEmailTemplateData): {
   html: string;
   text: string;
 } {
-  const cleanUrl = data.appUrl.replace(/\/+$/, "");
+  const cleanWebsite = data.hotelWebsite ? data.hotelWebsite.trim().replace(/\/+$/, "") : "";
   const contact = buildHotelContactBlock(data);
   const subject = `Booking Cancellation - ${data.hotelName} (${data.bookingRef})`;
 
@@ -656,7 +656,7 @@ export function buildBookingCancellationEmail(data: BookingEmailTemplateData): {
       <tr><td style="color: #71717a;">Check-Out</td><td>${escapeHtml(data.checkOut)}</td></tr>
     </table>
     <p style="margin: 20px 0 0; font-size: 14px;">If this cancellation was unexpected, please reply to this email or contact the hotel directly.</p>
-    <p style="margin: 12px 0 0; font-size: 14px;">Portal: <a href="${escapeHtml(cleanUrl)}" style="color: #059669;">${escapeHtml(cleanUrl)}</a></p>
+    ${cleanWebsite ? `<p style="margin: 12px 0 0; font-size: 14px;">Website: <a href="${escapeHtml(cleanWebsite)}" style="color: #059669;">${escapeHtml(cleanWebsite)}</a></p>` : ""}
     ${contact.html}
   </div>
 </body>
@@ -676,7 +676,7 @@ export function buildBookingCancellationEmail(data: BookingEmailTemplateData): {
     `Check-Out: ${data.checkOut}`,
     ``,
     `If this cancellation was unexpected, please contact the hotel directly.`,
-    `Website: ${cleanUrl}`,
+    ...(cleanWebsite ? [`Website: ${cleanWebsite}`] : []),
     contact.text,
   ].join("\n").trim();
 

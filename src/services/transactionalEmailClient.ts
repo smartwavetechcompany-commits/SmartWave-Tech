@@ -17,6 +17,7 @@ export type ReservationEmailEventType =
 
 export type PlatformNotificationEventType =
   | 'payment.received'
+  | 'deposit.received'
   | 'invoice.issued'
   | 'receipt.sent'
   | 'refund.processed'

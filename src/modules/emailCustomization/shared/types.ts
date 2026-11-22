@@ -3,16 +3,57 @@
  * and typed block schemas for the Multi-Tenant Email Customization Module.
  */
 
+export type EmailTemplateCategory =
+  | "guest_stays"
+  | "payments_billing"
+  | "loyalty_rewards"
+  | "corporate"
+  | "staff_operations";
+
 export type CustomizableEmailEventType =
+  // Guest Stays & Reservations (existing IDs strictly preserved)
   | "booking_confirmation"
   | "booking_cancellation"
   | "checked_in"
   | "checked_out"
   | "booking_modified"
   | "pre_arrival_reminder"
+  | "post_stay_feedback_request"
+  | "guest_profile_created"
+  | "fnb_order_posted"
+  // Payments, Deposits, Discounts & Refunds
   | "payment_receipt"
+  | "deposit_received"
+  | "refund_processed"
+  | "invoice_issued"
+  | "receipt_sent"
+  | "discount_settlement_confirmation"
+  // Guest Loyalty & Rewards
+  | "loyalty_account_activated"
+  | "loyalty_points_awarded"
+  | "loyalty_points_deducted"
+  | "loyalty_points_redeemed"
+  | "loyalty_tier_upgraded"
+  | "loyalty_points_expiring"
+  // Corporate & City Ledger
+  | "corporate_account_created"
+  | "corporate_city_ledger_transfer"
+  | "corporate_payment_settled"
+  | "corporate_low_balance_alert"
+  // Staff & Hotel Operations
   | "no_show"
-  | "post_stay_feedback_request";
+  | "staff_account_activation"
+  | "staff_password_reset"
+  | "staff_account_status_changed"
+  | "fnb_order_voided"
+  | "housekeeping_room_ready"
+  | "housekeeping_inspection_failed"
+  | "housekeeping_guest_request"
+  | "maintenance_issue_reported"
+  | "maintenance_issue_resolved"
+  | "guest_blacklisted"
+  | "daily_revenue_deficit_alert"
+  | "operational_alert";
 
 export type SystemFixedEmailEventType = "tracking_code_request_alert";
 
@@ -28,15 +69,49 @@ export const SUPPORTED_EMAIL_LANGUAGES: { code: SupportedEmailLanguage; label: s
 ];
 
 export const CUSTOMIZABLE_EMAIL_EVENTS: CustomizableEmailEventType[] = [
+  // Guest Stays & Reservations
   "booking_confirmation",
+  "booking_modified",
   "booking_cancellation",
   "checked_in",
   "checked_out",
-  "booking_modified",
   "pre_arrival_reminder",
-  "payment_receipt",
-  "no_show",
   "post_stay_feedback_request",
+  "guest_profile_created",
+  "fnb_order_posted",
+  // Payments, Deposits, Discounts & Refunds
+  "payment_receipt",
+  "deposit_received",
+  "refund_processed",
+  "invoice_issued",
+  "receipt_sent",
+  "discount_settlement_confirmation",
+  // Guest Loyalty & Rewards
+  "loyalty_account_activated",
+  "loyalty_points_awarded",
+  "loyalty_points_deducted",
+  "loyalty_points_redeemed",
+  "loyalty_tier_upgraded",
+  "loyalty_points_expiring",
+  // Corporate & City Ledger
+  "corporate_account_created",
+  "corporate_city_ledger_transfer",
+  "corporate_payment_settled",
+  "corporate_low_balance_alert",
+  // Staff & Hotel Operations
+  "no_show",
+  "staff_account_activation",
+  "staff_password_reset",
+  "staff_account_status_changed",
+  "fnb_order_voided",
+  "housekeeping_room_ready",
+  "housekeeping_inspection_failed",
+  "housekeeping_guest_request",
+  "maintenance_issue_reported",
+  "maintenance_issue_resolved",
+  "guest_blacklisted",
+  "daily_revenue_deficit_alert",
+  "operational_alert",
 ];
 
 export const SYSTEM_FIXED_EMAIL_EVENTS: SystemFixedEmailEventType[] = [
@@ -56,6 +131,7 @@ export const ALLOWED_TEMPLATE_VARIABLES = [
   "hotel_website",
   "legal_imprint",
   "room_name",
+  "room_number",
   "room_type",
   "check_in_date",
   "check_in_time",
@@ -63,12 +139,37 @@ export const ALLOWED_TEMPLATE_VARIABLES = [
   "check_out_time",
   "nights",
   "booking_reference",
+  "reservation_number",
   "total_amount",
+  "original_amount",
+  "discount_amount",
+  "amount_paid",
   "deposit_amount",
+  "deposit_balance",
+  "refund_amount",
   "balance_due",
+  "remaining_balance",
+  "payment_status",
+  "payment_method",
+  "transaction_reference",
+  "transaction_date",
+  "loyalty_points",
   "loyalty_points_earned",
   "loyalty_points_balance",
+  "points_balance",
   "loyalty_tier",
+  "previous_tier",
+  "redemption_value",
+  "expiry_date",
+  "reason",
+  "staff_name",
+  "staff_status",
+  "corporate_name",
+  "outlet_name",
+  "bill_number",
+  "issue_summary",
+  "priority",
+  "action_link",
   "booking_link",
   "portal_link",
   "app_url",
@@ -87,6 +188,7 @@ export const ALLOWED_URL_VARIABLES = new Set<string>([
   "{{portal_link}}",
   "{{hotel_website}}",
   "{{booking_link}}",
+  "{{action_link}}",
   "{{app_url}}",
   "{{review_link}}",
   "{{directions_link}}",
@@ -104,7 +206,11 @@ export const ALLOWED_CONTACT_URL_VARIABLES = new Set<string>([
 
 export const VARIABLE_DESCRIPTIONS: Record<
   AllowedTemplateVariable,
-  { label: string; group: "Guest" | "Hotel" | "Stay" | "Billing" | "Loyalty" | "Links"; sample: string }
+  {
+    label: string;
+    group: "Guest" | "Hotel" | "Stay" | "Billing" | "Loyalty" | "Operations" | "Links";
+    sample: string;
+  }
 > = {
   guest_name: { label: "Guest Full Name", group: "Guest", sample: "Alex Morgan" },
   guest_first_name: { label: "Guest First Name", group: "Guest", sample: "Alex" },
@@ -115,6 +221,7 @@ export const VARIABLE_DESCRIPTIONS: Record<
   hotel_website: { label: "Hotel Website", group: "Links", sample: "https://harborview.example" },
   legal_imprint: { label: "Legal / Imprint Text", group: "Hotel", sample: "Harborview Suites GmbH · VAT DE123456789" },
   room_name: { label: "Room Name / Number", group: "Stay", sample: "Room 204" },
+  room_number: { label: "Room Number", group: "Stay", sample: "204" },
   room_type: { label: "Room Type", group: "Stay", sample: "Deluxe King Suite" },
   check_in_date: { label: "Check-In Date", group: "Stay", sample: "2026-11-24" },
   check_in_time: { label: "Check-In Time", group: "Stay", sample: "14:00" },
@@ -122,15 +229,40 @@ export const VARIABLE_DESCRIPTIONS: Record<
   check_out_time: { label: "Check-Out Time", group: "Stay", sample: "12:00" },
   nights: { label: "Nights", group: "Stay", sample: "3" },
   booking_reference: { label: "Booking Reference", group: "Stay", sample: "RES8A4F2" },
-  total_amount: { label: "Total Amount", group: "Billing", sample: "NGN 270,000.00" },
-  deposit_amount: { label: "Deposit / Paid Amount", group: "Billing", sample: "NGN 90,000.00" },
-  balance_due: { label: "Balance Due", group: "Billing", sample: "NGN 180,000.00" },
+  reservation_number: { label: "Reservation Number", group: "Stay", sample: "RES8A4F2" },
+  total_amount: { label: "Total Amount", group: "Billing", sample: "NGN 100,000.00" },
+  original_amount: { label: "Original Amount (Before Discount)", group: "Billing", sample: "NGN 100,000.00" },
+  discount_amount: { label: "Discount Granted", group: "Billing", sample: "NGN 20,000.00" },
+  amount_paid: { label: "Amount Paid / Settled", group: "Billing", sample: "NGN 80,000.00" },
+  deposit_amount: { label: "Deposit / Payment Amount", group: "Billing", sample: "NGN 50,000.00" },
+  deposit_balance: { label: "Updated Deposit Balance", group: "Billing", sample: "NGN 125,000.00" },
+  refund_amount: { label: "Refund Amount", group: "Billing", sample: "NGN 25,000.00" },
+  balance_due: { label: "Remaining Balance Due", group: "Billing", sample: "NGN 0.00" },
+  remaining_balance: { label: "Actual Remaining Balance", group: "Billing", sample: "NGN 0.00" },
+  payment_status: { label: "Payment Status", group: "Billing", sample: "Fully Settled" },
+  payment_method: { label: "Payment Method", group: "Billing", sample: "TRANSFER" },
+  transaction_reference: { label: "Transaction / Deposit Reference", group: "Billing", sample: "TXN-89421" },
+  transaction_date: { label: "Transaction / Deposit Date", group: "Billing", sample: "2026-11-22" },
+  loyalty_points: { label: "Loyalty Points (Transaction)", group: "Loyalty", sample: "+450 pts" },
   loyalty_points_earned: { label: "Loyalty Points Earned", group: "Loyalty", sample: "450" },
   loyalty_points_balance: { label: "Loyalty Points Balance", group: "Loyalty", sample: "2,150" },
-  loyalty_tier: { label: "Loyalty Tier", group: "Loyalty", sample: "Gold" },
+  points_balance: { label: "Available Points Balance", group: "Loyalty", sample: "2,150 pts" },
+  loyalty_tier: { label: "Loyalty Membership Level", group: "Loyalty", sample: "Gold" },
+  previous_tier: { label: "Previous Loyalty Tier", group: "Loyalty", sample: "Silver" },
+  redemption_value: { label: "Points Redemption Value", group: "Loyalty", sample: "NGN 5,000.00" },
+  expiry_date: { label: "Points Expiry Date", group: "Loyalty", sample: "2027-01-31" },
+  reason: { label: "Reason / Notes", group: "Operations", sample: "Front desk adjustment" },
+  staff_name: { label: "Staff Member Name", group: "Operations", sample: "Jordan Taylor" },
+  staff_status: { label: "Account Status", group: "Operations", sample: "ACTIVE" },
+  corporate_name: { label: "Corporate Account Name", group: "Operations", sample: "Meridian Travel Group" },
+  outlet_name: { label: "Restaurant / F&B Outlet", group: "Operations", sample: "Main Restaurant" },
+  bill_number: { label: "Order / Bill Number", group: "Operations", sample: "FNB-1042" },
+  issue_summary: { label: "Maintenance / Alert Summary", group: "Operations", sample: "AC thermostat check in Room 204" },
+  priority: { label: "Priority Level", group: "Operations", sample: "HIGH" },
+  action_link: { label: "Secure Action Link (Auth/Reset)", group: "Links", sample: "https://your-hotel.example/auth-action" },
   booking_link: { label: "Booking Page URL", group: "Links", sample: "https://harborview.example/book" },
-  portal_link: { label: "Hotel Portal URL", group: "Links", sample: "https://tidehotels.de" },
-  app_url: { label: "Platform App URL", group: "Links", sample: "https://tidehotels.de" },
+  portal_link: { label: "Hotel Portal URL (Configured)", group: "Links", sample: "https://harborview.example/portal" },
+  app_url: { label: "PMS Staff App URL", group: "Links", sample: "https://harborview.example" },
   review_link: { label: "Guest Review Page URL", group: "Links", sample: "https://harborview.example/review" },
   directions_link: { label: "Directions / Map URL", group: "Links", sample: "https://harborview.example/directions" },
   wifi_guide_link: { label: "Wi-Fi & Guest Guide URL", group: "Links", sample: "https://harborview.example/wifi" },
@@ -955,7 +1087,9 @@ export interface EventCatalogEntry {
   eventType: CustomizableEmailEventType;
   name: string;
   description: string;
-  audience: "guest" | "hotel_staff";
+  category: EmailTemplateCategory;
+  audience: "guest" | "hotel_staff" | "corporate";
+  canDisable?: boolean;
   requiresScheduler?: boolean;
   markerKey: string;
   allowedVariables: AllowedTemplateVariable[];
@@ -978,6 +1112,7 @@ export interface EmailRenderContext {
   guestEmail?: string;
   guestLanguage?: string;
   roomName?: string;
+  roomNumber?: string;
   roomType?: string;
   checkInDate?: string;
   checkInTime?: string;
@@ -986,12 +1121,36 @@ export interface EmailRenderContext {
   nights?: number;
   bookingReference?: string;
   totalAmount?: number;
+  originalAmount?: number;
+  discountAmount?: number;
+  amountPaid?: number;
   depositAmount?: number;
+  depositBalance?: number;
+  refundAmount?: number;
   balanceDue?: number;
+  paymentStatus?: string;
+  paymentMethod?: string;
+  transactionReference?: string;
+  transactionDate?: string;
   /** Optional real loyalty fields when present on guest/reservation; never invented */
+  loyaltyPointsFormatted?: string | null;
   loyaltyPointsEarned?: number | null;
   loyaltyPointsBalance?: number | null;
   loyaltyTier?: string | null;
+  previousTier?: string | null;
+  redemptionValueFormatted?: string | null;
+  expiryDate?: string | null;
+  /** Optional operational / corporate / auth fields */
+  reason?: string;
+  staffName?: string;
+  staffStatus?: string;
+  corporateName?: string;
+  outletName?: string;
+  billNumber?: string;
+  issueSummary?: string;
+  priority?: string;
+  /** Strictly for legitimate security links (staff activation / password reset) */
+  actionLink?: string;
 }
 
 export interface RenderedEmailOutput {

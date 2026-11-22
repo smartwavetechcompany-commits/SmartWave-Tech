@@ -69,6 +69,12 @@ export function buildSamplePreviewContext(
 
   const logoCheck = validateEmailUrl(branding.logoUrl, { allowEmpty: true });
 
+  const cleanAppUrl = appUrl.replace(/\/+$/, "");
+  const configuredWebsite =
+    (typeof branding.website === "string" && branding.website.trim()) ||
+    (typeof hotelDoc?.website === "string" && hotelDoc.website.trim()) ||
+    "";
+
   return {
     hotelId,
     hotelName,
@@ -85,9 +91,9 @@ export function buildSamplePreviewContext(
       (typeof hotelDoc?.email === "string" && hotelDoc.email.trim()) ||
       "reservations@hotel.example",
     hotelWebsite:
-      (typeof branding.website === "string" && branding.website.trim()) ||
-      (typeof hotelDoc?.website === "string" && hotelDoc.website.trim()) ||
-      appUrl,
+      configuredWebsite && configuredWebsite.replace(/\/+$/, "").toLowerCase() !== cleanAppUrl.toLowerCase()
+        ? configuredWebsite
+        : undefined,
     hotelLogoUrl: logoCheck.valid && logoCheck.normalized ? logoCheck.normalized : undefined,
     hotelPrimaryColor: sanitizeHexColor(branding.primaryColor, "#059669"),
     hotelSecondaryColor: sanitizeHexColor(branding.secondaryColor, "#18181b"),
@@ -97,10 +103,11 @@ export function buildSamplePreviewContext(
       typeof hotelDoc?.defaultCurrency === "string" && hotelDoc.defaultCurrency.trim()
         ? hotelDoc.defaultCurrency.trim()
         : "NGN",
-    appUrl: appUrl.replace(/\/+$/, ""),
+    appUrl: cleanAppUrl,
     guestName: "Alex Morgan",
     guestEmail: "alex.morgan@example.com",
     roomName: "Room 204",
+    roomNumber: "204",
     roomType: "Deluxe King Suite",
     checkInDate: "2026-11-24",
     checkInTime: "14:00",
@@ -108,19 +115,45 @@ export function buildSamplePreviewContext(
     checkOutTime: "12:00",
     nights: 3,
     bookingReference: "RES8A4F2",
-    totalAmount: 270000,
-    depositAmount: 90000,
-    balanceDue: 180000,
+    totalAmount: 100000,
+    originalAmount: 100000,
+    discountAmount: 20000,
+    amountPaid: 80000,
+    depositAmount: 50000,
+    depositBalance: 125000,
+    refundAmount: 25000,
+    balanceDue: 0,
+    paymentStatus: "Fully Settled",
+    paymentMethod: "TRANSFER",
+    transactionReference: "TXN-89421",
+    transactionDate: "2026-11-22",
+    reason: "Front desk confirmation",
+    staffName: "Jordan Taylor",
+    staffStatus: "ACTIVE",
+    corporateName: "Meridian Travel Group",
+    outletName: "Main Restaurant",
+    billNumber: "FNB-1042",
+    issueSummary: "Room inspection completed",
+    priority: "NORMAL",
+    actionLink: `${cleanAppUrl}/auth-action?sample=1`,
     ...(options?.includeLoyaltySample
       ? {
+          loyaltyPointsFormatted: "+450 pts",
           loyaltyPointsEarned: 450,
           loyaltyPointsBalance: 2150,
           loyaltyTier: "Gold",
+          previousTier: "Silver",
+          redemptionValueFormatted: "NGN 5,000.00",
+          expiryDate: "2027-01-31",
         }
       : {
-          loyaltyPointsEarned: null,
-          loyaltyPointsBalance: null,
-          loyaltyTier: null,
+          loyaltyPointsFormatted: "+450 pts",
+          loyaltyPointsEarned: 450,
+          loyaltyPointsBalance: 2150,
+          loyaltyTier: "Gold",
+          previousTier: "Silver",
+          redemptionValueFormatted: "NGN 5,000.00",
+          expiryDate: "2027-01-31",
         }),
   };
 }

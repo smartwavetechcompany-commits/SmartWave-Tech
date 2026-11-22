@@ -788,6 +788,9 @@ export interface EmailTemplateOverviewItem {
   eventType: CustomizableEmailEventType;
   name: string;
   description: string;
+  category: import("../shared/types.ts").EmailTemplateCategory;
+  audience: "guest" | "hotel_staff" | "corporate";
+  canDisable: boolean;
   enabled: boolean;
   isCustomized: boolean;
   publishedVersion: number;
@@ -817,7 +820,8 @@ export async function listEmailTemplatesOverview(
     const meta = EMAIL_EVENT_CATALOG[eventType];
     const stored = byEvent.get(eventType);
     const isCustomized = stored?.isCustomized === true;
-    const enabled = stored ? stored.enabled !== false : true;
+    const canDisable = meta.canDisable !== false;
+    const enabled = canDisable ? (stored ? stored.enabled !== false : true) : true;
     const publishedVersion =
       typeof stored?.publishedVersion === "number" ? stored.publishedVersion : 0;
 
@@ -835,6 +839,9 @@ export async function listEmailTemplatesOverview(
       eventType,
       name: meta.name,
       description: meta.description,
+      category: meta.category,
+      audience: meta.audience,
+      canDisable,
       enabled,
       isCustomized,
       publishedVersion,
