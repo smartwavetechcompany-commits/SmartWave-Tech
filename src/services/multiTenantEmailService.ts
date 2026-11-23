@@ -56,6 +56,7 @@ export type MultiTenantEmailEventType =
   | "loyalty.points_redeemed"
   | "loyalty.tier_upgraded"
   | "loyalty.points_expiring"
+  | "loyalty.points_expired"
   // Important System Events
   | "system.daily_revenue_deficit"
   | "system.operational_alert";
@@ -410,7 +411,8 @@ export function isHotelEmailEventEnabled(
     case "loyalty.points_deducted":
     case "loyalty.points_redeemed":
     case "loyalty.tier_upgraded":
-    case "loyalty.points_expiring": {
+    case "loyalty.points_expiring":
+    case "loyalty.points_expired": {
       const loyaltyCfg = (hotelDoc.settings?.loyalty && typeof hotelDoc.settings.loyalty === "object"
         ? hotelDoc.settings.loyalty
         : {}) as Record<string, any>;
@@ -785,6 +787,12 @@ function getDefaultMetaForEvent(
         subjectPrefix: `Reminder: Your Loyalty Points Are Approaching Expiry - ${name}`,
         heading: "Loyalty Points Approaching Expiry",
         defaultIntro: `Some of your loyalty points at ${name} are approaching their expiry date. Review your points summary below so you don't miss out on your rewards.`,
+      };
+    case "loyalty.points_expired":
+      return {
+        subjectPrefix: `Loyalty Points Expiry Notice - ${name}`,
+        heading: "Loyalty Points Expired",
+        defaultIntro: `Unused loyalty points on your rewards account at ${name} have reached their expiry date and have been deducted from your available balance. Your lifetime earned total and membership tier remain unaffected.`,
       };
     case "system.daily_revenue_deficit":
       return {

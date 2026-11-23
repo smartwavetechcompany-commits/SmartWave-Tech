@@ -176,10 +176,33 @@ export function GuestLoyaltyPanel({
     [stayEvaluations]
   );
 
+  const selectedRedeemReservation = useMemo(
+    () => guestReservations.find((r) => r.id === redeemReservationId) || null,
+    [guestReservations, redeemReservationId]
+  );
+
   const redeemPtsNumber = Number(redeemPointsInput);
   const redeemValidation = useMemo(
-    () => validatePointsRedemption(redeemPtsNumber, policy, availablePoints),
-    [redeemPtsNumber, policy, availablePoints]
+    () =>
+      validatePointsRedemption(redeemPtsNumber, policy, availablePoints, {
+        accountIsActive: account ? account.isActive : false,
+        reservationId: redeemReservationId || undefined,
+        reservation: selectedRedeemReservation,
+        hotel,
+        ledgerEntries: allLedgerEntries,
+        existingTransactions: guestTransactions,
+      }),
+    [
+      redeemPtsNumber,
+      policy,
+      availablePoints,
+      account,
+      redeemReservationId,
+      selectedRedeemReservation,
+      hotel,
+      allLedgerEntries,
+      guestTransactions,
+    ]
   );
 
   const redemptionTransactions = useMemo(
@@ -309,6 +332,9 @@ export function GuestLoyaltyPanel({
           reason: redeemReason.trim(),
           reservationId: redeemReservationId || undefined,
           idempotencyKey: key,
+          reservation: selectedRedeemReservation,
+          ledgerEntries: allLedgerEntries,
+          existingTransactions: guestTransactions,
         },
         profile
       );
@@ -678,6 +704,26 @@ export function GuestLoyaltyPanel({
             />
           </div>
 
+          {selectedRedeemReservation && (
+            <div className="p-2.5 rounded-lg bg-zinc-950/70 border border-zinc-800 text-[11px] text-zinc-300 flex flex-wrap items-center gap-x-4 gap-y-1">
+              <span>
+                Booking Redeemed:{' '}
+                <strong className="text-zinc-100">
+                  {(redeemValidation.alreadyRedeemedForBooking || 0).toLocaleString()} /{' '}
+                  {policy.maximumRedemptionPointsPerBooking.toLocaleString()} pts
+                </strong>
+              </span>
+              {typeof redeemValidation.eligiblePayableAmount === 'number' && (
+                <span>
+                  Eligible Payable Balance:{' '}
+                  <strong className="text-emerald-400">
+                    {formatCurrency(redeemValidation.eligiblePayableAmount, currency, exchangeRate)}
+                  </strong>
+                </span>
+              )}
+            </div>
+          )}
+
           {redeemPointsInput !== '' && !redeemValidation.valid && (
             <div className="text-xs text-rose-300 flex items-center gap-1.5">
               <AlertTriangle size={13} />
@@ -688,8 +734,9 @@ export function GuestLoyaltyPanel({
           <div className="p-2.5 rounded-lg bg-zinc-950/70 border border-zinc-800 text-[10px] text-zinc-400 flex items-start gap-2">
             <Info size={13} className="text-zinc-400 shrink-0 mt-0.5" />
             <span>
-              Redemption is recorded atomically in the isolated loyalty ledger and emailed to the
-              guest without modifying room pricing, taxes, or folio accounting formulas.
+              Redemption is validated server-side (min {policy.minimumRedemptionPoints.toLocaleString()} pts, max{' '}
+              {policy.maximumRedemptionPointsPerBooking.toLocaleString()} pts per booking) and recorded atomically
+              in the isolated loyalty ledger without modifying room pricing, taxes, or folio accounting formulas.
             </span>
           </div>
 

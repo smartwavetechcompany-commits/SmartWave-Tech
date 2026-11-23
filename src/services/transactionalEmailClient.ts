@@ -45,6 +45,7 @@ export type PlatformNotificationEventType =
   | 'loyalty.points_redeemed'
   | 'loyalty.tier_upgraded'
   | 'loyalty.points_expiring'
+  | 'loyalty.points_expired'
   | 'system.daily_revenue_deficit'
   | 'system.operational_alert';
 

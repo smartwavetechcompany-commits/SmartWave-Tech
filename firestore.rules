@@ -266,6 +266,7 @@ service cloud.firestore {
         data.guestName is string && data.guestName.size() >= 1 && data.guestName.size() <= 200 &&
         data.transactionType in ['account_activation', 'earn_auto', 'manual_award', 'manual_deduct', 'redemption', 'expiry', 'reversal', 'tier_change'] &&
         data.points is number && data.points >= 0 &&
+        (data.transactionType != 'redemption' || (data.points >= 100 && data.points <= 5000)) &&
         data.pointsDelta is number &&
         data.previousBalance is number && data.previousBalance >= 0 &&
         data.updatedBalance is number && data.updatedBalance >= 0 &&

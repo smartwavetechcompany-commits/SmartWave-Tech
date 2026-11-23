@@ -7,23 +7,63 @@ import {
   runTransaction,
   where,
 } from 'firebase/firestore';
-import { db } from '../firebase';
+import { auth, db } from '../firebase';
 import {
   Guest,
   Hotel,
   LedgerEntry,
   LoyaltyAccount,
-  LoyaltyMembershipLevel,
   LoyaltySettings,
   LoyaltyTransaction,
-  LoyaltyTransactionType,
   Reservation,
   UserProfile,
 } from '../types';
-import { DEFAULT_LOYALTY_LEVELS, DEFAULT_SETTINGS } from '../constants';
-import { calculateReservationAccount } from '../utils/financialUtils';
+import { DEFAULT_SETTINGS } from '../constants';
 import { hasPermission } from '../utils/permissions';
 import { notifyPlatformEvent } from './transactionalEmailClient';
+import {
+  HARD_MIN_REDEMPTION_POINTS,
+  HARD_MAX_REDEMPTION_POINTS_PER_BOOKING,
+  buildDeterministicExpiryKey,
+  calculateEarnedPointsForAmount,
+  calculateRedemptionMonetaryValue,
+  evaluateLoyaltyPointsExpiry,
+  evaluateStayEligibilityForAutoEarn,
+  getLoyaltyPolicy,
+  getNextMembershipLevel,
+  mapToCanonicalLoyaltyTransactionType,
+  resolveMembershipLevel,
+  validateManualPointsAdjustment,
+  validatePointsRedemption,
+  type ExpiredPointLotDetail,
+  type LoyaltyExpirySummary,
+  type ManualPointsValidationResult,
+  type RedemptionValidationContext,
+  type RedemptionValidationResult,
+  type StayAutoEarnEvaluation,
+} from '../modules/loyalty/shared/loyaltyRules';
+
+export {
+  HARD_MIN_REDEMPTION_POINTS,
+  HARD_MAX_REDEMPTION_POINTS_PER_BOOKING,
+  buildDeterministicExpiryKey,
+  calculateEarnedPointsForAmount,
+  calculateRedemptionMonetaryValue,
+  evaluateLoyaltyPointsExpiry,
+  evaluateStayEligibilityForAutoEarn,
+  getLoyaltyPolicy,
+  getNextMembershipLevel,
+  mapToCanonicalLoyaltyTransactionType,
+  resolveMembershipLevel,
+  validateManualPointsAdjustment,
+  validatePointsRedemption,
+  type ExpiredPointLotDetail,
+  type LoyaltyExpirySummary,
+  type ManualPointsValidationResult,
+  type RedemptionValidationContext,
+  type RedemptionValidationResult,
+  type StayAutoEarnEvaluation,
+};
 
 // ============================================================================
 // PERMISSION & POLICY HELPERS (PURE)
@@ -61,372 +101,8 @@ export function canViewLoyalty(
   );
 }
 
-/**
- * Safely resolves the hotel's loyalty policy merged with safe defaults (disabled by default).
- */
-export function getLoyaltyPolicy(hotel?: Hotel | null): LoyaltySettings {
-  const defaults = DEFAULT_SETTINGS.loyalty!;
-  const raw = hotel?.settings?.loyalty;
-  if (!raw) {
-    return {
-      ...defaults,
-      membershipLevels: [...DEFAULT_LOYALTY_LEVELS],
-    };
-  }
-  const levels =
-    Array.isArray(raw.membershipLevels) && raw.membershipLevels.length > 0
-      ? raw.membershipLevels
-      : [...DEFAULT_LOYALTY_LEVELS];
-  return {
-    ...defaults,
-    ...raw,
-    earningRateAmount: Number(raw.earningRateAmount) > 0 ? Number(raw.earningRateAmount) : defaults.earningRateAmount,
-    earningRatePoints: Number(raw.earningRatePoints) >= 0 ? Number(raw.earningRatePoints) : defaults.earningRatePoints,
-    redemptionPointValue: Number(raw.redemptionPointValue) >= 0 ? Number(raw.redemptionPointValue) : defaults.redemptionPointValue,
-    minimumRedemptionPoints: Math.max(0, Math.floor(Number(raw.minimumRedemptionPoints) || 0)),
-    maximumRedemptionPointsPerBooking: Math.max(0, Math.floor(Number(raw.maximumRedemptionPointsPerBooking) || 0)),
-    pointsExpiryDays: Math.max(1, Math.floor(Number(raw.pointsExpiryDays) || defaults.pointsExpiryDays)),
-    expiryReminderDays: Math.max(1, Math.floor(Number(raw.expiryReminderDays) || defaults.expiryReminderDays)),
-    membershipLevels: levels,
-  };
-}
-
-/**
- * Dynamically resolves a guest's membership level strictly from the administrator's
- * configured membership levels (never hardcoded).
- */
-export function resolveMembershipLevel(
-  lifetimePointsEarned: number,
-  levels: LoyaltyMembershipLevel[] = DEFAULT_LOYALTY_LEVELS
-): LoyaltyMembershipLevel {
-  const safeLevels =
-    Array.isArray(levels) && levels.length > 0 ? levels : DEFAULT_LOYALTY_LEVELS;
-  const sortedAsc = [...safeLevels].sort((a, b) => (a.minPoints || 0) - (b.minPoints || 0));
-  const safePoints = Math.max(0, Number(lifetimePointsEarned) || 0);
-
-  let matched = sortedAsc[0];
-  for (const level of sortedAsc) {
-    if (safePoints >= (Number(level.minPoints) || 0)) {
-      matched = level;
-    }
-  }
-  return matched;
-}
-
-/**
- * Returns the next higher configured membership level and remaining points required, if any.
- */
-export function getNextMembershipLevel(
-  lifetimePointsEarned: number,
-  levels: LoyaltyMembershipLevel[] = DEFAULT_LOYALTY_LEVELS
-): { nextLevel: LoyaltyMembershipLevel | null; pointsNeeded: number } {
-  const safeLevels =
-    Array.isArray(levels) && levels.length > 0 ? levels : DEFAULT_LOYALTY_LEVELS;
-  const sortedAsc = [...safeLevels].sort((a, b) => (a.minPoints || 0) - (b.minPoints || 0));
-  const safePoints = Math.max(0, Number(lifetimePointsEarned) || 0);
-  const nextLevel = sortedAsc.find((l) => (Number(l.minPoints) || 0) > safePoints) || null;
-  return {
-    nextLevel,
-    pointsNeeded: nextLevel ? Math.max(0, (Number(nextLevel.minPoints) || 0) - safePoints) : 0,
-  };
-}
-
-/**
- * Computes points earned for an eligible monetary spend using the configured Admin Control Policy rate.
- */
-export function calculateEarnedPointsForAmount(
-  eligibleSpend: number,
-  policy: LoyaltySettings
-): number {
-  if (!policy.enabled || !policy.enableAutoEarning) return 0;
-  if (!Number.isFinite(eligibleSpend) || eligibleSpend <= 0) return 0;
-  if (!Number.isFinite(policy.earningRateAmount) || policy.earningRateAmount <= 0) return 0;
-  if (!Number.isFinite(policy.earningRatePoints) || policy.earningRatePoints <= 0) return 0;
-  return Math.floor((eligibleSpend / policy.earningRateAmount) * policy.earningRatePoints);
-}
-
-/**
- * Computes monetary value of a given number of loyalty points using the configured redemption value.
- */
-export function calculateRedemptionMonetaryValue(
-  points: number,
-  policy: LoyaltySettings
-): number {
-  const safePts = Math.max(0, Math.floor(Number(points) || 0));
-  const valPerPt = Math.max(0, Number(policy.redemptionPointValue) || 0);
-  return Number((safePts * valPerPt).toFixed(2));
-}
-
-export interface ManualPointsValidationResult {
-  valid: boolean;
-  error?: string;
-}
-
-/**
- * Validates a manual award or deduction against the active Admin Control Policy and current balance.
- */
-export function validateManualPointsAdjustment(
-  params: {
-    action: 'manual_award' | 'manual_deduct' | 'reversal';
-    points: number;
-    reason: string;
-    expiresAt?: string | null;
-  },
-  policy: LoyaltySettings,
-  currentAvailablePoints: number
-): ManualPointsValidationResult {
-  if (!policy.enabled) {
-    return { valid: false, error: 'Loyalty programme is currently disabled in Admin Controls.' };
-  }
-  if (!policy.allowManualAllocation) {
-    return { valid: false, error: 'Manual points allocation is disabled in Admin Controls.' };
-  }
-  const pts = Number(params.points);
-  if (!Number.isFinite(pts) || !Number.isInteger(pts) || pts <= 0) {
-    return { valid: false, error: 'Points must be a positive whole number.' };
-  }
-  if (!params.reason || !params.reason.trim()) {
-    return { valid: false, error: 'A clear reason is required for every loyalty adjustment.' };
-  }
-  if (params.action === 'manual_deduct' && pts > Math.max(0, currentAvailablePoints)) {
-    return {
-      valid: false,
-      error: `Deduction (${pts.toLocaleString()} pts) exceeds available balance (${Math.max(0, currentAvailablePoints).toLocaleString()} pts).`,
-    };
-  }
-  if (params.expiresAt) {
-    const parsed = new Date(params.expiresAt);
-    if (isNaN(parsed.getTime())) {
-      return { valid: false, error: 'Invalid expiry date provided.' };
-    }
-  }
-  return { valid: true };
-}
-
-export interface RedemptionValidationResult {
-  valid: boolean;
-  monetaryValue: number;
-  error?: string;
-}
-
-/**
- * Validates a points redemption against Admin Control Policy rules and current available points.
- */
-export function validatePointsRedemption(
-  pointsToRedeem: number,
-  policy: LoyaltySettings,
-  currentAvailablePoints: number
-): RedemptionValidationResult {
-  if (!policy.enabled) {
-    return { valid: false, monetaryValue: 0, error: 'Loyalty programme is currently disabled in Admin Controls.' };
-  }
-  if (!policy.enableRedemption) {
-    return { valid: false, monetaryValue: 0, error: 'Points redemption is disabled in Admin Controls.' };
-  }
-  const pts = Number(pointsToRedeem);
-  if (!Number.isFinite(pts) || !Number.isInteger(pts) || pts <= 0) {
-    return { valid: false, monetaryValue: 0, error: 'Redemption points must be a positive whole number.' };
-  }
-  const safeBalance = Math.max(0, Math.floor(Number(currentAvailablePoints) || 0));
-  if (pts > safeBalance) {
-    return {
-      valid: false,
-      monetaryValue: 0,
-      error: `Redemption (${pts.toLocaleString()} pts) exceeds available points balance (${safeBalance.toLocaleString()} pts).`,
-    };
-  }
-  if (policy.minimumRedemptionPoints > 0 && pts < policy.minimumRedemptionPoints) {
-    return {
-      valid: false,
-      monetaryValue: 0,
-      error: `Minimum redemption is ${policy.minimumRedemptionPoints.toLocaleString()} points.`,
-    };
-  }
-  if (policy.maximumRedemptionPointsPerBooking > 0 && pts > policy.maximumRedemptionPointsPerBooking) {
-    return {
-      valid: false,
-      monetaryValue: 0,
-      error: `Maximum redemption allowed per booking is ${policy.maximumRedemptionPointsPerBooking.toLocaleString()} points.`,
-    };
-  }
-  return {
-    valid: true,
-    monetaryValue: calculateRedemptionMonetaryValue(pts, policy),
-  };
-}
-
-export interface StayAutoEarnEvaluation {
-  eligible: boolean;
-  eligibleSpend: number;
-  pointsToAward: number;
-  idempotencyKey: string;
-  reason: string;
-}
-
-/**
- * Evaluates whether a reservation qualifies for automatic loyalty points earning.
- * Strictly read-only against existing verified financial records via calculateReservationAccount.
- * Never awards points for No-Show, Cancelled, non-checked-out, or unpaid/outstanding stays.
- */
-export function evaluateStayEligibilityForAutoEarn(
-  res: Reservation,
-  hotel: Hotel | null,
-  reservationLedgerEntries: LedgerEntry[],
-  existingLoyaltyTransactions: LoyaltyTransaction[] = []
-): StayAutoEarnEvaluation {
-  const idempotencyKey = `auto_earn_${res.id}`;
-  const policy = getLoyaltyPolicy(hotel);
-
-  if (!policy.enabled) {
-    return { eligible: false, eligibleSpend: 0, pointsToAward: 0, idempotencyKey, reason: 'Loyalty programme is disabled.' };
-  }
-  if (!policy.enableAutoEarning) {
-    return { eligible: false, eligibleSpend: 0, pointsToAward: 0, idempotencyKey, reason: 'Automatic points earning is disabled.' };
-  }
-  if (!res?.id) {
-    return { eligible: false, eligibleSpend: 0, pointsToAward: 0, idempotencyKey, reason: 'Missing reservation reference.' };
-  }
-  if (res.status === 'no_show') {
-    return { eligible: false, eligibleSpend: 0, pointsToAward: 0, idempotencyKey, reason: 'No-Show reservations are ineligible for automatic points.' };
-  }
-  if (res.status === 'cancelled') {
-    return { eligible: false, eligibleSpend: 0, pointsToAward: 0, idempotencyKey, reason: 'Cancelled reservations are ineligible for automatic points.' };
-  }
-  if (res.status !== 'checked_out') {
-    return { eligible: false, eligibleSpend: 0, pointsToAward: 0, idempotencyKey, reason: 'Only completed (checked-out) stays qualify for automatic points.' };
-  }
-
-  // Prevent duplicate point awards for the same reservation
-  const alreadyAwarded = existingLoyaltyTransactions.some(
-    (tx) =>
-      tx.idempotencyKey === idempotencyKey ||
-      (tx.transactionType === 'earn_auto' && tx.reservationId === res.id)
-  );
-  if (alreadyAwarded) {
-    return { eligible: false, eligibleSpend: 0, pointsToAward: 0, idempotencyKey, reason: 'Points already awarded for this stay.' };
-  }
-
-  // Read verified financial figures from existing financial engine (read-only)
-  const account = calculateReservationAccount(res, hotel, reservationLedgerEntries);
-
-  // Reject any stay with an unpaid / outstanding balance
-  if (account.outstandingBalance > 0.01) {
-    return {
-      eligible: false,
-      eligibleSpend: 0,
-      pointsToAward: 0,
-      idempotencyKey,
-      reason: 'Reservation has an unpaid or outstanding balance.',
-    };
-  }
-
-  // Use verified net payments received (excluding refunds) as eligible expenditure
-  const netPaymentsReceived = Number(Math.max(0, account.totalPayments - account.totalRefunds).toFixed(2));
-  if (netPaymentsReceived <= 0.01) {
-    return {
-      eligible: false,
-      eligibleSpend: 0,
-      pointsToAward: 0,
-      idempotencyKey,
-      reason: 'No verified settled payments found for this stay.',
-    };
-  }
-
-  // Cap eligible spend at settled invoice charges so overpayments/unrefunded deposits don't inflate points
-  const eligibleSpend =
-    account.totalCharges > 0.01
-      ? Number(Math.min(netPaymentsReceived, account.totalCharges).toFixed(2))
-      : netPaymentsReceived;
-
-  const pointsToAward = calculateEarnedPointsForAmount(eligibleSpend, policy);
-  if (pointsToAward <= 0) {
-    return {
-      eligible: false,
-      eligibleSpend,
-      pointsToAward: 0,
-      idempotencyKey,
-      reason: 'Eligible stay spend is below the minimum threshold to earn 1 point.',
-    };
-  }
-
-  return {
-    eligible: true,
-    eligibleSpend,
-    pointsToAward,
-    idempotencyKey,
-    reason: `Completed & settled stay (Room ${res.roomNumber || 'N/A'})`,
-  };
-}
-
-export interface LoyaltyExpirySummary {
-  expiredPointsUnprocessed: number;
-  expiringSoonPoints: number;
-  earliestExpiringDate: string | null;
-}
-
-/**
- * Calculates expired points awaiting expiry deduction and points approaching expiry
- * using FIFO consumption against prior redemptions, deductions, and expiry entries.
- */
-export function evaluateLoyaltyPointsExpiry(
-  transactions: LoyaltyTransaction[],
-  reminderDays: number = 30,
-  now: Date = new Date()
-): LoyaltyExpirySummary {
-  const sorted = [...transactions].sort(
-    (a, b) => new Date(a.timestamp || a.createdAt).getTime() - new Date(b.timestamp || b.createdAt).getTime()
-  );
-
-  // Build FIFO credit lots (positive point transactions)
-  const lots: Array<{ remaining: number; expiresAt: Date | null; expiresAtIso: string | null }> = [];
-  for (const tx of sorted) {
-    if (tx.pointsDelta > 0) {
-      const expDate = tx.expiresAt ? new Date(tx.expiresAt) : null;
-      const validExp = expDate && !isNaN(expDate.getTime()) ? expDate : null;
-      lots.push({
-        remaining: tx.pointsDelta,
-        expiresAt: validExp,
-        expiresAtIso: validExp ? validExp.toISOString() : null,
-      });
-    } else if (tx.pointsDelta < 0) {
-      let toConsume = Math.abs(tx.pointsDelta);
-      // Consume earliest-expiring lots first (standard loyalty FIFO)
-      for (const lot of lots) {
-        if (toConsume <= 0) break;
-        if (lot.remaining <= 0) continue;
-        const used = Math.min(lot.remaining, toConsume);
-        lot.remaining -= used;
-        toConsume -= used;
-      }
-    }
-  }
-
-  const nowMs = now.getTime();
-  const reminderCutoffMs = nowMs + Math.max(1, reminderDays) * 24 * 60 * 60 * 1000;
-
-  let expiredPointsUnprocessed = 0;
-  let expiringSoonPoints = 0;
-  let earliestExpiringDate: string | null = null;
-
-  for (const lot of lots) {
-    if (lot.remaining <= 0 || !lot.expiresAt) continue;
-    const expMs = lot.expiresAt.getTime();
-    if (expMs <= nowMs) {
-      expiredPointsUnprocessed += lot.remaining;
-    } else if (expMs <= reminderCutoffMs) {
-      expiringSoonPoints += lot.remaining;
-      if (!earliestExpiringDate || expMs < new Date(earliestExpiringDate).getTime()) {
-        earliestExpiringDate = lot.expiresAtIso;
-      }
-    }
-  }
-
-  return {
-    expiredPointsUnprocessed: Math.floor(expiredPointsUnprocessed),
-    expiringSoonPoints: Math.floor(expiringSoonPoints),
-    earliestExpiringDate,
-  };
-}
+// Pure policy, earning, redemption, and FIFO expiry rules are exported from
+// `../modules/loyalty/shared/loyaltyRules` above as the single source of truth shared with server routes.
 
 // ============================================================================
 // INTERNAL HELPERS
@@ -558,14 +234,18 @@ export async function activateGuestLoyaltyAccount(
         guestName: guest.name || 'Guest',
         ...(guest.email ? { guestEmail: guest.email } : {}),
         transactionType: 'account_activation',
+        canonicalType: mapToCanonicalLoyaltyTransactionType('account_activation', 0),
         points: 0,
         pointsDelta: 0,
         previousBalance: 0,
         updatedBalance: 0,
+        previousLifetimeBalance: 0,
+        updatedLifetimeBalance: 0,
         reason: 'Loyalty account activated',
         adminId: adminProfile.uid,
         adminName: adminProfile.displayName || adminProfile.name || adminProfile.email || 'Admin',
         ...(adminProfile.email ? { adminEmail: adminProfile.email } : {}),
+        actorType: 'staff',
         newTierName: account.membershipLevelName,
         idempotencyKey: activationKey,
         timestamp: nowIso,
@@ -630,6 +310,8 @@ export async function adjustGuestLoyaltyPoints(
     reason: string;
     expiresAt?: string | null;
     idempotencyKey: string;
+    reversalDirection?: 'credit' | 'debit';
+    originalTransactionId?: string;
   },
   adminProfile: UserProfile
 ): Promise<LoyaltyMutationResult> {
@@ -667,7 +349,8 @@ export async function adjustGuestLoyaltyPoints(
       }
 
       const pts = Math.floor(Number(params.points));
-      const isDeduction = params.action === 'manual_deduct';
+      const isDebitReversal = params.action === 'reversal' && params.reversalDirection === 'debit';
+      const isDeduction = params.action === 'manual_deduct' || isDebitReversal;
       const delta = isDeduction ? -pts : pts;
       const previousBalance = Math.max(0, Math.floor(Number(currentAccount.availablePoints) || 0));
       const updatedBalance = previousBalance + delta;
@@ -676,14 +359,18 @@ export async function adjustGuestLoyaltyPoints(
         throw new Error('Deduction cannot reduce balance below 0 points.');
       }
 
-      const nextLifetimeEarned = isDeduction
-        ? currentAccount.lifetimePointsEarned
-        : currentAccount.lifetimePointsEarned + pts;
+      const previousLifetime = Math.max(0, Math.floor(Number(currentAccount.lifetimePointsEarned) || 0));
+      // Manual deductions never reduce lifetime earned; debit reversals of erroneous earnings adjust lifetime auditably
+      const nextLifetimeEarned = isDebitReversal
+        ? Math.max(0, previousLifetime - pts)
+        : params.action === 'manual_deduct'
+          ? previousLifetime
+          : previousLifetime + pts;
       const nextManualAdjusted = (currentAccount.totalPointsManuallyAdjusted || 0) + delta;
 
       const prevTier = currentAccount.membershipLevelName;
       const nextLevel = resolveMembershipLevel(nextLifetimeEarned, policy.membershipLevels);
-      const tierChanged = !isNewAccount && nextLevel.name !== prevTier;
+      const tierChanged = nextLevel.name !== prevTier;
       const tierUpgraded =
         tierChanged &&
         nextLevel.minPoints >
@@ -712,14 +399,19 @@ export async function adjustGuestLoyaltyPoints(
         guestName: guest.name || currentAccount.guestName,
         ...(guest.email ? { guestEmail: guest.email } : {}),
         transactionType: params.action,
+        canonicalType: mapToCanonicalLoyaltyTransactionType(params.action, delta),
         points: pts,
         pointsDelta: delta,
         previousBalance,
         updatedBalance,
+        previousLifetimeBalance: previousLifetime,
+        updatedLifetimeBalance: nextLifetimeEarned,
         reason: params.reason.trim(),
         adminId: adminProfile.uid,
         adminName: adminProfile.displayName || adminProfile.name || adminProfile.email || 'Admin',
         ...(adminProfile.email ? { adminEmail: adminProfile.email } : {}),
+        actorType: 'staff',
+        ...(params.originalTransactionId ? { originalTransactionId: params.originalTransactionId } : {}),
         ...(expiryIso ? { expiresAt: expiryIso } : {}),
         idempotencyKey: safeKey,
         timestamp: nowIso,
@@ -740,15 +432,19 @@ export async function adjustGuestLoyaltyPoints(
           guestName: guest.name || 'Guest',
           ...(guest.email ? { guestEmail: guest.email } : {}),
           transactionType: 'account_activation',
+          canonicalType: mapToCanonicalLoyaltyTransactionType('account_activation', 0),
           points: 0,
           pointsDelta: 0,
           previousBalance: 0,
           updatedBalance: 0,
+          previousLifetimeBalance: 0,
+          updatedLifetimeBalance: 0,
           reason: 'Loyalty account activated upon initial points allocation',
           adminId: adminProfile.uid,
           adminName: adminProfile.displayName || adminProfile.name || adminProfile.email || 'Admin',
           ...(adminProfile.email ? { adminEmail: adminProfile.email } : {}),
-          newTierName: nextLevel.name,
+          actorType: 'staff',
+          newTierName: prevTier,
           idempotencyKey: actKey,
           timestamp: nowIso,
           createdAt: nowIso,
@@ -767,14 +463,19 @@ export async function adjustGuestLoyaltyPoints(
           guestName: guest.name || currentAccount.guestName,
           ...(guest.email ? { guestEmail: guest.email } : {}),
           transactionType: 'tier_change',
+          canonicalType: mapToCanonicalLoyaltyTransactionType('tier_change', 0),
           points: 0,
           pointsDelta: 0,
           previousBalance: updatedBalance,
           updatedBalance,
+          previousLifetimeBalance: nextLifetimeEarned,
+          updatedLifetimeBalance: nextLifetimeEarned,
           reason: `Membership level upgraded from ${prevTier} to ${nextLevel.name}`,
           adminId: adminProfile.uid,
           adminName: adminProfile.displayName || adminProfile.name || adminProfile.email || 'Admin',
           ...(adminProfile.email ? { adminEmail: adminProfile.email } : {}),
+          actorType: 'system',
+          systemProcess: 'tier_evaluation',
           previousTierName: prevTier,
           newTierName: nextLevel.name,
           idempotencyKey: tierKey,
@@ -938,12 +639,12 @@ export async function awardAutomaticStayPoints(
       const pts = evalResult.pointsToAward;
       const previousBalance = Math.max(0, Math.floor(Number(currentAccount.availablePoints) || 0));
       const updatedBalance = previousBalance + pts;
-      const nextLifetimeEarned = (currentAccount.lifetimePointsEarned || 0) + pts;
+      const previousLifetime = Math.max(0, Math.floor(Number(currentAccount.lifetimePointsEarned) || 0));
+      const nextLifetimeEarned = previousLifetime + pts;
 
       const prevTier = currentAccount.membershipLevelName;
       const nextLevel = resolveMembershipLevel(nextLifetimeEarned, policy.membershipLevels);
       const tierUpgraded =
-        !isNewAccount &&
         nextLevel.name !== prevTier &&
         nextLevel.minPoints >
           (policy.membershipLevels.find((l) => l.name === prevTier)?.minPoints ?? -1);
@@ -962,6 +663,10 @@ export async function awardAutomaticStayPoints(
       };
 
       const expiryIso = buildDefaultExpiryIso(policy, null);
+      const financialRef =
+        evalResult.financialTransactionRefs.length > 0
+          ? evalResult.financialTransactionRefs.join(',')
+          : undefined;
       const tx: LoyaltyTransaction = {
         id: safeKey,
         hotelId: hotel.id,
@@ -969,15 +674,21 @@ export async function awardAutomaticStayPoints(
         guestName: guest.name || currentAccount.guestName,
         ...(guest.email ? { guestEmail: guest.email } : {}),
         transactionType: 'earn_auto',
+        canonicalType: mapToCanonicalLoyaltyTransactionType('earn_auto', pts),
         points: pts,
         pointsDelta: pts,
         previousBalance,
         updatedBalance,
+        previousLifetimeBalance: previousLifetime,
+        updatedLifetimeBalance: nextLifetimeEarned,
         reason: `Automatic stay points earned — Room ${res.roomNumber || 'N/A'} (Settled spend: ${evalResult.eligibleSpend.toLocaleString()})`,
         adminId: adminProfile.uid,
         adminName: adminProfile.displayName || adminProfile.name || adminProfile.email || 'System Policy',
         ...(adminProfile.email ? { adminEmail: adminProfile.email } : {}),
+        actorType: 'system',
+        systemProcess: 'auto_stay_earning',
         reservationId: res.id,
+        ...(financialRef ? { financialTransactionRef: financialRef } : {}),
         ...(expiryIso ? { expiresAt: expiryIso } : {}),
         idempotencyKey: safeKey,
         timestamp: nowIso,
@@ -986,6 +697,38 @@ export async function awardAutomaticStayPoints(
 
       trx.set(accountRef, updatedAccount);
       trx.set(txRef, tx);
+
+      if (isNewAccount) {
+        const actKey = sanitizeDocId(`activation_${guest.id}`);
+        const actRef = doc(db, 'hotels', hotel.id, 'loyaltyTransactions', actKey);
+        const actTx: LoyaltyTransaction = {
+          id: actKey,
+          hotelId: hotel.id,
+          guestId: guest.id,
+          guestName: guest.name || 'Guest',
+          ...(guest.email ? { guestEmail: guest.email } : {}),
+          transactionType: 'account_activation',
+          canonicalType: mapToCanonicalLoyaltyTransactionType('account_activation', 0),
+          points: 0,
+          pointsDelta: 0,
+          previousBalance: 0,
+          updatedBalance: 0,
+          previousLifetimeBalance: 0,
+          updatedLifetimeBalance: 0,
+          reason: 'Loyalty account activated upon first eligible settled stay',
+          adminId: adminProfile.uid,
+          adminName: adminProfile.displayName || adminProfile.name || adminProfile.email || 'System Policy',
+          ...(adminProfile.email ? { adminEmail: adminProfile.email } : {}),
+          actorType: 'system',
+          systemProcess: 'auto_stay_earning',
+          reservationId: res.id,
+          newTierName: prevTier,
+          idempotencyKey: actKey,
+          timestamp: nowIso,
+          createdAt: nowIso,
+        };
+        trx.set(actRef, actTx);
+      }
 
       if (tierUpgraded) {
         const tierKey = sanitizeDocId(`tier_${safeKey}`);
@@ -997,14 +740,19 @@ export async function awardAutomaticStayPoints(
           guestName: guest.name || currentAccount.guestName,
           ...(guest.email ? { guestEmail: guest.email } : {}),
           transactionType: 'tier_change',
+          canonicalType: mapToCanonicalLoyaltyTransactionType('tier_change', 0),
           points: 0,
           pointsDelta: 0,
           previousBalance: updatedBalance,
           updatedBalance,
+          previousLifetimeBalance: nextLifetimeEarned,
+          updatedLifetimeBalance: nextLifetimeEarned,
           reason: `Membership level upgraded from ${prevTier} to ${nextLevel.name}`,
           adminId: adminProfile.uid,
           adminName: adminProfile.displayName || adminProfile.name || adminProfile.email || 'System Policy',
           ...(adminProfile.email ? { adminEmail: adminProfile.email } : {}),
+          actorType: 'system',
+          systemProcess: 'tier_evaluation',
           reservationId: res.id,
           previousTierName: prevTier,
           newTierName: nextLevel.name,
@@ -1086,8 +834,9 @@ export async function awardAutomaticStayPoints(
 }
 
 /**
- * Atomically redeems loyalty points in the isolated loyalty ledger.
- * Strictly enforces policy enablement, min/max bounds, available balance, and duplicate protection.
+ * Authoritatively redeems loyalty points via the server-side validation endpoint (`POST /api/loyalty/redeem`),
+ * enforcing minimum 100 pts, maximum 5,000 pts per booking (cumulative), active account, live unexpired balance,
+ * booking status, settled check, eligible payable amount cap, and duplicate/concurrency protection.
  * Does NOT independently modify room prices, taxes, folio calculations, or payment logic.
  */
 export async function redeemGuestLoyaltyPoints(
@@ -1098,6 +847,9 @@ export async function redeemGuestLoyaltyPoints(
     reason: string;
     reservationId?: string;
     idempotencyKey: string;
+    reservation?: Reservation | null;
+    ledgerEntries?: LedgerEntry[];
+    existingTransactions?: LoyaltyTransaction[];
   },
   adminProfile: UserProfile
 ): Promise<LoyaltyMutationResult> {
@@ -1105,13 +857,78 @@ export async function redeemGuestLoyaltyPoints(
     return { success: false, error: 'Missing hotel, guest, or administrator context.' };
   }
 
-  const policy = await fetchFreshHotelPolicy(hotel);
   const safeKey = sanitizeDocId(params.idempotencyKey || `redeem_${guest.id}_${Date.now()}`);
+
+  // Primary path: Authoritative server-side redemption validation & commit
+  try {
+    const currentUser = auth?.currentUser;
+    if (currentUser && typeof fetch === 'function') {
+      const idToken = await currentUser.getIdToken();
+      if (idToken) {
+        const resp = await fetch('/api/loyalty/redeem', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            hotelId: hotel.id,
+            guestId: guest.id,
+            points: Math.floor(Number(params.points)),
+            reason: (params.reason || '').trim() || 'Loyalty points redeemed',
+            ...(params.reservationId ? { reservationId: params.reservationId } : {}),
+            idempotencyKey: safeKey,
+          }),
+        });
+
+        // Authoritative server handled the request (either success or authoritative validation rejection)
+        if (resp.status !== 404 && resp.status !== 502 && resp.status !== 503) {
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data?.success) {
+            return {
+              success: false,
+              error: data?.error || `Redemption rejected by server (${resp.status}).`,
+            };
+          }
+          return {
+            success: true,
+            duplicate: Boolean(data.duplicate),
+            account: data.account,
+            transaction: data.transaction,
+          };
+        }
+      }
+    }
+  } catch (apiErr) {
+    console.warn('[LoyaltyService] Server redemption endpoint unreachable; falling back to atomic Firestore transaction with full validation:', apiErr);
+  }
+
+  // Fallback path (offline / test contexts): enforces identical 7-point validation inside Firestore runTransaction
+  const policy = await fetchFreshHotelPolicy(hotel);
   const accountRef = doc(db, 'hotels', hotel.id, 'loyaltyAccounts', guest.id);
   const txRef = doc(db, 'hotels', hotel.id, 'loyaltyTransactions', safeKey);
-  const nowIso = new Date().toISOString();
+  const now = new Date();
+  const nowIso = now.toISOString();
 
   try {
+    const existingTransactions =
+      params.existingTransactions || (await fetchGuestLoyaltyTransactions(hotel.id, guest.id));
+
+    let reservation = params.reservation || null;
+    let reservationLedger = params.ledgerEntries;
+    if (params.reservationId && !reservation) {
+      const resSnap = await getDoc(doc(db, 'hotels', hotel.id, 'reservations', params.reservationId));
+      if (resSnap.exists()) {
+        reservation = { id: resSnap.id, ...resSnap.data() } as Reservation;
+      }
+    }
+    if (params.reservationId && !reservationLedger) {
+      const ledgerSnap = await getDocs(
+        query(collection(db, 'hotels', hotel.id, 'ledger'), where('reservationId', '==', params.reservationId))
+      );
+      reservationLedger = ledgerSnap.docs.map((d) => ({ id: d.id, ...d.data() } as LedgerEntry));
+    }
+
     const trxResult = await runTransaction(db, async (trx) => {
       const [accSnap, txSnap] = await Promise.all([trx.get(accountRef), trx.get(txRef)]);
       if (txSnap.exists()) {
@@ -1127,7 +944,16 @@ export async function redeemGuestLoyaltyPoints(
       }
 
       const currentAccount = accSnap.data() as LoyaltyAccount;
-      const validation = validatePointsRedemption(params.points, policy, currentAccount.availablePoints);
+      const validation = validatePointsRedemption(params.points, policy, currentAccount.availablePoints, {
+        accountIsActive: currentAccount.isActive,
+        reservationId: params.reservationId,
+        reservation,
+        hotel,
+        ledgerEntries: reservationLedger,
+        existingTransactions,
+        idempotencyKey: safeKey,
+        now,
+      });
       if (!validation.valid) {
         throw new Error(validation.error || 'Points redemption validation failed.');
       }
@@ -1135,7 +961,11 @@ export async function redeemGuestLoyaltyPoints(
       const pts = Math.floor(Number(params.points));
       const previousBalance = Math.max(0, Math.floor(Number(currentAccount.availablePoints) || 0));
       const updatedBalance = previousBalance - pts;
+      if (updatedBalance < 0) {
+        throw new Error('Redemption cannot result in a negative loyalty balance.');
+      }
       const nextRedeemed = (currentAccount.totalPointsRedeemed || 0) + pts;
+      const lifetime = Math.max(0, Math.floor(Number(currentAccount.lifetimePointsEarned) || 0));
 
       const updatedAccount: LoyaltyAccount = {
         ...currentAccount,
@@ -1152,15 +982,20 @@ export async function redeemGuestLoyaltyPoints(
         guestName: guest.name || currentAccount.guestName,
         ...(guest.email ? { guestEmail: guest.email } : {}),
         transactionType: 'redemption',
+        canonicalType: mapToCanonicalLoyaltyTransactionType('redemption', -pts),
         points: pts,
         pointsDelta: -pts,
         previousBalance,
         updatedBalance,
+        previousLifetimeBalance: lifetime,
+        updatedLifetimeBalance: lifetime,
         reason: params.reason.trim() || 'Loyalty points redeemed',
         adminId: adminProfile.uid,
         adminName: adminProfile.displayName || adminProfile.name || adminProfile.email || 'Admin',
         ...(adminProfile.email ? { adminEmail: adminProfile.email } : {}),
+        actorType: 'staff',
         ...(params.reservationId ? { reservationId: params.reservationId } : {}),
+        redemptionRef: safeKey,
         monetaryValue: validation.monetaryValue,
         idempotencyKey: safeKey,
         timestamp: nowIso,
@@ -1217,7 +1052,9 @@ export async function redeemGuestLoyaltyPoints(
 
 /**
  * Atomically expires unconsumed points that have passed their configured expiry date.
- * Safe and idempotent per calendar day per guest.
+ * Uses deterministic per-lot idempotency keys so expired lots can never expire twice,
+ * reduces availablePoints only (preserving lifetimePointsEarned and membership tier),
+ * and dispatches post-commit `loyalty.points_expired` email notification when enabled.
  */
 export async function processExpiredLoyaltyPoints(
   hotel: Hotel,
@@ -1229,14 +1066,48 @@ export async function processExpiredLoyaltyPoints(
     return { success: false, error: 'Missing required context.' };
   }
 
+  // Primary path: Authoritative server-side expiry endpoint
+  try {
+    const currentUser = auth?.currentUser;
+    if (currentUser && typeof fetch === 'function') {
+      const idToken = await currentUser.getIdToken();
+      if (idToken) {
+        const resp = await fetch('/api/loyalty/process-expiry', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            hotelId: hotel.id,
+            guestId: guest.id,
+          }),
+        });
+        if (resp.status !== 404 && resp.status !== 502 && resp.status !== 503) {
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data?.success) {
+            return { success: false, error: data?.error || `Expiry processing failed (${resp.status}).` };
+          }
+          return {
+            success: true,
+            duplicate: Boolean(data.duplicate),
+            account: data.account,
+            transaction: data.transaction,
+          };
+        }
+      }
+    }
+  } catch (apiErr) {
+    console.warn('[LoyaltyService] Server expiry endpoint unreachable; falling back to atomic Firestore transaction:', apiErr);
+  }
+
   const policy = await fetchFreshHotelPolicy(hotel);
   const expirySummary = evaluateLoyaltyPointsExpiry(guestTransactions, policy.expiryReminderDays, new Date());
-  if (expirySummary.expiredPointsUnprocessed <= 0) {
+  if (expirySummary.expiredPointsUnprocessed <= 0 || expirySummary.expiredLots.length === 0) {
     return { success: false, error: 'No expired points pending deduction.' };
   }
 
-  const todayKey = new Date().toISOString().slice(0, 10);
-  const safeKey = sanitizeDocId(`expiry_${guest.id}_${todayKey}_${expirySummary.expiredPointsUnprocessed}`);
+  const safeKey = buildDeterministicExpiryKey(guest.id, expirySummary.expiredLots);
   const accountRef = doc(db, 'hotels', hotel.id, 'loyaltyAccounts', guest.id);
   const txRef = doc(db, 'hotels', hotel.id, 'loyaltyTransactions', safeKey);
   const nowIso = new Date().toISOString();
@@ -1245,7 +1116,11 @@ export async function processExpiredLoyaltyPoints(
     const trxResult = await runTransaction(db, async (trx) => {
       const [accSnap, txSnap] = await Promise.all([trx.get(accountRef), trx.get(txRef)]);
       if (txSnap.exists()) {
-        return { duplicate: true as const, account: accSnap.exists() ? (accSnap.data() as LoyaltyAccount) : undefined };
+        return {
+          duplicate: true as const,
+          account: accSnap.exists() ? (accSnap.data() as LoyaltyAccount) : undefined,
+          transaction: txSnap.data() as LoyaltyTransaction,
+        };
       }
       if (!accSnap.exists()) {
         throw new Error('Loyalty account not found.');
@@ -1259,6 +1134,7 @@ export async function processExpiredLoyaltyPoints(
       }
 
       const updatedBalance = previousBalance - ptsToExpire;
+      const lifetime = Math.max(0, Math.floor(Number(currentAccount.lifetimePointsEarned) || 0));
       const updatedAccount: LoyaltyAccount = {
         ...currentAccount,
         availablePoints: updatedBalance,
@@ -1274,14 +1150,19 @@ export async function processExpiredLoyaltyPoints(
         guestName: guest.name || currentAccount.guestName,
         ...(guest.email ? { guestEmail: guest.email } : {}),
         transactionType: 'expiry',
+        canonicalType: mapToCanonicalLoyaltyTransactionType('expiry', -ptsToExpire),
         points: ptsToExpire,
         pointsDelta: -ptsToExpire,
         previousBalance,
         updatedBalance,
+        previousLifetimeBalance: lifetime,
+        updatedLifetimeBalance: lifetime,
         reason: `Automatic expiry of ${ptsToExpire.toLocaleString()} unused loyalty points past expiry date`,
         adminId: adminProfile.uid,
         adminName: adminProfile.displayName || adminProfile.name || adminProfile.email || 'System Policy',
         ...(adminProfile.email ? { adminEmail: adminProfile.email } : {}),
+        actorType: 'staff',
+        expiredLotIds: expirySummary.expiredLots.map((l) => l.txId),
         idempotencyKey: safeKey,
         timestamp: nowIso,
         createdAt: nowIso,
@@ -1292,6 +1173,27 @@ export async function processExpiredLoyaltyPoints(
 
       return { duplicate: false as const, account: updatedAccount, transaction: tx };
     });
+
+    if (!trxResult.duplicate && policy.notifyGuestsByEmail !== false && trxResult.account && 'transaction' in trxResult && trxResult.transaction) {
+      const tx = trxResult.transaction;
+      const acc = trxResult.account;
+      void notifyPlatformEvent({
+        hotelId: hotel.id,
+        eventType: 'loyalty.points_expired',
+        entityId: tx.id,
+        guestId: guest.id,
+        idempotencyKey: tx.idempotencyKey,
+        metadata: {
+          guestName: guest.name,
+          transactionType: 'Points Expired',
+          pointsFormatted: `-${tx.points.toLocaleString()} pts expired`,
+          updatedBalanceFormatted: `${acc.availablePoints.toLocaleString()} pts`,
+          membershipLevel: acc.membershipLevelName,
+          transactionDate: formatReadableDate(tx.timestamp),
+          reason: tx.reason,
+        },
+      });
+    }
 
     return {
       success: true,

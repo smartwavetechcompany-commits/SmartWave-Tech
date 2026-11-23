@@ -55,6 +55,8 @@ import {
 import { mountEmailCustomizationRoutes } from "./src/modules/emailCustomization/server/routes.ts";
 import { sendHotelEmail } from "./src/modules/emailCustomization/server/dispatcher.ts";
 import { startDailyOpsBackgroundScheduler } from "./src/modules/emailCustomization/server/dailyOpsService.ts";
+import { mountLoyaltyRoutes } from "./src/modules/loyalty/server/loyaltyRoutes.ts";
+import { startLoyaltyExpiryBackgroundJob } from "./src/modules/loyalty/server/loyaltyServerService.ts";
 import { computeEmailFinancialBreakdown } from "./src/modules/emailCustomization/shared/financialEmailBreakdown.ts";
 import { resolveEffectiveTemplate } from "./src/modules/emailCustomization/server/resolver.ts";
 import { renderHotelEmailServerSide } from "./src/modules/emailCustomization/server/renderer.ts";
@@ -4793,6 +4795,7 @@ async function startServer() {
       "loyalty.points_redeemed",
       "loyalty.tier_upgraded",
       "loyalty.points_expiring",
+      "loyalty.points_expired",
       "system.daily_revenue_deficit",
       "system.operational_alert",
     ]);
@@ -5407,7 +5410,8 @@ async function startServer() {
         case "loyalty.points_deducted":
         case "loyalty.points_redeemed":
         case "loyalty.tier_upgraded":
-        case "loyalty.points_expiring": {
+        case "loyalty.points_expiring":
+        case "loyalty.points_expired": {
           const rows: EmailSummaryRow[] = [
             { label: "Hotel", value: hotelBrand.hotelName },
             { label: "Guest", value: resolvedGuestName },
@@ -5424,7 +5428,9 @@ async function startServer() {
                           ? "Points Redeemed"
                           : typedEvent === "loyalty.points_expiring"
                             ? "Expiring Points"
-                            : "Points",
+                            : typedEvent === "loyalty.points_expired"
+                              ? "Expired Points"
+                              : "Points",
                     value: cleanMetaStr("pointsFormatted")!,
                   },
                 ]
@@ -6025,6 +6031,100 @@ async function startServer() {
     },
   });
 
+  // Helper: Post-commit deduplicated loyalty email dispatch for server-authoritative redemption & expiry
+  const dispatchServerLoyaltyNotification = async (params: {
+    hotelId: string;
+    eventType: "loyalty.points_redeemed" | "loyalty.points_expired";
+    guestId: string;
+    guestName: string;
+    guestEmail: string;
+    reservationId?: string;
+    transaction: any;
+    account: any;
+    currency?: string;
+  }): Promise<void> => {
+    const dedupeKey = `evt:${params.hotelId}:${params.eventType}:${params.transaction?.idempotencyKey || params.transaction?.id || params.guestId}`;
+    if (inFlightTransactionalKeys.has(dedupeKey) || hasRecentTransactionalEvent(dedupeKey)) {
+      return;
+    }
+    const cfgCheck = validateEmailConfig();
+    if (!cfgCheck.ok) return;
+
+    inFlightTransactionalKeys.add(dedupeKey);
+    try {
+      const hotelDoc = await readFirestoreDocServerSide(`hotels/${params.hotelId}`);
+      const eventCheck = isHotelEmailEventEnabled(hotelDoc, params.eventType, "guest");
+      if (!eventCheck.enabled) return;
+
+      const appUrl = (process.env.APP_URL || "http://localhost:3000").replace(/\/+$/, "");
+      const brand = resolveHotelBrandContext(params.hotelId, hotelDoc, appUrl);
+      const currency = params.currency || brand.currency || "NGN";
+      const symbol = currency === "USD" ? "$" : "₦";
+      const tx = params.transaction;
+      const acc = params.account;
+      const txDate = (() => {
+        try {
+          return new Date(tx.timestamp || new Date().toISOString()).toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+          });
+        } catch {
+          return String(tx.timestamp || "");
+        }
+      })();
+
+      const rows: EmailSummaryRow[] = [
+        { label: "Hotel", value: brand.hotelName },
+        { label: "Guest", value: params.guestName },
+        {
+          label: "Transaction Type",
+          value: params.eventType === "loyalty.points_redeemed" ? "Points Redemption" : "Points Expired",
+        },
+        {
+          label: params.eventType === "loyalty.points_redeemed" ? "Points Redeemed" : "Expired Points",
+          value: `-${Number(tx.points || 0).toLocaleString()} pts`,
+        },
+        ...(params.eventType === "loyalty.points_redeemed" && typeof tx.monetaryValue === "number"
+          ? [{ label: "Redemption Value", value: `${symbol}${Number(tx.monetaryValue).toLocaleString()}` }]
+          : []),
+        { label: "Membership Level", value: String(acc?.membershipLevelName || "Standard") },
+        {
+          label: "Available Points Balance",
+          value: `${Number(acc?.availablePoints || 0).toLocaleString()} pts`,
+        },
+        { label: "Date", value: txDate },
+        ...(tx.reason ? [{ label: "Reason", value: String(tx.reason).slice(0, 240) }] : []),
+      ];
+
+      const rendered = renderMultiTenantEmail(params.eventType, brand, {
+        recipientName: params.guestName,
+        rows,
+      });
+
+      const sendRes = await sendEmail({
+        to: params.guestEmail,
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+        fromName: rendered.fromName,
+        replyTo: rendered.replyTo,
+      });
+
+      if (sendRes.success) {
+        markTransactionalEventSent(dedupeKey);
+      }
+    } finally {
+      inFlightTransactionalKeys.delete(dedupeKey);
+    }
+  };
+
+  // Mount Authoritative Server-Side Loyalty Controls (Redemption, Expiry, Cron Expiry Sweep)
+  mountLoyaltyRoutes(app, {
+    requireAuth,
+    dispatchLoyaltyNotification: dispatchServerLoyaltyNotification,
+  });
+
   // API routes FIRST
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
@@ -6088,6 +6188,22 @@ async function startServer() {
       startDailyOpsBackgroundScheduler();
     } catch (schedErr) {
       console.error("[DAILY OPS SCHEDULER] Failed to initialize background scheduler (non-fatal):", schedErr);
+    }
+    // Start non-blocking automated Loyalty Points Expiry scheduler (independent of admin login)
+    try {
+      startLoyaltyExpiryBackgroundJob(async (p) => {
+        await dispatchServerLoyaltyNotification({
+          hotelId: p.hotelId,
+          eventType: "loyalty.points_expired",
+          guestId: p.guestId,
+          guestName: p.guestName,
+          guestEmail: p.guestEmail,
+          transaction: p.transaction,
+          account: p.account,
+        });
+      });
+    } catch (loyaltySchedErr) {
+      console.error("[LOYALTY EXPIRY SCHEDULER] Failed to initialize background expiry job (non-fatal):", loyaltySchedErr);
     }
   });
 }

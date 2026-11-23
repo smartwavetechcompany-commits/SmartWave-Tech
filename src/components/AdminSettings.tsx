@@ -387,6 +387,32 @@ export function AdminSettings() {
 
   const handleInputBlur = (group: keyof HotelSettings, key: string) => {
     if (!canEdit) return;
+    if (
+      group === 'loyalty' &&
+      (key === 'minimumRedemptionPoints' || key === 'maximumRedemptionPointsPerBooking')
+    ) {
+      const currentLoyalty = { ...(DEFAULT_SETTINGS_LOCAL.loyalty!), ...(localSettings.loyalty || {}) };
+      const rawMin = Math.floor(Number(currentLoyalty.minimumRedemptionPoints) || 0);
+      const clampedMin = Math.min(5000, Math.max(100, rawMin || 100));
+      const rawMax = Math.floor(Number(currentLoyalty.maximumRedemptionPointsPerBooking) || 0);
+      const clampedMax = Math.max(clampedMin, Math.min(5000, rawMax > 0 ? rawMax : 5000));
+      if (rawMin !== clampedMin || rawMax !== clampedMax) {
+        const normalized: HotelSettings = {
+          ...localSettings,
+          loyalty: {
+            ...currentLoyalty,
+            minimumRedemptionPoints: clampedMin,
+            maximumRedemptionPointsPerBooking: clampedMax,
+          },
+        };
+        setLocalSettings(normalized);
+        saveSettings(normalized, 'loyalty', key);
+        toast.info(
+          `Redemption limits enforced within policy bounds: Min ${clampedMin.toLocaleString()} pts, Max ${clampedMax.toLocaleString()} pts per booking.`
+        );
+        return;
+      }
+    }
     if (hasChanges) {
       saveSettings(localSettings, group, key);
     }
@@ -1282,13 +1308,13 @@ export function AdminSettings() {
                   'loyalty',
                   'minimumRedemptionPoints',
                   'Minimum Points Required for Redemption',
-                  'Guests must redeem at least this many points per redemption transaction.'
+                  'Guests must redeem at least this many points per transaction (enforced minimum: 100 points).'
                 )}
                 {renderInput(
                   'loyalty',
                   'maximumRedemptionPointsPerBooking',
                   'Maximum Redeemable Points per Booking',
-                  'Upper cap per redemption transaction. Set to 0 for no cap.'
+                  'Cumulative upper limit per booking across redemptions (enforced maximum: 5,000 points per booking).'
                 )}
 
                 <div className="h-px bg-zinc-800 my-4" />

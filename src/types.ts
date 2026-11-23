@@ -1601,6 +1601,17 @@ export type LoyaltyTransactionType =
   | 'reversal'
   | 'tier_change';
 
+export type LoyaltyCanonicalTransactionType =
+  | 'EARNING'
+  | 'REDEMPTION'
+  | 'MANUAL_CREDIT'
+  | 'MANUAL_DEBIT'
+  | 'EXPIRY'
+  | 'REVERSAL'
+  | 'ADJUSTMENT'
+  | 'ACCOUNT_ACTIVATION'
+  | 'TIER_CHANGE';
+
 export interface LoyaltyAccount {
   id: string; // matches existing guest.id (1:1 per hotel)
   hotelId: string;
@@ -1629,15 +1640,24 @@ export interface LoyaltyTransaction {
   guestName: string;
   guestEmail?: string;
   transactionType: LoyaltyTransactionType;
+  canonicalType?: LoyaltyCanonicalTransactionType;
   points: number; // absolute magnitude (>= 0)
   pointsDelta: number; // signed change (+, -, or 0 for tier_change/activation)
   previousBalance: number;
   updatedBalance: number;
+  previousLifetimeBalance?: number;
+  updatedLifetimeBalance?: number;
   reason: string;
   adminId: string;
   adminName?: string;
   adminEmail?: string;
+  actorType?: 'staff' | 'system';
+  systemProcess?: string;
   reservationId?: string;
+  financialTransactionRef?: string;
+  redemptionRef?: string;
+  originalTransactionId?: string;
+  expiredLotIds?: string[];
   monetaryValue?: number;
   previousTierName?: string;
   newTierName?: string;
@@ -1646,4 +1666,5 @@ export interface LoyaltyTransaction {
   timestamp: string;
   createdAt: string;
 }
+
 
