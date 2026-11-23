@@ -13,7 +13,7 @@
  * against reservations/ledger. NEVER mutates PMS room pricing, taxes, folios, discounts, or payments.
  */
 
-import {
+import type {
   Hotel,
   LedgerEntry,
   LoyaltyAccount,
@@ -25,8 +25,8 @@ import {
   evaluateLoyaltyPointsExpiry,
   getLoyaltyPolicy,
   mapToCanonicalLoyaltyTransactionType,
-  validatePointsRedemption,
-} from '../shared/loyaltyRules.ts';
+  validatePointsRedemptionCore as validatePointsRedemption,
+} from '../shared/loyaltyPolicyCore.ts';
 import {
   fsPatchFields,
   fsReadDocWithMeta,
