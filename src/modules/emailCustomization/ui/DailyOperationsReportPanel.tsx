@@ -198,7 +198,10 @@ export function DailyOperationsReportPanel({
     setDirty(true);
   };
 
-  const handleSaveConfig = async (overrideConfig?: DailyOpsReportConfig) => {
+  const handleSaveConfig = async (
+    overrideConfig?: DailyOpsReportConfig,
+    customSuccessMessage?: string
+  ) => {
     const target = overrideConfig || config;
     if (!target || !canManage) return;
 
@@ -224,13 +227,57 @@ export function DailyOperationsReportPanel({
       setNextScheduled(res.nextScheduledDelivery);
       setTimezoneFallbackUsed(false);
       setDirty(false);
-      toast.success("Daily Hotel Operations Report settings saved.");
+      toast.success(customSuccessMessage || "Daily Hotel Operations Report settings saved.");
     } catch (err: any) {
       toast.error(err?.message || "Could not save Daily Operations Report settings.");
     } finally {
       setSaving(false);
     }
   };
+
+  const handleToggleScheduleEnabled = async () => {
+    if (!canManage || !config || saving) return;
+    const nextEnabled = !config.enabled;
+    const nextConfig: DailyOpsReportConfig = { ...config, enabled: nextEnabled };
+    await handleSaveConfig(
+      nextConfig,
+      nextEnabled
+        ? `Automated Daily Operations Report enabled (${nextConfig.scheduledTime || DEFAULT_DAILY_OPS_TIME} ${nextConfig.timezone}).`
+        : "Automated Daily Operations Report paused."
+    );
+  };
+
+  // Live 30-second due check while automation is enabled so scheduled deliveries trigger on time and update UI immediately
+  useEffect(() => {
+    if (!config?.enabled || !canManage || !hotelId) return;
+    let cancelled = false;
+
+    const checkDueNow = async () => {
+      try {
+        const res = await emailCustomizationApi.checkDailyOpsDue(hotelId);
+        if (cancelled) return;
+        if (res.triggered && ((res.sent || 0) > 0 || (res.partial || 0) > 0 || (res.failed || 0) > 0)) {
+          if ((res.sent || 0) > 0) {
+            toast.success("Scheduled Daily Operations Report delivered automatically.");
+          } else if ((res.partial || 0) > 0) {
+            toast.warning("Scheduled Daily Operations Report partially delivered. Check Delivery History.");
+          }
+          await refreshRuns();
+        }
+      } catch {
+        // Non-blocking background check
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void checkDueNow();
+    }, 30_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [config?.enabled, canManage, hotelId]);
 
   const persistRecipientsUpdate = async (
     nextConfig: DailyOpsReportConfig,
@@ -610,7 +657,7 @@ export function DailyOperationsReportPanel({
                     Daily Operations Report Schedule
                   </h2>
                   <p className="text-xs text-zinc-400 mt-0.5">
-                    Automatically compiles and emails {hotelName}&apos;s preceding-day operational summary at 12:00 AM hotel time.
+                    Automatically compiles and emails {hotelName}&apos;s preceding-day operational summary at {config.scheduledTime || DEFAULT_DAILY_OPS_TIME} ({config.timezone}).
                   </p>
                 </div>
               </div>
@@ -619,14 +666,11 @@ export function DailyOperationsReportPanel({
                 type="button"
                 role="switch"
                 aria-checked={config.enabled}
-                disabled={!canManage}
-                onClick={() =>
-                  canManage &&
-                  updateLocalConfig((prev) => ({ ...prev, enabled: !prev.enabled }))
-                }
+                disabled={!canManage || saving}
+                onClick={() => void handleToggleScheduleEnabled()}
                 className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
                   config.enabled ? "bg-emerald-600" : "bg-zinc-700"
-                } ${!canManage ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                } ${!canManage || saving ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
               >
                 <span
                   className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${

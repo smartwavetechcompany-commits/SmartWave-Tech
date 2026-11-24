@@ -89,6 +89,8 @@ const LOYALTY_VARS: AllowedTemplateVariable[] = [
   "points_balance",
   "loyalty_tier",
   "previous_tier",
+  "loyalty_tier_benefits",
+  "loyalty_all_tiers_benefits",
   "redemption_value",
   "expiry_date",
   "transaction_date",

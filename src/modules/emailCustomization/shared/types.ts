@@ -159,6 +159,8 @@ export const ALLOWED_TEMPLATE_VARIABLES = [
   "points_balance",
   "loyalty_tier",
   "previous_tier",
+  "loyalty_tier_benefits",
+  "loyalty_all_tiers_benefits",
   "redemption_value",
   "expiry_date",
   "reason",
@@ -249,6 +251,16 @@ export const VARIABLE_DESCRIPTIONS: Record<
   points_balance: { label: "Available Points Balance", group: "Loyalty", sample: "2,150 pts" },
   loyalty_tier: { label: "Loyalty Membership Level", group: "Loyalty", sample: "Gold" },
   previous_tier: { label: "Previous Loyalty Tier", group: "Loyalty", sample: "Silver" },
+  loyalty_tier_benefits: {
+    label: "Current Tier Benefits",
+    group: "Loyalty",
+    sample: "Late check-out subject to availability • Room upgrade priority • Welcome amenity",
+  },
+  loyalty_all_tiers_benefits: {
+    label: "All Membership Tiers & Benefits",
+    group: "Loyalty",
+    sample: "Standard (0+ pts), Silver (500+ pts), Gold (2,000+ pts), Platinum (5,000+ pts) full benefits",
+  },
   redemption_value: { label: "Points Redemption Value", group: "Loyalty", sample: "NGN 5,000.00" },
   expiry_date: { label: "Points Expiry Date", group: "Loyalty", sample: "2027-01-31" },
   reason: { label: "Reason / Notes", group: "Operations", sample: "Front desk adjustment" },
@@ -1138,6 +1150,15 @@ export interface EmailRenderContext {
   loyaltyPointsBalance?: number | null;
   loyaltyTier?: string | null;
   previousTier?: string | null;
+  loyaltyTierBenefits?: string[] | null;
+  loyaltyAllTiers?: Array<{
+    id?: string;
+    name: string;
+    minPoints: number;
+    color?: string;
+    benefits: string[];
+    isCurrent?: boolean;
+  }> | null;
   redemptionValueFormatted?: string | null;
   expiryDate?: string | null;
   /** Optional operational / corporate / auth fields */

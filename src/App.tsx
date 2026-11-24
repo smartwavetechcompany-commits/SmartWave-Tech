@@ -47,6 +47,7 @@ import { ResetPasswordPage } from './components/ResetPasswordPage';
 import { SetPasswordPage } from './components/SetPasswordPage';
 import { LandingLoadingScreen } from './components/LandingLoadingScreen';
 import { EmailTemplatesPage } from './modules/emailCustomization/ui/EmailTemplatesPage';
+import { emailCustomizationApi } from './modules/emailCustomization/ui/apiClient';
 
 function DashboardRoute() {
   const { profile } = useAuth();
@@ -130,6 +131,39 @@ function AppContent() {
   React.useEffect(() => {
     setSidebarOpen(false);
   }, [location.pathname]);
+
+  // Silent background heartbeat for Automated Daily Operations Report schedule
+  const canTriggerDailyOpsHeartbeat = Boolean(
+    user &&
+      profile &&
+      profile.status === 'active' &&
+      !profile.forcePasswordChange &&
+      hotel?.id &&
+      (profile.role === 'hotelAdmin' ||
+        profile.role === 'admin' ||
+        profile.role === 'superAdmin' ||
+        profile.staffRole === 'admin')
+  );
+
+  React.useEffect(() => {
+    if (!canTriggerDailyOpsHeartbeat || !hotel?.id) return;
+    const activeHotelId = hotel.id;
+    let cancelled = false;
+
+    const runCheck = () => {
+      if (cancelled) return;
+      void emailCustomizationApi.checkDailyOpsDue(activeHotelId).catch(() => {});
+    };
+
+    const initialTimer = window.setTimeout(runCheck, 6_000);
+    const intervalTimer = window.setInterval(runCheck, 30_000);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(initialTimer);
+      window.clearInterval(intervalTimer);
+    };
+  }, [canTriggerDailyOpsHeartbeat, hotel?.id]);
 
   if (loading) {
     return <LandingLoadingScreen />;

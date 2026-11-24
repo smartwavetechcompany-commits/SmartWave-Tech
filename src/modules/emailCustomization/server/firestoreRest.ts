@@ -5,6 +5,7 @@ interface FirebaseAppletConfig {
   apiKey?: string;
   projectId?: string;
   storageBucket?: string;
+  firestoreDatabaseId?: string;
 }
 
 let cachedConfig: FirebaseAppletConfig | null = null;
@@ -86,11 +87,16 @@ export function decodeFirestoreDocument(docJson: any): Record<string, any> {
 }
 
 function getFirestoreBaseUrl(): string {
-  const projectId = getFirebaseAppletConfig().projectId;
+  const cfg = getFirebaseAppletConfig();
+  const projectId = cfg.projectId;
   if (!projectId) {
     throw new Error("Firebase projectId is missing in firebase-applet-config.json.");
   }
-  return `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
+  const databaseId =
+    typeof cfg.firestoreDatabaseId === "string" && cfg.firestoreDatabaseId.trim()
+      ? cfg.firestoreDatabaseId.trim()
+      : "(default)";
+  return `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${encodeURIComponent(databaseId)}/documents`;
 }
 
 export async function fsReadDocWithMeta(

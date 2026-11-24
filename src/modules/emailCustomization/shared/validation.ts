@@ -2155,6 +2155,22 @@ export function buildTemplateVariablesMap(
     points_balance: hasBalance ? `${Number(ctx.loyaltyPointsBalance).toLocaleString("en-US")} pts` : "",
     loyalty_tier: hasTier ? String(ctx.loyaltyTier).trim() : "",
     previous_tier: typeof ctx.previousTier === "string" ? ctx.previousTier.trim() : "",
+    loyalty_tier_benefits: Array.isArray(ctx.loyaltyTierBenefits)
+      ? ctx.loyaltyTierBenefits.map((b) => String(b || "").trim()).filter(Boolean).join(" • ")
+      : "",
+    loyalty_all_tiers_benefits:
+      Array.isArray(ctx.loyaltyAllTiers) && ctx.loyaltyAllTiers.length > 0
+        ? ctx.loyaltyAllTiers
+            .map((tier) => {
+              const pts = `${Math.max(0, Number(tier.minPoints) || 0).toLocaleString("en-US")}+ pts`;
+              const badge = tier.isCurrent ? " (Current Tier)" : "";
+              const benefits = Array.isArray(tier.benefits)
+                ? tier.benefits.map((b) => String(b || "").trim()).filter(Boolean)
+                : [];
+              return `${tier.name} (${pts})${badge}: ${benefits.join("; ")}`;
+            })
+            .join("\n")
+        : "",
     redemption_value:
       typeof ctx.redemptionValueFormatted === "string" ? ctx.redemptionValueFormatted.trim() : "",
     expiry_date: expiryDate,

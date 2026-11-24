@@ -384,4 +384,20 @@ export const emailCustomizationApi = {
       { method: "POST", body: payload, hotelId }
     );
   },
+
+  checkDailyOpsDue(hotelId?: string) {
+    return apiFetch<{
+      ok: boolean;
+      skipped?: boolean;
+      reason?: string;
+      triggered?: boolean;
+      sent?: number;
+      partial?: number;
+      failed?: number;
+    }>("/api/email-customization/daily-ops-report/check-due", {
+      method: "POST",
+      body: {},
+      hotelId,
+    });
+  },
 };

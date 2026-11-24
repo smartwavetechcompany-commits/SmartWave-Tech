@@ -12,6 +12,7 @@ import type {
   SupportedEmailLanguage,
 } from "../shared/types.ts";
 import { sanitizeHexColor, validateEmailUrl } from "../shared/validation.ts";
+import { resolveLoyaltyTierBenefitsForEmail } from "../../loyalty/shared/loyaltyPolicyCore.ts";
 
 export {
   buildDefaultTemplateVariant,
@@ -57,7 +58,7 @@ export function buildSamplePreviewContext(
   hotelId: string,
   hotelDoc: Record<string, any> | null | undefined,
   appUrl: string,
-  options?: { includeLoyaltySample?: boolean }
+  options?: { includeLoyaltySample?: boolean; eventType?: CustomizableEmailEventType }
 ): EmailRenderContext {
   const branding = (hotelDoc?.branding && typeof hotelDoc.branding === "object"
     ? hotelDoc.branding
@@ -136,24 +137,28 @@ export function buildSamplePreviewContext(
     issueSummary: "Room inspection completed",
     priority: "NORMAL",
     actionLink: `${cleanAppUrl}/auth-action?sample=1`,
-    ...(options?.includeLoyaltySample
-      ? {
-          loyaltyPointsFormatted: "+450 pts",
-          loyaltyPointsEarned: 450,
-          loyaltyPointsBalance: 2150,
-          loyaltyTier: "Gold",
-          previousTier: "Silver",
-          redemptionValueFormatted: "NGN 5,000.00",
-          expiryDate: "2027-01-31",
-        }
-      : {
-          loyaltyPointsFormatted: "+450 pts",
-          loyaltyPointsEarned: 450,
-          loyaltyPointsBalance: 2150,
-          loyaltyTier: "Gold",
-          previousTier: "Silver",
-          redemptionValueFormatted: "NGN 5,000.00",
-          expiryDate: "2027-01-31",
-        }),
+    ...(() => {
+      const includeAllTierBenefits =
+        options?.includeLoyaltySample === true ||
+        (typeof options?.eventType === "string" && options.eventType.startsWith("loyalty_"));
+      const tierSummary = includeAllTierBenefits
+        ? resolveLoyaltyTierBenefitsForEmail(hotelDoc, "Gold")
+        : null;
+      return {
+        loyaltyPointsFormatted: "+450 pts",
+        loyaltyPointsEarned: 450,
+        loyaltyPointsBalance: 2150,
+        loyaltyTier: "Gold",
+        previousTier: "Silver",
+        ...(tierSummary
+          ? {
+              loyaltyTierBenefits: tierSummary.currentTierBenefits,
+              loyaltyAllTiers: tierSummary.allTiers,
+            }
+          : {}),
+        redemptionValueFormatted: "NGN 5,000.00",
+        expiryDate: "2027-01-31",
+      };
+    })(),
   };
 }

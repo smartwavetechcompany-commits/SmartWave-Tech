@@ -117,11 +117,16 @@ async function listCollectionAll(
     }
   }
 
-  const projectId = getFirebaseAppletConfig().projectId;
+  const cfg = getFirebaseAppletConfig();
+  const projectId = cfg.projectId;
   if (!projectId) {
     throw new Error("Firebase projectId is missing in firebase-applet-config.json.");
   }
-  const baseUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
+  const databaseId =
+    typeof cfg.firestoreDatabaseId === "string" && cfg.firestoreDatabaseId.trim()
+      ? cfg.firestoreDatabaseId.trim()
+      : "(default)";
+  const baseUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${encodeURIComponent(databaseId)}/documents`;
   const headers: Record<string, string> = {};
   if (bearerToken) headers.Authorization = `Bearer ${bearerToken}`;
 
@@ -489,7 +494,12 @@ async function deliverToRecipientList(params: {
   const sender = params.sendEmailFn || sendEmail;
   const recipientResults: DailyOpsRecipientDeliveryResult[] = [];
 
-  for (const email of params.recipients) {
+  for (let i = 0; i < params.recipients.length; i++) {
+    const email = params.recipients[i];
+    // Space out live Resend deliveries slightly to stay safely within 2 req/s rate limits
+    if (i > 0 && !params.sendEmailFn) {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    }
     const emailHash = crypto.createHash("sha256").update(email.toLowerCase()).digest("hex").slice(0, 12);
     const idempotencyKey = `${params.idempotencyPrefix}_${emailHash}`;
     try {
@@ -583,9 +593,13 @@ async function logEmailNotificationAudit(params: {
   }
 }
 
+const inFlightDailyOpsHotels = new Set<string>();
+const AUTO_RETRY_BACKOFF_MS = 15 * 60 * 1000;
+const MAX_AUTO_RETRIES = 3;
+
 /**
  * Executes a single scheduled daily operations report run for a hotel & reporting date.
- * Strictly idempotent via deterministic runId = reportDate (`YYYY-MM-DD`).
+ * Strictly idempotent via deterministic runId = reportDate (`YYYY-MM-DD`) and in-flight mutex.
  */
 export async function executeScheduledDailyOpsRun(params: {
   hotelId: string;
@@ -593,34 +607,55 @@ export async function executeScheduledDailyOpsRun(params: {
   scheduledForIso?: string;
   bearerToken?: string;
   dryRun?: boolean;
+  forceRetry?: boolean;
   sendEmailFn?: DailyOpsEmailSender;
 }): Promise<{
   status: "sent" | "partial" | "failed" | "skipped" | "dry_run";
   reason?: string;
   run?: DailyOpsReportRun;
 }> {
-  const { hotelId, reportDate, scheduledForIso, bearerToken, dryRun, sendEmailFn } = params;
+  const { hotelId, reportDate, scheduledForIso, bearerToken, dryRun, forceRetry, sendEmailFn } = params;
   const runId = reportDate;
   const idempotencyKey = `daily_ops_${hotelId}_${reportDate}`;
+  const lockKey = `${hotelId}:${reportDate}`;
 
-  // 1. Check existing scheduled run for strict duplicate prevention
-  const existingRun = await getDailyOpsRun(hotelId, runId, bearerToken);
-  if (existingRun && existingRun.deliveryStatus === "sent") {
-    return { status: "skipped", reason: "already_sent", run: existingRun };
+  if (inFlightDailyOpsHotels.has(lockKey)) {
+    return { status: "skipped", reason: "in_flight" };
   }
+  inFlightDailyOpsHotels.add(lockKey);
 
-  const { config } = await getDailyOpsConfig(hotelId, undefined, bearerToken);
-  const activeRecipients = config.recipients
-    .filter((r) => r.enabled && validateDailyOpsEmail(r.email))
-    .map((r) => r.email.toLowerCase());
+  try {
+    // 1. Check existing scheduled run for strict duplicate prevention & failed-run auto-retry backoff
+    const existingRun = await getDailyOpsRun(hotelId, runId, bearerToken);
+    if (existingRun && existingRun.deliveryStatus === "sent") {
+      return { status: "skipped", reason: "already_sent", run: existingRun };
+    }
+    if (
+      !forceRetry &&
+      existingRun &&
+      (existingRun.deliveryStatus === "failed" || existingRun.deliveryStatus === "partial")
+    ) {
+      if ((existingRun.retryCount || 0) >= MAX_AUTO_RETRIES) {
+        return { status: "skipped", reason: "max_auto_retries_reached", run: existingRun };
+      }
+      const lastAttemptMs = existingRun.generatedAt ? new Date(existingRun.generatedAt).getTime() : 0;
+      if (Number.isFinite(lastAttemptMs) && lastAttemptMs > 0 && Date.now() - lastAttemptMs < AUTO_RETRY_BACKOFF_MS) {
+        return { status: "skipped", reason: "retry_backoff_active", run: existingRun };
+      }
+    }
 
-  if (activeRecipients.length === 0) {
-    return { status: "skipped", reason: "no_active_recipients" };
-  }
+    const { config } = await getDailyOpsConfig(hotelId, undefined, bearerToken);
+    const activeRecipients = config.recipients
+      .filter((r) => r.enabled && validateDailyOpsEmail(r.email))
+      .map((r) => r.email.toLowerCase());
 
-  if (dryRun) {
-    return { status: "dry_run", reason: `would_send_to_${activeRecipients.length}_recipients` };
-  }
+    if (activeRecipients.length === 0) {
+      return { status: "skipped", reason: "no_active_recipients" };
+    }
+
+    if (dryRun) {
+      return { status: "dry_run", reason: `would_send_to_${activeRecipients.length}_recipients` };
+    }
 
   const nowIso = new Date().toISOString();
 
@@ -743,7 +778,10 @@ export async function executeScheduledDailyOpsRun(params: {
     bearerToken,
   });
 
-  return { status: delivery.deliveryStatus, run: runRecord };
+    return { status: delivery.deliveryStatus, run: runRecord };
+  } finally {
+    inFlightDailyOpsHotels.delete(lockKey);
+  }
 }
 
 /**
@@ -772,6 +810,7 @@ export async function retryFailedDailyOpsRun(params: {
       reportDate: existing.reportDate,
       scheduledForIso: existing.scheduledForIso,
       bearerToken,
+      forceRetry: true,
       sendEmailFn,
     });
     return {
@@ -1148,37 +1187,184 @@ export async function runScheduledDailyOpsTick(options: {
 }
 
 // ---------------------------------------------------------------------------
-// Server-Side Background Scheduler (independent of browser sessions)
+// In-Memory Authorized Session Registry (Fallback when Admin SDK is absent)
+// Strictly volatile in server RAM — never logged or persisted to disk.
+// ---------------------------------------------------------------------------
+interface RegisteredDailyOpsSession {
+  bearerToken: string;
+  registeredAt: number;
+  expiresAt: number;
+}
+
+const SESSION_TOKEN_TTL_MS = 50 * 60 * 1000; // 50 min (Firebase ID tokens last 60 min)
+const registeredHotelSessions = new Map<string, RegisteredDailyOpsSession>();
+
+export function registerHotelDailyOpsSessionToken(
+  hotelId: string,
+  bearerToken?: string | null
+): void {
+  if (!hotelId || !isSafeIdentifier(hotelId)) return;
+  const token = typeof bearerToken === "string" ? bearerToken.trim() : "";
+  if (!token) return;
+  const now = Date.now();
+  registeredHotelSessions.set(hotelId, {
+    bearerToken: token,
+    registeredAt: now,
+    expiresAt: now + SESSION_TOKEN_TTL_MS,
+  });
+}
+
+export function clearRegisteredDailyOpsSessions(): void {
+  registeredHotelSessions.clear();
+}
+
+export function getRegisteredDailyOpsHotelIds(nowMs = Date.now()): string[] {
+  const active: string[] = [];
+  for (const [hid, entry] of registeredHotelSessions.entries()) {
+    if (entry.expiresAt <= nowMs) {
+      registeredHotelSessions.delete(hid);
+    } else {
+      active.push(hid);
+    }
+  }
+  return active;
+}
+
+/**
+ * Runs a single background scheduler pass:
+ * - Uses Firebase Admin SDK across all hotels when configured.
+ * - Falls back seamlessly to active authorized hotel session tokens held in server memory
+ *   when FIREBASE_SERVICE_ACCOUNT_KEY is not configured, ensuring scheduled reports fire
+ *   reliably on time even without a service account key.
+ */
+export async function runDailyOpsBackgroundSchedulerPass(options: {
+  now?: Date;
+  dryRun?: boolean;
+  sendEmailFn?: DailyOpsEmailSender;
+  forceSessionMode?: boolean;
+} = {}): Promise<{
+  mode: "admin_sdk" | "session_tokens" | "idle";
+  checkedHotels: number;
+  dueHotels: number;
+  sent: number;
+  partial: number;
+  failed: number;
+  skipped: number;
+  details: Array<{ hotelId: string; reportDate?: string; status: string; reason?: string }>;
+}> {
+  const adminDb = options.forceSessionMode ? null : await getOptionalAdminFirestore();
+  if (adminDb) {
+    const summary = await runScheduledDailyOpsTick({
+      now: options.now,
+      dryRun: options.dryRun,
+      sendEmailFn: options.sendEmailFn,
+    });
+    return { mode: "admin_sdk", ...summary };
+  }
+
+  const nowMs = (options.now || new Date()).getTime();
+  const activeEntries: Array<[string, RegisteredDailyOpsSession]> = [];
+  for (const [hid, entry] of registeredHotelSessions.entries()) {
+    if (entry.expiresAt <= nowMs) {
+      registeredHotelSessions.delete(hid);
+    } else {
+      activeEntries.push([hid, entry]);
+    }
+  }
+
+  if (activeEntries.length === 0) {
+    return {
+      mode: "idle",
+      checkedHotels: 0,
+      dueHotels: 0,
+      sent: 0,
+      partial: 0,
+      failed: 0,
+      skipped: 0,
+      details: [],
+    };
+  }
+
+  let checkedHotels = 0;
+  let dueHotels = 0;
+  let sent = 0;
+  let partial = 0;
+  let failed = 0;
+  let skipped = 0;
+  const details: Array<{ hotelId: string; reportDate?: string; status: string; reason?: string }> = [];
+
+  for (const [hotelId, entry] of activeEntries) {
+    try {
+      const sub = await runScheduledDailyOpsTick({
+        now: options.now,
+        dryRun: options.dryRun,
+        hotelIds: [hotelId],
+        bearerToken: entry.bearerToken,
+        sendEmailFn: options.sendEmailFn,
+      });
+      checkedHotels += sub.checkedHotels;
+      dueHotels += sub.dueHotels;
+      sent += sub.sent;
+      partial += sub.partial;
+      failed += sub.failed;
+      skipped += sub.skipped;
+      details.push(...sub.details);
+
+      // Evict expired/revoked bearer tokens cleanly if Firestore rejects with 401/403
+      if (
+        sub.details.some(
+          (d) =>
+            d.status === "failed" &&
+            typeof d.reason === "string" &&
+            (d.reason.includes("(401)") || d.reason.includes("(403)"))
+        )
+      ) {
+        registeredHotelSessions.delete(hotelId);
+      }
+    } catch (err: any) {
+      const msg = String(err?.message || "");
+      if (msg.includes("(401)") || msg.includes("(403)")) {
+        registeredHotelSessions.delete(hotelId);
+      }
+      failed++;
+      details.push({
+        hotelId,
+        status: "failed",
+        reason: msg || "Unexpected session-backed scheduler error",
+      });
+    }
+  }
+
+  return {
+    mode: "session_tokens",
+    checkedHotels,
+    dueHotels,
+    sent,
+    partial,
+    failed,
+    skipped,
+    details,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Server-Side Background Scheduler
 // ---------------------------------------------------------------------------
 let schedulerStarted = false;
 let schedulerInFlight = false;
-let loggedMissingAdminNotice = false;
 
-export function startDailyOpsBackgroundScheduler(intervalMs = 300_000): void {
+export function startDailyOpsBackgroundScheduler(intervalMs = 30_000): void {
   if (schedulerStarted) return;
   schedulerStarted = true;
 
   const runTick = async () => {
     if (schedulerInFlight) return;
-    // Unattended background Firestore reads require Firebase Admin SDK credentials
-    // when Firestore security rules enforce strict multi-tenant authentication.
-    const adminDb = await getOptionalAdminFirestore();
-    if (!adminDb) {
-      if (!loggedMissingAdminNotice) {
-        loggedMissingAdminNotice = true;
-        console.log(
-          "[DailyOpsScheduler] Waiting for FIREBASE_SERVICE_ACCOUNT_KEY for unattended background ticks (secured POST /api/email-customization/daily-ops-report/cron/run and interactive Email Module routes remain active)."
-        );
-      }
-      return;
-    }
-
     schedulerInFlight = true;
     try {
-      const summary = await runScheduledDailyOpsTick();
+      const summary = await runDailyOpsBackgroundSchedulerPass();
       if (summary.dueHotels > 0) {
         console.log(
-          `[DailyOpsScheduler] Tick complete — checked=${summary.checkedHotels}, due=${summary.dueHotels}, sent=${summary.sent}, partial=${summary.partial}, failed=${summary.failed}`
+          `[DailyOpsScheduler] Tick complete (${summary.mode}) — checked=${summary.checkedHotels}, due=${summary.dueHotels}, sent=${summary.sent}, partial=${summary.partial}, failed=${summary.failed}`
         );
       }
     } catch (err: any) {
@@ -1188,10 +1374,10 @@ export function startDailyOpsBackgroundScheduler(intervalMs = 300_000): void {
     }
   };
 
-  // Initial startup check (15s after boot) to recover any missed midnight run after restart/redeploy
+  // Initial startup check (10s after boot) to recover any missed run after restart/redeploy
   const bootTimer = setTimeout(() => {
     void runTick();
-  }, 15_000);
+  }, 10_000);
   if (typeof bootTimer.unref === "function") bootTimer.unref();
 
   const loopTimer = setInterval(() => {
@@ -1199,5 +1385,7 @@ export function startDailyOpsBackgroundScheduler(intervalMs = 300_000): void {
   }, intervalMs);
   if (typeof loopTimer.unref === "function") loopTimer.unref();
 
-  console.log("[DailyOpsScheduler] Server-side Daily Hotel Operations Report scheduler initialized (60s interval).");
+  console.log(
+    `[DailyOpsScheduler] Server-side Daily Hotel Operations Report scheduler initialized (${Math.round(intervalMs / 1000)}s interval).`
+  );
 }

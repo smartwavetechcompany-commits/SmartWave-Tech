@@ -669,3 +669,209 @@ export function validatePointsRedemptionCore(
     eligiblePayableAmount,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Loyalty Tier Benefits Email Helpers (Strictly read-only & HTML-escaped)
+// ---------------------------------------------------------------------------
+
+export interface LoyaltyTierBenefitSummary {
+  id: string;
+  name: string;
+  minPoints: number;
+  color?: string;
+  benefits: string[];
+  isCurrent: boolean;
+}
+
+export interface ResolvedLoyaltyEmailTierBenefits {
+  currentTierName: string;
+  currentTierBenefits: string[];
+  allTiers: LoyaltyTierBenefitSummary[];
+  currentTierBenefitsText: string;
+  allTiersBenefitsText: string;
+}
+
+function escapeLoyaltyEmailHtml(raw: string): string {
+  return String(raw || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function sanitizeLoyaltyTierColor(raw: unknown, fallback = '#059669'): string {
+  if (typeof raw === 'string' && /^#[0-9a-fA-F]{6}$/.test(raw.trim())) {
+    return raw.trim();
+  }
+  return fallback;
+}
+
+/**
+ * Resolves ALL configured membership tiers and ALL benefits of each tier for a hotel's
+ * loyalty programme (falling back to SERVER_DEFAULT_LOYALTY_LEVELS when not customized),
+ * identifying the guest's current tier without modifying any loyalty business logic.
+ */
+export function resolveLoyaltyTierBenefitsForEmail(
+  hotel?: Hotel | Record<string, any> | null,
+  currentTierName?: string | null
+): ResolvedLoyaltyEmailTierBenefits {
+  const policy = getLoyaltyPolicy((hotel || null) as Hotel | null);
+  const rawLevels =
+    Array.isArray(policy.membershipLevels) && policy.membershipLevels.length > 0
+      ? policy.membershipLevels
+      : SERVER_DEFAULT_LOYALTY_LEVELS;
+
+  const sortedAsc = [...rawLevels].sort(
+    (a, b) => (Number(a?.minPoints) || 0) - (Number(b?.minPoints) || 0)
+  );
+  const targetClean = typeof currentTierName === 'string' ? currentTierName.trim().toLowerCase() : '';
+
+  const allTiers: LoyaltyTierBenefitSummary[] = sortedAsc.map((lvl, idx) => {
+    const name = String(lvl?.name || `Tier ${idx + 1}`).trim();
+    const minPoints = Math.max(0, Math.floor(Number(lvl?.minPoints) || 0));
+    const benefits = Array.isArray(lvl?.benefits)
+      ? lvl.benefits.map((b) => String(b || '').trim()).filter(Boolean)
+      : [];
+    return {
+      id: String(lvl?.id || `tier-${idx + 1}`),
+      name,
+      minPoints,
+      color: sanitizeLoyaltyTierColor(lvl?.color, '#71717a'),
+      benefits,
+      isCurrent: Boolean(targetClean && name.toLowerCase() === targetClean),
+    };
+  });
+
+  const matchedTier =
+    allTiers.find((t) => t.isCurrent) ||
+    (targetClean ? allTiers.find((t) => t.name.toLowerCase().includes(targetClean)) : undefined) ||
+    allTiers[0];
+
+  const resolvedCurrentName =
+    (typeof currentTierName === 'string' && currentTierName.trim()) ||
+    matchedTier?.name ||
+    'Standard';
+  const currentTierBenefits = matchedTier ? matchedTier.benefits : [];
+  const currentTierBenefitsText = currentTierBenefits.join(' • ');
+  const allTiersBenefitsText = renderLoyaltyTierBenefitsText(allTiers);
+
+  return {
+    currentTierName: resolvedCurrentName,
+    currentTierBenefits,
+    allTiers,
+    currentTierBenefitsText,
+    allTiersBenefitsText,
+  };
+}
+
+/**
+ * Renders a plain-text summary containing EVERY loyalty tier and ALL benefits of each tier.
+ */
+export function renderLoyaltyTierBenefitsText(
+  allTiers: Array<{
+    name: string;
+    minPoints: number;
+    benefits: string[];
+    isCurrent?: boolean;
+  }>
+): string {
+  if (!Array.isArray(allTiers) || allTiers.length === 0) return '';
+
+  const lines: string[] = ['Loyalty Membership Tiers & Benefits:'];
+  for (const tier of allTiers) {
+    const threshold = `${Math.max(0, Number(tier.minPoints) || 0).toLocaleString('en-US')}+ pts`;
+    const badge = tier.isCurrent ? ' (Current Tier)' : '';
+    lines.push(`\n${tier.name} — ${threshold}${badge}`);
+    const benefits = Array.isArray(tier.benefits)
+      ? tier.benefits.map((b) => String(b || '').trim()).filter(Boolean)
+      : [];
+    if (benefits.length > 0) {
+      for (const benefit of benefits) {
+        lines.push(`  • ${benefit}`);
+      }
+    } else {
+      lines.push('  • Standard loyalty membership recognition');
+    }
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Renders an email-safe, strictly HTML-escaped responsive HTML table displaying EVERY loyalty
+ * tier, its qualifying points threshold, a badge for the guest's current tier, and ALL benefits
+ * of each tier.
+ */
+export function renderLoyaltyTierBenefitsHtml(
+  allTiers: Array<{
+    name: string;
+    minPoints: number;
+    color?: string;
+    benefits: string[];
+    isCurrent?: boolean;
+  }>,
+  primaryColor = '#059669',
+  fontCss = 'Arial, Helvetica, sans-serif'
+): string {
+  if (!Array.isArray(allTiers) || allTiers.length === 0) return '';
+  const safePrimary = sanitizeLoyaltyTierColor(primaryColor, '#059669');
+
+  const tierCards = allTiers
+    .map((tier, idx) => {
+      const safeName = escapeLoyaltyEmailHtml(tier.name);
+      const thresholdLabel = `${Math.max(0, Number(tier.minPoints) || 0).toLocaleString('en-US')}+ pts`;
+      const tierAccent = sanitizeLoyaltyTierColor(tier.color, safePrimary);
+      const isCurrent = tier.isCurrent === true;
+      const borderColor = isCurrent ? safePrimary : '#e4e4e7';
+      const bgColor = isCurrent ? '#f0fdf4' : '#fafafa';
+      const benefits = Array.isArray(tier.benefits)
+        ? tier.benefits.map((b) => String(b || '').trim()).filter(Boolean)
+        : [];
+      const benefitRows =
+        benefits.length > 0
+          ? benefits
+              .map(
+                (b) =>
+                  `<tr>
+                    <td width="16" valign="top" style="padding:2px 0;font-size:13px;line-height:1.45;color:${escapeLoyaltyEmailHtml(tierAccent)};font-weight:700;font-family:${fontCss};">&#8226;</td>
+                    <td valign="top" style="padding:2px 0;font-size:13px;line-height:1.45;color:#27272a;font-family:${fontCss};">${escapeLoyaltyEmailHtml(b)}</td>
+                  </tr>`
+              )
+              .join('')
+          : `<tr>
+              <td width="16" valign="top" style="padding:2px 0;font-size:13px;line-height:1.45;color:${escapeLoyaltyEmailHtml(tierAccent)};font-weight:700;font-family:${fontCss};">&#8226;</td>
+              <td valign="top" style="padding:2px 0;font-size:13px;line-height:1.45;color:#52525b;font-family:${fontCss};">Standard loyalty membership recognition</td>
+            </tr>`;
+
+      const currentBadgeHtml = isCurrent
+        ? `<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background-color:${escapeLoyaltyEmailHtml(safePrimary)};color:#ffffff;font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;vertical-align:middle;">Current Tier</span>`
+        : '';
+
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;background-color:${bgColor};border:1px solid ${escapeLoyaltyEmailHtml(borderColor)};border-left:4px solid ${escapeLoyaltyEmailHtml(tierAccent)};border-radius:6px;margin-top:${idx === 0 ? '0' : '10px'};">
+        <tr>
+          <td style="padding:12px 14px;font-family:${fontCss};">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
+              <tr>
+                <td align="left" valign="middle" style="padding:0 0 6px 0;font-size:14px;font-weight:700;color:#18181b;font-family:${fontCss};">
+                  ${safeName}${currentBadgeHtml}
+                </td>
+                <td align="right" valign="middle" style="padding:0 0 6px 0;font-size:12px;font-weight:600;color:#52525b;white-space:nowrap;font-family:${fontCss};">
+                  ${escapeLoyaltyEmailHtml(thresholdLabel)}
+                </td>
+              </tr>
+            </table>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
+              ${benefitRows}
+            </table>
+          </td>
+        </tr>
+      </table>`;
+    })
+    .join('');
+
+  return `<div style="margin:20px 0 8px 0;font-family:${fontCss};">
+    <div style="font-size:14px;font-weight:700;color:#18181b;margin:0 0 4px 0;font-family:${fontCss};">Loyalty Membership Tiers &amp; Benefits</div>
+    <div style="font-size:12px;color:#52525b;margin:0 0 12px 0;line-height:1.5;font-family:${fontCss};">Explore the full list of perks included at every loyalty membership tier.</div>
+    ${tierCards}
+  </div>`;
+}

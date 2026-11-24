@@ -57,6 +57,11 @@ import { sendHotelEmail } from "./src/modules/emailCustomization/server/dispatch
 import { startDailyOpsBackgroundScheduler } from "./src/modules/emailCustomization/server/dailyOpsService.ts";
 import { mountLoyaltyRoutes } from "./src/modules/loyalty/server/loyaltyRoutes.ts";
 import { startLoyaltyExpiryBackgroundJob } from "./src/modules/loyalty/server/loyaltyServerService.ts";
+import {
+  renderLoyaltyTierBenefitsHtml,
+  renderLoyaltyTierBenefitsText,
+  resolveLoyaltyTierBenefitsForEmail,
+} from "./src/modules/loyalty/shared/loyaltyPolicyCore.ts";
 import { computeEmailFinancialBreakdown } from "./src/modules/emailCustomization/shared/financialEmailBreakdown.ts";
 import { resolveEffectiveTemplate } from "./src/modules/emailCustomization/server/resolver.ts";
 import { renderHotelEmailServerSide } from "./src/modules/emailCustomization/server/renderer.ts";
@@ -4942,6 +4947,8 @@ async function startServer() {
         brand: typeof hotelBrand;
         recipientName?: string;
         rows: EmailSummaryRow[];
+        extraHtml?: string;
+        extraText?: string;
         note?: string;
         subjectOverride?: string;
         keySuffix: string;
@@ -5412,6 +5419,10 @@ async function startServer() {
         case "loyalty.tier_upgraded":
         case "loyalty.points_expiring":
         case "loyalty.points_expired": {
+          const tierSummary = resolveLoyaltyTierBenefitsForEmail(
+            hotelDoc,
+            cleanMetaStr("membershipLevel")
+          );
           const rows: EmailSummaryRow[] = [
             { label: "Hotel", value: hotelBrand.hotelName },
             { label: "Guest", value: resolvedGuestName },
@@ -5444,6 +5455,9 @@ async function startServer() {
             ...(cleanMetaStr("membershipLevel")
               ? [{ label: "Membership Level", value: cleanMetaStr("membershipLevel")! }]
               : []),
+            ...(tierSummary.currentTierBenefitsText
+              ? [{ label: "Current Tier Benefits", value: tierSummary.currentTierBenefitsText }]
+              : []),
             ...(cleanMetaStr("updatedBalanceFormatted")
               ? [{ label: "Available Points Balance", value: cleanMetaStr("updatedBalanceFormatted")! }]
               : []),
@@ -5465,6 +5479,11 @@ async function startServer() {
               brand: hotelBrand,
               recipientName: resolvedGuestName,
               rows,
+              extraHtml: renderLoyaltyTierBenefitsHtml(
+                tierSummary.allTiers,
+                hotelBrand.primaryColor
+              ),
+              extraText: renderLoyaltyTierBenefitsText(tierSummary.allTiers),
               keySuffix: "guest",
             });
           }
@@ -5679,12 +5698,31 @@ async function startServer() {
                   ? Number(meta.amount)
                   : undefined,
               loyaltyPointsFormatted: cleanMetaStr("pointsFormatted") || null,
-              loyaltyPointsBalance:
-                meta.updatedBalance !== undefined && Number.isFinite(Number(meta.updatedBalance))
-                  ? Number(meta.updatedBalance)
-                  : null,
+              loyaltyPointsBalance: (() => {
+                if (meta.updatedBalance !== undefined && Number.isFinite(Number(meta.updatedBalance))) {
+                  return Number(meta.updatedBalance);
+                }
+                const formattedBal = cleanMetaStr("updatedBalanceFormatted");
+                if (formattedBal) {
+                  const parsed = Number(formattedBal.replace(/[^0-9.-]/g, ""));
+                  if (Number.isFinite(parsed)) return parsed;
+                }
+                return null;
+              })(),
               loyaltyTier: cleanMetaStr("membershipLevel") || null,
               previousTier: cleanMetaStr("previousTier") || null,
+              ...(typedEvent.startsWith("loyalty.")
+                ? (() => {
+                    const tierSummary = resolveLoyaltyTierBenefitsForEmail(
+                      hotelDoc,
+                      cleanMetaStr("membershipLevel")
+                    );
+                    return {
+                      loyaltyTierBenefits: tierSummary.currentTierBenefits,
+                      loyaltyAllTiers: tierSummary.allTiers,
+                    };
+                  })()
+                : {}),
               redemptionValueFormatted: cleanMetaStr("monetaryValueFormatted") || null,
               expiryDate: cleanMetaStr("expiryDate") || null,
               corporateName: String(corporateDoc?.name || cleanMetaStr("corporateName") || "") || undefined,
@@ -5731,6 +5769,8 @@ async function startServer() {
           rendered = renderMultiTenantEmail(typedEvent, plan.brand, {
             recipientName: plan.recipientName,
             rows: plan.rows,
+            extraHtml: plan.extraHtml,
+            extraText: plan.extraText,
             note: plan.note,
             subjectOverride: plan.subjectOverride,
             // Only include PMS portal URL for internal staff/superadmin audiences — never guest/corporate
@@ -6074,6 +6114,11 @@ async function startServer() {
         }
       })();
 
+      const tierSummary = resolveLoyaltyTierBenefitsForEmail(
+        hotelDoc,
+        acc?.membershipLevelName || "Standard"
+      );
+
       const rows: EmailSummaryRow[] = [
         { label: "Hotel", value: brand.hotelName },
         { label: "Guest", value: params.guestName },
@@ -6089,6 +6134,9 @@ async function startServer() {
           ? [{ label: "Redemption Value", value: `${symbol}${Number(tx.monetaryValue).toLocaleString()}` }]
           : []),
         { label: "Membership Level", value: String(acc?.membershipLevelName || "Standard") },
+        ...(tierSummary.currentTierBenefitsText
+          ? [{ label: "Current Tier Benefits", value: tierSummary.currentTierBenefitsText }]
+          : []),
         {
           label: "Available Points Balance",
           value: `${Number(acc?.availablePoints || 0).toLocaleString()} pts`,
@@ -6100,6 +6148,8 @@ async function startServer() {
       const rendered = renderMultiTenantEmail(params.eventType, brand, {
         recipientName: params.guestName,
         rows,
+        extraHtml: renderLoyaltyTierBenefitsHtml(tierSummary.allTiers, brand.primaryColor),
+        extraText: renderLoyaltyTierBenefitsText(tierSummary.allTiers),
       });
 
       const sendRes = await sendEmail({

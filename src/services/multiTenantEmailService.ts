@@ -106,6 +106,8 @@ export interface MultiTenantEmailPayload {
   ctaLabel?: string;
   ctaUrl?: string;
   rows: EmailSummaryRow[];
+  extraHtml?: string;
+  extraText?: string;
   subjectOverride?: string;
 }
 
@@ -894,6 +896,7 @@ export function renderMultiTenantEmail(
       ${greetingHtml}
       <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.6; color: #27272a;">${escapeHtml(intro)}</p>
       ${rowsHtml}
+      ${payload.extraHtml || ""}
       ${noteHtml}
       ${ctaUrl ? `<p style="margin: 22px 0 0; font-size: 14px;">${escapeHtml(ctaLabel)}: <a href="${escapeHtml(ctaUrl)}" style="color: ${escapeHtml(brand.primaryColor)}; text-decoration: underline;">${escapeHtml(ctaUrl)}</a></p>` : ""}
       ${contactHtml}
@@ -910,6 +913,7 @@ export function renderMultiTenantEmail(
     intro,
     "",
     ...rows.map((r) => `${r.label}: ${r.value}`),
+    ...(payload.extraText ? ["", payload.extraText] : []),
     ...(payload.note ? ["", payload.note] : []),
     ...(ctaUrl ? ["", `${ctaLabel}: ${ctaUrl}`] : []),
     ...(contactTextParts.length > 0 ? ["", `${brand.hotelName} Contact:`, ...contactTextParts] : []),

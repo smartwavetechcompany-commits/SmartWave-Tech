@@ -64,6 +64,7 @@ import {
   getDailyOpsRun,
   listDailyOpsRuns,
   manualResendDailyOpsRun,
+  registerHotelDailyOpsSessionToken,
   retryFailedDailyOpsRun,
   runScheduledDailyOpsTick,
   saveDailyOpsConfig,
@@ -245,7 +246,7 @@ export function mountEmailCustomizationRoutes(
         ctx.hotelId,
         hotelDoc,
         resolveAppUrlSafe(),
-        { includeLoyaltySample: false }
+        { includeLoyaltySample: false, eventType }
       );
 
       return res.json({
@@ -457,7 +458,7 @@ export function mountEmailCustomizationRoutes(
         ctx.hotelId,
         hotelDoc,
         resolveAppUrlSafe(),
-        { includeLoyaltySample }
+        { includeLoyaltySample, eventType }
       );
 
       const rendered = renderHotelEmailServerSide({
@@ -528,7 +529,7 @@ export function mountEmailCustomizationRoutes(
         ctx.hotelId,
         hotelDoc,
         resolveAppUrlSafe(),
-        { includeLoyaltySample }
+        { includeLoyaltySample, eventType }
       );
 
       const rendered = renderHotelEmailServerSide({
@@ -857,6 +858,10 @@ export function mountEmailCustomizationRoutes(
       const ctx = await requireEmailModuleAccess(req, res, "view");
       if (!ctx) return;
 
+      if (ctx.canManage) {
+        registerHotelDailyOpsSessionToken(ctx.hotelId, ctx.bearerToken);
+      }
+
       const hotelDoc = await fsReadDoc(`hotels/${ctx.hotelId}`, ctx.bearerToken).catch(() => null);
       const data = await getDailyOpsConfig(ctx.hotelId, hotelDoc, ctx.bearerToken);
       return res.json({
@@ -881,6 +886,8 @@ export function mountEmailCustomizationRoutes(
       if (!rate.allowed) {
         return res.status(429).json({ error: "Too many save requests. Please wait a moment." });
       }
+
+      registerHotelDailyOpsSessionToken(ctx.hotelId, ctx.bearerToken);
 
       const hotelDoc = await fsReadDoc(`hotels/${ctx.hotelId}`, ctx.bearerToken).catch(() => null);
       const actor = ctx.caller.email || ctx.caller.uid;
@@ -917,6 +924,10 @@ export function mountEmailCustomizationRoutes(
       const ctx = await requireEmailModuleAccess(req, res, "view");
       if (!ctx) return;
 
+      if (ctx.canManage) {
+        registerHotelDailyOpsSessionToken(ctx.hotelId, ctx.bearerToken);
+      }
+
       const limitParam = Number(req.query?.limit);
       const limitCount = Number.isInteger(limitParam) && limitParam > 0 ? Math.min(60, limitParam) : 30;
       const runs = await listDailyOpsRuns(ctx.hotelId, ctx.bearerToken, limitCount);
@@ -931,6 +942,61 @@ export function mountEmailCustomizationRoutes(
       return res
         .status(500)
         .json({ error: sanitizeErrorForClient(err, "Failed to load report delivery history.") });
+    }
+  });
+
+  // Authenticated heartbeat endpoint: refreshes in-memory session token and triggers due report idempotently
+  app.post("/api/email-customization/daily-ops-report/check-due", async (req, res) => {
+    try {
+      const caller = await requireAuth(req, res);
+      if (!caller) return;
+
+      const requestedHotelId = getRequestedHotelId(req);
+      if (requestedHotelId === "__invalid__") {
+        return res.status(400).json({ error: "Invalid hotelId format." });
+      }
+
+      const bearerToken = extractBearerToken(req) || "";
+      let customRoleDoc: Record<string, any> | null = null;
+      const ownHotelId = String(caller.profile?.hotelId || caller.profile?.hotel_id || "").trim();
+      const customRoleId =
+        typeof caller.profile?.customRoleId === "string" ? caller.profile.customRoleId.trim() : "";
+      if (ownHotelId && customRoleId && isSafeIdentifier(ownHotelId) && isSafeIdentifier(customRoleId)) {
+        customRoleDoc = await fsReadDoc(
+          `hotels/${ownHotelId}/customRoles/${customRoleId}`,
+          bearerToken
+        ).catch(() => null);
+      }
+
+      const check = callerHasEmailModuleAccess(caller, requestedHotelId, "manage", customRoleDoc);
+      if (!check.allowed) {
+        return res.status(200).json({ ok: true, skipped: true, reason: "insufficient_permissions" });
+      }
+
+      const rate = previewLimiter.check(`daily-ops-check:${caller.uid}`, 6, 60_000);
+      if (!rate.allowed) {
+        return res.status(200).json({ ok: true, skipped: true, reason: "rate_limited" });
+      }
+
+      registerHotelDailyOpsSessionToken(check.resolvedHotelId, bearerToken);
+
+      const summary = await runScheduledDailyOpsTick({
+        hotelIds: [check.resolvedHotelId],
+        bearerToken,
+      });
+
+      return res.json({
+        ok: true,
+        triggered: summary.dueHotels > 0,
+        sent: summary.sent,
+        partial: summary.partial,
+        failed: summary.failed,
+        summary,
+      });
+    } catch (err) {
+      return res
+        .status(500)
+        .json({ error: sanitizeErrorForClient(err, "Failed to evaluate Daily Operations Report schedule.") });
     }
   });
 

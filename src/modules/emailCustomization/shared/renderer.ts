@@ -34,7 +34,31 @@ import {
   validateLinkLabelAgainstUrl,
 } from "./validation.ts";
 
+import {
+  renderLoyaltyTierBenefitsHtml,
+  renderLoyaltyTierBenefitsText,
+} from "../../loyalty/shared/loyaltyPolicyCore.ts";
+
 const MODERN_BLOCK_SET = new Set<string>(MODERN_EMAIL_BLOCK_TYPES);
+const FOOTER_SECTION_BLOCK_TYPES = new Set<string>([
+  "footer",
+  "footer_nav",
+  "legal_section",
+  "footer_contact",
+  "footer_authenticity",
+  "footer_copyright",
+  "footer_legal",
+  "footer_powered_by",
+  "social_links",
+]);
+
+function variantExplicitlyUsesAllTiersTag(variant: EmailTemplateVariant): boolean {
+  try {
+    return JSON.stringify(variant.blocks || []).includes("loyalty_all_tiers_benefits");
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Determines whether a variant uses the modern v2/v3/v4 responsive shell or must stay
@@ -398,9 +422,27 @@ export function renderEmailTemplate(options: {
       textParts.push(eyebrowText);
     }
 
+    const shouldAppendAllTiers =
+      Array.isArray(context.loyaltyAllTiers) &&
+      context.loyaltyAllTiers.length > 0 &&
+      !variantExplicitlyUsesAllTiersTag(variant);
+    const loyaltyTiersHtml = shouldAppendAllTiers
+      ? renderLoyaltyTierBenefitsHtml(context.loyaltyAllTiers!, primaryColor, fontCss)
+      : "";
+    const loyaltyTiersText = shouldAppendAllTiers
+      ? renderLoyaltyTierBenefitsText(context.loyaltyAllTiers!)
+      : "";
+    let loyaltyTiersInserted = false;
+
     for (const block of variant.blocks) {
       if (!block || block.hidden === true || !shouldRenderCondition(block.condition, conditions)) {
         continue;
+      }
+
+      if (shouldAppendAllTiers && !loyaltyTiersInserted && FOOTER_SECTION_BLOCK_TYPES.has(block.type)) {
+        if (loyaltyTiersHtml) htmlParts.push(loyaltyTiersHtml);
+        if (loyaltyTiersText) textParts.push(loyaltyTiersText);
+        loyaltyTiersInserted = true;
       }
 
       const rendered = renderSingleBlock(block, {
@@ -420,6 +462,11 @@ export function renderEmailTemplate(options: {
 
       if (rendered.html) htmlParts.push(rendered.html);
       if (rendered.text) textParts.push(rendered.text);
+    }
+
+    if (shouldAppendAllTiers && !loyaltyTiersInserted) {
+      if (loyaltyTiersHtml) htmlParts.push(loyaltyTiersHtml);
+      if (loyaltyTiersText) textParts.push(loyaltyTiersText);
     }
 
     const preheaderHtml = preheaderText
@@ -546,9 +593,35 @@ ${preheaderHtml}
     if (eyebrowText) textParts.push(eyebrowText);
   }
 
+  const shouldAppendAllTiersModern =
+    Array.isArray(context.loyaltyAllTiers) &&
+    context.loyaltyAllTiers.length > 0 &&
+    !variantExplicitlyUsesAllTiersTag(variant);
+  const loyaltyTiersModernHtml = shouldAppendAllTiersModern
+    ? renderLoyaltyTierBenefitsHtml(context.loyaltyAllTiers!, primaryColor, fontCss)
+    : "";
+  const loyaltyTiersModernText = shouldAppendAllTiersModern
+    ? renderLoyaltyTierBenefitsText(context.loyaltyAllTiers!)
+    : "";
+  let loyaltyTiersModernInserted = false;
+
   for (const block of variant.blocks) {
     if (!block || block.hidden === true || !shouldRenderCondition(block.condition, conditions)) {
       continue;
+    }
+
+    if (
+      shouldAppendAllTiersModern &&
+      !loyaltyTiersModernInserted &&
+      FOOTER_SECTION_BLOCK_TYPES.has(block.type)
+    ) {
+      if (loyaltyTiersModernHtml) {
+        rowParts.push(
+          `<tr><td class="ec-pad-sm" style="padding:8px 28px 18px 28px;background-color:#ffffff;font-family:${fontCss};color:#18181b;">${loyaltyTiersModernHtml}</td></tr>`
+        );
+      }
+      if (loyaltyTiersModernText) textParts.push(loyaltyTiersModernText);
+      loyaltyTiersModernInserted = true;
     }
 
     const rendered = renderSingleBlock(block, {
@@ -577,6 +650,15 @@ ${preheaderHtml}
       }
     }
     if (rendered.text) textParts.push(rendered.text);
+  }
+
+  if (shouldAppendAllTiersModern && !loyaltyTiersModernInserted) {
+    if (loyaltyTiersModernHtml) {
+      rowParts.push(
+        `<tr><td class="ec-pad-sm" style="padding:8px 28px 18px 28px;background-color:#ffffff;font-family:${fontCss};color:#18181b;">${loyaltyTiersModernHtml}</td></tr>`
+      );
+    }
+    if (loyaltyTiersModernText) textParts.push(loyaltyTiersModernText);
   }
 
   const preheaderHtml = preheaderText
