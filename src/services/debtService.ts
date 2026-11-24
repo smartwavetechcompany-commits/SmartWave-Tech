@@ -20,6 +20,11 @@ import { postToLedger } from './ledgerService';
 import { hasPermission } from '../utils/permissions';
 import { calculateGuestFinancialPosition, validateLedgerTransaction } from './financialService';
 import { getReservationLiveBalance } from '../utils/billingEngine';
+import {
+  enforceCityLedgerTenantIsolation,
+  isDuplicateCityLedgerTransfer,
+  validateAccountReceivableEligibility,
+} from './cityLedgerCore';
 
 /**
  * Single source of truth for Debt / Accounts Receivable management.
@@ -278,9 +283,32 @@ export const transferDebt = async (
     details: `Transferred ₦${amount.toLocaleString()} to ${targetName} (${targetType.replace('_', ' ').toUpperCase()}). Reason: ${notes}`
   };
 
-  // If transferring to corporate account
+  // If transferring to corporate account, verify account is approved/active and prevent duplicate transfer
   if (targetType === 'corporate' && targetId) {
+    enforceCityLedgerTenantIsolation(hotelId);
     const corpRef = doc(db, 'hotels', hotelId, 'corporate_accounts', targetId);
+    const corpSnap = await getDoc(corpRef);
+    if (!corpSnap.exists()) {
+      throw new Error('Target City Ledger corporate account does not exist.');
+    }
+    const corpAccount = { id: corpSnap.id, ...(corpSnap.data() as Omit<CorporateAccount, 'id'>) } as CorporateAccount;
+    enforceCityLedgerTenantIsolation(hotelId, corpAccount.hotelId);
+
+    const eligibility = validateAccountReceivableEligibility(corpAccount);
+    if (!eligibility.eligible) {
+      throw new Error(eligibility.reason || 'Target City Ledger account must be approved and active before receiving debt transfers.');
+    }
+
+    const existingLedgerSnap = await getDocs(
+      query(collection(db, 'hotels', hotelId, 'ledger'), where('reservationId', '==', debt.reservationId))
+    );
+    const existingEntries = existingLedgerSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+    const transferKey = `cl_debt_xfer_${hotelId}_${debt.reservationId}_${targetId}_${Math.round(amount * 100)}`;
+    const dupCheck = isDuplicateCityLedgerTransfer(existingEntries, debt.reservationId, targetId, amount, transferKey);
+    if (dupCheck.isDuplicate) {
+      throw new Error(dupCheck.reason || 'This guest debt has already been transferred to the selected City Ledger account.');
+    }
+
     await database.safeUpdate(corpRef, {
       currentBalance: increment(amount),
       totalDebits: increment(amount)
@@ -298,8 +326,34 @@ export const transferDebt = async (
       category: 'city_ledger',
       description: `Debt transfer from Guest Folio ${debt.folioNumber} (${debt.guestName})`,
       referenceId: debt.reservationId,
-      postedBy: profile?.uid || 'accounts'
-    }, profile?.uid || 'accounts', targetId);
+      postedBy: profile?.uid || 'accounts',
+      idempotencyKey: transferKey,
+      cityLedgerTransferId: transferKey
+    } as any, profile?.uid || 'accounts', targetId);
+
+    // Non-blocking: record linked City Ledger invoice (revenueAlreadyRecognized: true -> zero duplicate revenue)
+    import('./cityLedgerService')
+      .then(({ createCityLedgerInvoice }) =>
+        createCityLedgerInvoice(
+          hotelId,
+          {
+            corporateId: targetId,
+            sourceType: 'folio_transfer',
+            revenueAlreadyRecognized: true,
+            reservationId: debt.reservationId,
+            guestId: debt.guestId,
+            guestName: debt.guestName,
+            roomNumber: debt.roomNumber,
+            folioNumber: debt.folioNumber,
+            sourceTransferKey: transferKey,
+            description: `Transferred Guest Debt - ${debt.guestName} (${debt.folioNumber}, Room ${debt.roomNumber || 'N/A'})${notes ? ` - ${notes}` : ''}`,
+            originalAmount: amount,
+            initialStatus: 'issued',
+          },
+          profile
+        )
+      )
+      .catch(() => {});
   }
 
   // If transferring to a master group folio / another reservation

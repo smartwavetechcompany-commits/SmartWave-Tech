@@ -3,7 +3,7 @@ import { collection, getDocs, addDoc, query, orderBy, doc, updateDoc, deleteDoc,
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
-import { CorporateAccount, CorporateRate, Room, OperationType, RoomType, Reservation } from '../types';
+import { CorporateAccount, CorporateRate, Room, OperationType, RoomType, Reservation, CityLedgerAccountType, CityLedgerAccountStatus } from '../types';
 import { printDocument } from '../utils/printUtils';
 import { notifyPlatformEvent } from '../services/transactionalEmailClient';
 import { 
@@ -27,7 +27,11 @@ import {
   ArrowRight,
   RefreshCw,
   Printer,
-  XCircle
+  XCircle,
+  CheckCircle2,
+  PauseCircle,
+  ShieldCheck,
+  Ban
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, exportToCSV } from '../utils';
@@ -37,6 +41,21 @@ import { safeFormatDate } from '../utils/dateUtils';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { postToLedger, processAutomatedBillingForReservation, reconcileCorporateAccountBalance } from '../services/ledgerService';
+import {
+  approveCityLedgerAccount,
+  createCityLedgerAccount,
+  updateCityLedgerAccount,
+  updateCityLedgerAccountStatus,
+} from '../services/cityLedgerService';
+import {
+  CITY_LEDGER_ACCOUNT_STATUS_LABELS,
+  CITY_LEDGER_ACCOUNT_TYPE_LABELS,
+  CITY_LEDGER_PAYMENT_TERM_OPTIONS,
+  canPerformCityLedgerAction,
+  getEffectiveAccountStatus,
+  getEffectiveAccountType,
+  resolveAccountSettlementDays,
+} from '../services/cityLedgerCore';
 import { parseLocalDateTime } from '../utils/billingEngine';
 import { useSettings } from '../hooks/useSettings';
 
@@ -45,7 +64,7 @@ import { ConfirmModal } from './ConfirmModal';
 import { Pagination } from './Pagination';
 
 export function CorporateManagement() {
-  const { hotel, profile, currency, exchangeRate, hasPermission: authHasPermission } = useAuth();
+  const { hotel, profile, currency, exchangeRate, customRoles, hasPermission: authHasPermission } = useAuth();
   const { settings } = useSettings();
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<CorporateAccount[]>([]);
@@ -133,6 +152,14 @@ export function CorporateManagement() {
   const [rates, setRates] = useState<CorporateRate[]>([]);
   const [editingAccount, setEditingAccount] = useState<CorporateAccount | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [accountTypeFilter, setAccountTypeFilter] = useState<CityLedgerAccountType | 'all'>('all');
+  const [accountStatusFilter, setAccountStatusFilter] = useState<CityLedgerAccountStatus | 'all'>('all');
+  const [statusActionModal, setStatusActionModal] = useState<{
+    account: CorporateAccount;
+    targetStatus: 'active' | 'suspended' | 'closed' | 'rejected';
+  } | null>(null);
+  const [statusActionReason, setStatusActionReason] = useState('');
+  const [statusActionSaving, setStatusActionSaving] = useState(false);
   const [sortBy, setSortBy] = useState<'name' | 'contactPerson' | 'creditLimit' | 'currentBalance'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [accountsPage, setAccountsPage] = useState<number>(1);
@@ -142,7 +169,7 @@ export function CorporateManagement() {
 
   useEffect(() => {
     setAccountsPage(1);
-  }, [searchQuery, sortBy, sortOrder]);
+  }, [searchQuery, sortBy, sortOrder, accountTypeFilter, accountStatusFilter]);
 
   useEffect(() => {
     setRatesPage(1);
@@ -150,14 +177,20 @@ export function CorporateManagement() {
   const [editingRate, setEditingRate] = useState<CorporateRate | null>(null);
   const [newAccount, setNewAccount] = useState({
     name: '',
+    accountType: 'corporate' as CityLedgerAccountType,
+    accountReference: '',
     email: '',
     phone: '',
     address: '',
+    billingAddress: '',
     contactPerson: '',
     taxId: '',
     creditLimit: 0,
     currentBalance: 0,
-    billingCycle: 'monthly' as 'weekly' | 'monthly' | 'quarterly'
+    billingCycle: 'monthly' as CorporateAccount['billingCycle'],
+    paymentTerms: 'Net 30',
+    settlementDays: 30,
+    notes: '',
   });
 
   const [newRate, setNewRate] = useState({
@@ -573,42 +606,107 @@ export function CorporateManagement() {
     }
   };
 
+  const canApproveAccounts = canPerformCityLedgerAction(profile, 'approve_account', customRoles);
+  const canSuspendOrCloseAccounts = canPerformCityLedgerAction(profile, 'suspend_or_close_account', customRoles);
+
+  const handleConfirmStatusAction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hotel?.id || !profile || !statusActionModal) return;
+    try {
+      setStatusActionSaving(true);
+      if (
+        statusActionModal.targetStatus === 'active' &&
+        getEffectiveAccountStatus(statusActionModal.account) === 'pending'
+      ) {
+        await approveCityLedgerAccount(
+          hotel.id,
+          statusActionModal.account.id,
+          profile,
+          customRoles,
+          statusActionReason
+        );
+        toast.success(`Approved and activated "${statusActionModal.account.name}"`);
+      } else {
+        await updateCityLedgerAccountStatus(
+          hotel.id,
+          statusActionModal.account.id,
+          statusActionModal.targetStatus,
+          statusActionReason,
+          profile,
+          customRoles
+        );
+        toast.success(
+          `Updated "${statusActionModal.account.name}" status to ${statusActionModal.targetStatus.toUpperCase()}`
+        );
+      }
+      setStatusActionModal(null);
+      setStatusActionReason('');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update account status');
+    } finally {
+      setStatusActionSaving(false);
+    }
+  };
+
   const handleSaveAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotel?.id || !profile) return;
 
     try {
       if (editingAccount) {
-        // Exclude read-only financial fields from update to prevent clearing them
-        const { currentBalance, totalDebits, createdAt, ...updateData } = newAccount as any;
-        await database.safeUpdate(doc(db, 'hotels', hotel.id, 'corporate_accounts', editingAccount.id), updateData, {
-          hotelId: hotel.id,
-          module: 'Corporate',
-          action: 'CORPORATE_ACCOUNT_UPDATE',
-          details: `Updated corporate account ${newAccount.name}`
-        });
+        await updateCityLedgerAccount(
+          hotel.id,
+          editingAccount.id,
+          {
+            name: newAccount.name,
+            accountType: newAccount.accountType,
+            accountReference: newAccount.accountReference || undefined,
+            contactPerson: newAccount.contactPerson,
+            email: newAccount.email,
+            phone: newAccount.phone,
+            address: newAccount.address,
+            billingAddress: newAccount.billingAddress || newAccount.address,
+            taxId: newAccount.taxId,
+            creditLimit: Number(newAccount.creditLimit) || 0,
+            billingCycle: newAccount.billingCycle,
+            paymentTerms: newAccount.paymentTerms,
+            settlementDays: Number(newAccount.settlementDays) || 0,
+            notes: newAccount.notes,
+          },
+          profile,
+          customRoles
+        );
       } else {
-        const createdCorpRef = await database.safeAdd(collection(db, 'hotels', hotel.id, 'corporate_accounts'), {
-          ...newAccount,
-          currentBalance: 0,
-          totalDebits: 0,
-          createdAt: new Date().toISOString()
-        }, {
-          hotelId: hotel.id,
-          module: 'Corporate',
-          action: 'CORPORATE_ACCOUNT_CREATE',
-          details: `Created new corporate account ${newAccount.name}`
-        });
+        const createdAccount = await createCityLedgerAccount(
+          hotel.id,
+          {
+            name: newAccount.name,
+            accountType: newAccount.accountType,
+            accountReference: newAccount.accountReference || undefined,
+            contactPerson: newAccount.contactPerson,
+            email: newAccount.email,
+            phone: newAccount.phone,
+            address: newAccount.address,
+            billingAddress: newAccount.billingAddress || newAccount.address,
+            taxId: newAccount.taxId,
+            creditLimit: Number(newAccount.creditLimit) || 0,
+            billingCycle: newAccount.billingCycle,
+            paymentTerms: newAccount.paymentTerms,
+            settlementDays: Number(newAccount.settlementDays) || 0,
+            notes: newAccount.notes,
+          },
+          profile,
+          customRoles
+        );
 
-        const createdCorpId = (createdCorpRef as any)?.id;
-        if (createdCorpId) {
+        if (createdAccount?.id) {
           try {
             void notifyPlatformEvent({
               hotelId: hotel.id,
               eventType: 'corporate.account_created',
-              corporateId: createdCorpId,
-              entityId: createdCorpId,
-              idempotencyKey: `corp-created:${hotel.id}:${createdCorpId}`,
+              corporateId: createdAccount.id,
+              entityId: createdAccount.id,
+              idempotencyKey: `corp-created:${hotel.id}:${createdAccount.id}`,
               metadata: {
                 corporateName: newAccount.name,
               },
@@ -619,40 +717,33 @@ export function CorporateManagement() {
         }
       }
 
-      // Log the action for UI visibility
-      await database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
-        timestamp: new Date().toISOString(),
-        userId: profile.uid,
-        userEmail: profile.email,
-        userRole: profile.role,
-        action: editingAccount ? 'CORPORATE_ACCOUNT_UPDATED' : 'CORPORATE_ACCOUNT_CREATED',
-        resource: `${newAccount.name} (${newAccount.contactPerson})`,
-        hotelId: hotel.id,
-        module: 'Corporate'
-      }, {
-        hotelId: hotel.id,
-        module: 'Corporate',
-        action: 'ACTIVITY_LOG_CREATE',
-        details: 'Corporate account management activity'
-      });
-
       setShowAddModal(false);
       setEditingAccount(null);
       setNewAccount({
-        name: '', 
-        email: '', 
-        phone: '', 
-        address: '', 
-        contactPerson: '', 
+        name: '',
+        accountType: 'corporate',
+        accountReference: '',
+        email: '',
+        phone: '',
+        address: '',
+        billingAddress: '',
+        contactPerson: '',
         taxId: '',
-        creditLimit: 0, 
-        currentBalance: 0, 
-        billingCycle: 'monthly'
+        creditLimit: 0,
+        currentBalance: 0,
+        billingCycle: 'monthly',
+        paymentTerms: 'Net 30',
+        settlementDays: 30,
+        notes: '',
       });
-      toast.success(editingAccount ? 'Account updated successfully' : 'Account created successfully');
-    } catch (err) {
+      toast.success(
+        editingAccount
+          ? 'City Ledger account updated successfully'
+          : 'City Ledger account created in Pending Approval status. Approve & activate to allow credit transfers.'
+      );
+    } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/corporate_accounts`);
-      toast.error('Failed to save account');
+      toast.error(err?.message || 'Failed to save account');
     }
   };
 
@@ -778,10 +869,16 @@ export function CorporateManagement() {
   };
 
   const filteredAccounts = accounts
-    .filter(a => 
-      fuzzySearch(a.name || '', searchQuery) || 
-      fuzzySearch(a.contactPerson || '', searchQuery)
-    )
+    .filter(a => {
+      const matchesSearch =
+        fuzzySearch(a.name || '', searchQuery) ||
+        fuzzySearch(a.contactPerson || '', searchQuery) ||
+        fuzzySearch(a.accountReference || '', searchQuery);
+      if (!matchesSearch) return false;
+      if (accountTypeFilter !== 'all' && getEffectiveAccountType(a) !== accountTypeFilter) return false;
+      if (accountStatusFilter !== 'all' && getEffectiveAccountStatus(a) !== accountStatusFilter) return false;
+      return true;
+    })
     .sort((a, b) => {
       const factor = sortOrder === 'asc' ? 1 : -1;
       if (sortBy === 'name') return factor * (a.name || '').localeCompare(b.name || '');
@@ -798,17 +895,21 @@ export function CorporateManagement() {
 
   const handleExport = () => {
     const dataToExport = filteredAccounts.map(acc => ({
+      Reference: acc.accountReference || acc.id.slice(-8).toUpperCase(),
       Name: acc.name,
+      Category: CITY_LEDGER_ACCOUNT_TYPE_LABELS[getEffectiveAccountType(acc)],
+      Status: CITY_LEDGER_ACCOUNT_STATUS_LABELS[getEffectiveAccountStatus(acc)],
       Email: acc.email,
       Phone: acc.phone,
       Contact: acc.contactPerson,
       TaxID: acc.taxId,
       CreditLimit: acc.creditLimit,
       Balance: acc.currentBalance,
-      BillingCycle: acc.billingCycle
+      PaymentTerms: acc.paymentTerms || `Net ${resolveAccountSettlementDays(acc)}`,
+      BillingCycle: acc.billingCycle,
     }));
-    exportToCSV(dataToExport, `corporate_accounts_${format(new Date(), 'yyyy-MM-dd')}.csv`);
-    toast.success('Corporate accounts exported successfully');
+    exportToCSV(dataToExport, `city_ledger_accounts_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+    toast.success('City Ledger accounts exported successfully');
   };
 
   if (!hotel?.id) {
@@ -888,8 +989,21 @@ export function CorporateManagement() {
                 onClick={() => {
                   setEditingAccount(null);
                   setNewAccount({
-                    name: '', email: '', phone: '', address: '', contactPerson: '', taxId: '',
-                    creditLimit: 0, currentBalance: 0, billingCycle: 'monthly'
+                    name: '',
+                    accountType: 'corporate',
+                    accountReference: '',
+                    email: '',
+                    phone: '',
+                    address: '',
+                    billingAddress: '',
+                    contactPerson: '',
+                    taxId: '',
+                    creditLimit: 0,
+                    currentBalance: 0,
+                    billingCycle: 'monthly',
+                    paymentTerms: 'Net 30',
+                    settlementDays: 30,
+                    notes: '',
                   });
                   setShowAddModal(true);
                 }}
@@ -982,7 +1096,27 @@ export function CorporateManagement() {
               className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-4 py-1.5 text-xs text-zinc-50 focus:outline-none focus:border-emerald-500 transition-all"
             />
           </div>
-          <div className="flex items-center gap-2 flex-wrap md:flex-nowrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={accountTypeFilter}
+              onChange={(e) => setAccountTypeFilter(e.target.value as any)}
+              className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-zinc-300 focus:outline-none focus:border-emerald-500 cursor-pointer"
+            >
+              <option value="all">All Categories</option>
+              {(Object.keys(CITY_LEDGER_ACCOUNT_TYPE_LABELS) as CityLedgerAccountType[]).map(t => (
+                <option key={t} value={t}>{CITY_LEDGER_ACCOUNT_TYPE_LABELS[t]}</option>
+              ))}
+            </select>
+            <select
+              value={accountStatusFilter}
+              onChange={(e) => setAccountStatusFilter(e.target.value as any)}
+              className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-zinc-300 focus:outline-none focus:border-emerald-500 cursor-pointer"
+            >
+              <option value="all">All Statuses</option>
+              {(Object.keys(CITY_LEDGER_ACCOUNT_STATUS_LABELS) as CityLedgerAccountStatus[]).map(st => (
+                <option key={st} value={st}>{CITY_LEDGER_ACCOUNT_STATUS_LABELS[st]}</option>
+              ))}
+            </select>
             <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1">
               <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest leading-none">Min Credit Limit Alert ({currency})</span>
               <input
@@ -1064,15 +1198,42 @@ export function CorporateManagement() {
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-500">
-                        <Building2 size={20} />
-                      </div>
-                      <div>
-                        <div className="text-sm font-bold text-zinc-50">{account.name}</div>
-                        <div className="text-xs text-zinc-500">{account.taxId}</div>
-                      </div>
-                    </div>
+                    {(() => {
+                      const effType = getEffectiveAccountType(account);
+                      const effStatus = getEffectiveAccountStatus(account);
+                      const statusStyle =
+                        effStatus === 'active'
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                          : effStatus === 'pending'
+                          ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                          : effStatus === 'suspended'
+                          ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                          : 'bg-zinc-800 text-zinc-400 border-zinc-700';
+                      return (
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-400 shrink-0">
+                            <Building2 size={20} />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-bold text-zinc-50">{account.name}</span>
+                              <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border', statusStyle)}>
+                                {CITY_LEDGER_ACCOUNT_STATUS_LABELS[effStatus]}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                              <span className="text-[10px] font-semibold text-blue-400">
+                                {CITY_LEDGER_ACCOUNT_TYPE_LABELS[effType]}
+                              </span>
+                              {account.accountReference && (
+                                <span className="text-[10px] font-mono text-zinc-500">{account.accountReference}</span>
+                              )}
+                              {account.taxId && <span className="text-[10px] text-zinc-500">Tax: {account.taxId}</span>}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-sm text-zinc-50">{account.contactPerson}</div>
@@ -1112,12 +1273,72 @@ export function CorporateManagement() {
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className="px-2 py-1 bg-zinc-800 text-zinc-400 rounded text-[10px] font-bold uppercase tracking-wider">
-                      {account.billingCycle}
-                    </span>
+                    <div className="space-y-1">
+                      <span className="px-2 py-0.5 bg-zinc-800 text-zinc-300 rounded text-[10px] font-bold uppercase tracking-wider inline-block">
+                        {account.paymentTerms || `Net ${resolveAccountSettlementDays(account)}`}
+                      </span>
+                      <div className="text-[10px] text-zinc-500 capitalize">
+                        Cycle: {account.billingCycle}
+                      </div>
+                    </div>
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <div className="flex justify-end gap-2">
+                    <div className="flex justify-end gap-1.5 flex-wrap">
+                      {(() => {
+                        const effStatus = getEffectiveAccountStatus(account);
+                        return (
+                          <>
+                            {effStatus === 'pending' && canApproveAccounts && (
+                              <button
+                                onClick={() => {
+                                  setStatusActionReason('Verified credit documentation and approved for City Ledger');
+                                  setStatusActionModal({ account, targetStatus: 'active' });
+                                }}
+                                className="px-2.5 py-1.5 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500 hover:text-black rounded-lg text-[10px] font-bold transition-all flex items-center gap-1"
+                                title="Approve & Activate Account"
+                              >
+                                <ShieldCheck size={13} /> Approve
+                              </button>
+                            )}
+                            {effStatus === 'active' && canSuspendOrCloseAccounts && (
+                              <button
+                                onClick={() => {
+                                  setStatusActionReason('');
+                                  setStatusActionModal({ account, targetStatus: 'suspended' });
+                                }}
+                                className="p-2 text-amber-400 hover:bg-amber-500/10 rounded-lg transition-all"
+                                title="Suspend Credit Account"
+                              >
+                                <PauseCircle size={17} />
+                              </button>
+                            )}
+                            {effStatus === 'suspended' && canApproveAccounts && (
+                              <button
+                                onClick={() => {
+                                  setStatusActionReason('Account reviewed and reactivated');
+                                  setStatusActionModal({ account, targetStatus: 'active' });
+                                }}
+                                className="p-2 text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-all"
+                                title="Reactivate Credit Account"
+                              >
+                                <CheckCircle2 size={17} />
+                              </button>
+                            )}
+                            {effStatus !== 'closed' && canSuspendOrCloseAccounts && (
+                              <button
+                                onClick={() => {
+                                  setStatusActionReason('');
+                                  setStatusActionModal({ account, targetStatus: 'closed' });
+                                }}
+                                className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
+                                title="Close Account (Requires Zero Balance)"
+                              >
+                                <Ban size={16} />
+                              </button>
+                            )}
+                          </>
+                        );
+                      })()}
                       <button 
                         onClick={() => {
                           setAdjustmentData({ amount: 0, type: 'credit', description: '', paymentMethod: 'cash' });
@@ -1138,7 +1359,7 @@ export function CorporateManagement() {
                       <button 
                         onClick={() => setShowFolioModal(account)}
                         className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all"
-                        title="View Folio"
+                        title="Open City Ledger Folio, Invoices & Statement"
                       >
                         <FileText size={18} />
                       </button>
@@ -1156,14 +1377,20 @@ export function CorporateManagement() {
                               setEditingAccount(account);
                               setNewAccount({
                                 name: account.name,
+                                accountType: getEffectiveAccountType(account),
+                                accountReference: account.accountReference || '',
                                 email: account.email,
                                 phone: account.phone,
                                 address: account.address,
+                                billingAddress: account.billingAddress || account.address || '',
                                 contactPerson: account.contactPerson,
                                 taxId: account.taxId,
                                 creditLimit: account.creditLimit,
                                 currentBalance: account.currentBalance,
-                                billingCycle: account.billingCycle
+                                billingCycle: account.billingCycle,
+                                paymentTerms: account.paymentTerms || `Net ${resolveAccountSettlementDays(account)}`,
+                                settlementDays: resolveAccountSettlementDays(account),
+                                notes: account.notes || '',
                               });
                               setShowAddModal(true);
                             }}
@@ -1603,15 +1830,42 @@ export function CorporateManagement() {
               className="bg-zinc-900 border border-zinc-800 rounded-2xl sm:rounded-3xl w-full max-w-2xl max-h-[85vh] sm:max-h-[90vh] overflow-hidden flex flex-col shadow-2xl min-h-0 relative my-auto"
             >
               <div className="p-6 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900 sticky top-0 z-10">
-                <h2 className="text-xl font-bold text-zinc-50">{editingAccount ? 'Edit Account' : 'Add Corporate Account'}</h2>
+                <div>
+                  <h2 className="text-xl font-bold text-zinc-50">{editingAccount ? 'Edit City Ledger Account' : 'Add City Ledger Account'}</h2>
+                  {!editingAccount && (
+                    <p className="text-xs text-amber-400 mt-0.5">New accounts start in Pending Approval status until explicitly approved by authorized management.</p>
+                  )}
+                </div>
                 <button onClick={() => setShowAddModal(false)} className="text-zinc-500 hover:text-zinc-50">
                   <X size={20} />
                 </button>
               </div>
               <form onSubmit={handleSaveAccount} className="flex flex-col flex-1 min-h-0 overflow-hidden">
-                <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 flex-1 overflow-y-auto min-h-0 overscroll-contain">
+                <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-5 flex-1 overflow-y-auto min-h-0 overscroll-contain">
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Company Name</label>
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Account Category</label>
+                  <select
+                    value={newAccount.accountType}
+                    onChange={(e) => setNewAccount({ ...newAccount, accountType: e.target.value as CityLedgerAccountType })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                  >
+                    {(Object.keys(CITY_LEDGER_ACCOUNT_TYPE_LABELS) as CityLedgerAccountType[]).map(t => (
+                      <option key={t} value={t}>{CITY_LEDGER_ACCOUNT_TYPE_LABELS[t]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Account Reference Code (Optional)</label>
+                  <input
+                    type="text"
+                    value={newAccount.accountReference}
+                    onChange={(e) => setNewAccount({ ...newAccount, accountReference: e.target.value })}
+                    placeholder="Auto-generated if left blank"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 font-mono text-sm"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Account / Organisation Name</label>
                   <input
                     required
                     type="text"
@@ -1663,31 +1917,61 @@ export function CorporateManagement() {
                   <label className="text-xs font-bold text-zinc-500 uppercase">Credit Limit ({currency})</label>
                   <input
                     type="number"
+                    min="0"
                     value={newAccount.creditLimit}
                     onChange={(e) => setNewAccount({ ...newAccount, creditLimit: Number(e.target.value) })}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   />
                 </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase">Billing Cycle</label>
-                    <select
-                      value={newAccount.billingCycle}
-                      onChange={(e) => setNewAccount({ ...newAccount, billingCycle: e.target.value as any })}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
-                    >
-                      <option value="daily">Daily</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="monthly">Monthly</option>
-                      <option value="quarterly">Quarterly</option>
-                      <option value="yearly">Yearly</option>
-                    </select>
-                  </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Payment Terms / Settlement Window</label>
+                  <select
+                    value={newAccount.paymentTerms}
+                    onChange={(e) => {
+                      const opt = CITY_LEDGER_PAYMENT_TERM_OPTIONS.find(o => o.terms === e.target.value);
+                      setNewAccount({
+                        ...newAccount,
+                        paymentTerms: e.target.value,
+                        settlementDays: opt ? opt.days : newAccount.settlementDays,
+                      });
+                    }}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                  >
+                    {CITY_LEDGER_PAYMENT_TERM_OPTIONS.map(opt => (
+                      <option key={opt.terms} value={opt.terms}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Billing Cycle</label>
+                  <select
+                    value={newAccount.billingCycle}
+                    onChange={(e) => setNewAccount({ ...newAccount, billingCycle: e.target.value as any })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
+                  >
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="quarterly">Quarterly</option>
+                    <option value="yearly">Yearly</option>
+                  </select>
+                </div>
                 <div className="space-y-2 md:col-span-2">
-                  <label className="text-xs font-bold text-zinc-500 uppercase">Address</label>
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Billing / Office Address</label>
                   <textarea
                     value={newAccount.address}
-                    onChange={(e) => setNewAccount({ ...newAccount, address: e.target.value })}
+                    onChange={(e) => setNewAccount({ ...newAccount, address: e.target.value, billingAddress: e.target.value })}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50 h-20 resize-none"
+                  />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <label className="text-xs font-bold text-zinc-500 uppercase">Credit Notes / Billing Instructions</label>
+                  <input
+                    type="text"
+                    value={newAccount.notes}
+                    onChange={(e) => setNewAccount({ ...newAccount, notes: e.target.value })}
+                    placeholder="e.g. Requires LPO reference on invoices, monthly consolidated billing"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 text-zinc-50 focus:outline-none focus:border-emerald-500/50"
                   />
                 </div>
               </div>
@@ -1709,6 +1993,79 @@ export function CorporateManagement() {
             </form>
           </motion.div>
           </div>
+        </div>
+      )}
+
+      {/* Account Lifecycle Status Modal (Approve / Suspend / Reactivate / Close) */}
+      {statusActionModal && (
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setStatusActionModal(null);
+          }}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl"
+          >
+            <div className="p-6 border-b border-zinc-800">
+              <h3 className="text-lg font-bold text-zinc-50">
+                {statusActionModal.targetStatus === 'active'
+                  ? getEffectiveAccountStatus(statusActionModal.account) === 'pending'
+                    ? 'Approve & Activate City Ledger Account'
+                    : 'Reactivate City Ledger Account'
+                  : statusActionModal.targetStatus === 'suspended'
+                  ? 'Suspend City Ledger Account'
+                  : 'Close City Ledger Account'}
+              </h3>
+              <p className="text-xs text-zinc-400 mt-1">
+                {statusActionModal.account.name} ({statusActionModal.account.accountReference || statusActionModal.account.id.slice(-6).toUpperCase()})
+              </p>
+            </div>
+            <form onSubmit={handleConfirmStatusAction} className="p-6 space-y-4">
+              {statusActionModal.targetStatus === 'closed' && (statusActionModal.account.currentBalance || 0) > 0.01 && (
+                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-400">
+                  This account still has an outstanding balance of{' '}
+                  <strong>{formatCurrency(statusActionModal.account.currentBalance, currency, exchangeRate)}</strong>. Settle or suspend it before closing.
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-zinc-400 uppercase">Audit Reason / Justification</label>
+                <textarea
+                  required={statusActionModal.targetStatus !== 'active'}
+                  value={statusActionReason}
+                  onChange={(e) => setStatusActionReason(e.target.value)}
+                  rows={3}
+                  placeholder="Enter reason recorded in immutable City Ledger audit trail..."
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm text-zinc-50 focus:outline-none focus:border-emerald-500 resize-none"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setStatusActionModal(null)}
+                  className="flex-1 py-2.5 bg-zinc-800 text-zinc-300 rounded-xl font-bold text-sm hover:bg-zinc-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={statusActionSaving}
+                  className={cn(
+                    'flex-1 py-2.5 rounded-xl font-bold text-sm transition-all disabled:opacity-50',
+                    statusActionModal.targetStatus === 'active'
+                      ? 'bg-emerald-500 text-black hover:bg-emerald-400'
+                      : statusActionModal.targetStatus === 'suspended'
+                      ? 'bg-amber-500 text-black hover:bg-amber-400'
+                      : 'bg-red-500 text-white hover:bg-red-400'
+                  )}
+                >
+                  {statusActionSaving ? 'Processing...' : 'Confirm Action'}
+                </button>
+              </div>
+            </form>
+          </motion.div>
         </div>
       )}
 

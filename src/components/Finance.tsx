@@ -3,14 +3,17 @@ import { collection, query, orderBy, addDoc, where, onSnapshot, doc, updateDoc, 
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
-import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Account, PurchaseOrder, Commission, InventoryItem, CorporateAccount, LedgerEntry } from '../types';
+import { FinanceRecord, OperationType, Guest, Reservation, Room, Supplier, Account, PurchaseOrder, Commission, InventoryItem, CorporateAccount, LedgerEntry, CityLedgerInvoice } from '../types';
 import { settleLedger, refundGuest, validateRefundRequest } from '../services/ledgerService';
 import { reconcileFinanceRecords, reconcileLedgerEntries, isActualPaymentLedgerEntry, calculateGuestFinancialPosition } from '../services/financialService';
 import { canProcessRefund } from '../utils/policyUtils';
 import { showPolicyBlockedToast } from '../utils/policyToast';
 import { syncDailyCharges } from '../services/financeService';
+import { subscribeCityLedgerInvoices } from '../services/cityLedgerService';
 import { useRequestManager } from '../contexts/RequestManagerContext';
 import { GuestFolio } from './GuestFolio';
+import { CorporateFolio } from './CorporateFolio';
+import { CityLedgerAgeingAndReconciliationPanel } from './CityLedgerPanels';
 import { SafeModalBoundary } from './SafeModalBoundary';
 import { OutstandingGuestLedger } from './OutstandingGuestLedger';
 import { RevenueHeatmap } from './RevenueHeatmap';
@@ -156,6 +159,8 @@ export function Finance() {
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
   const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
+  const [cityLedgerInvoices, setCityLedgerInvoices] = useState<CityLedgerInvoice[]>([]);
+  const [selectedCityLedgerFolioAccount, setSelectedCityLedgerFolioAccount] = useState<CorporateAccount | null>(null);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
@@ -539,11 +544,14 @@ export function Finance() {
       handleFirestoreError(err, OperationType.LIST, `hotels/${hotel.id}/corporate_accounts`);
     });
 
+    const unsubCityLedgerInvoices = subscribeCityLedgerInvoices(hotel.id, setCityLedgerInvoices);
+
     return () => {
       unsub();
       unsubRes();
       unsubRooms();
       unsubCorp();
+      unsubCityLedgerInvoices();
     };
   }, [hotel?.id, profile?.uid, hasPermissionError]);
 
@@ -2188,6 +2196,23 @@ export function Finance() {
                 </div>
               </div>
 
+              {/* Consolidated City Ledger Reconciliation & 0-30 / 31-60 / 61-90 / >90 Debt Ageing Report */}
+              <CityLedgerAgeingAndReconciliationPanel
+                hotel={hotel}
+                profile={profile}
+                corporateAccounts={corporateAccounts}
+                invoices={cityLedgerInvoices}
+                ledgerEntries={validLedgerEntries}
+                reservations={reservations}
+                outstandingGuestBalancesTotal={guests.reduce(
+                  (acc, g) => acc + (getGuestNonCorporateLiveBalance(g) > 0 ? getGuestNonCorporateLiveBalance(g) : 0),
+                  0
+                )}
+                currency={currency}
+                exchangeRate={exchangeRate}
+                onOpenAccountFolio={(acc) => setSelectedCityLedgerFolioAccount(acc)}
+              />
+
               <div className="bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden">
                 <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
                   <h3 className="font-bold text-zinc-50">Aging Report (Accounts Receivable)</h3>
@@ -2339,6 +2364,16 @@ export function Finance() {
                   itemLabel="accounts"
                 />
               </div>
+
+              {selectedCityLedgerFolioAccount && (
+                <SafeModalBoundary onClose={() => setSelectedCityLedgerFolioAccount(null)}>
+                  <CorporateFolio
+                    account={selectedCityLedgerFolioAccount}
+                    onClose={() => setSelectedCityLedgerFolioAccount(null)}
+                    initialTab="invoices"
+                  />
+                </SafeModalBoundary>
+              )}
             </div>
           )}
 

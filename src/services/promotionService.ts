@@ -110,7 +110,7 @@ export interface PromotionValidationContext {
   guestType?: 'individual' | 'corporate';
   corporateId?: string;
   corporateName?: string;
-  corporateStatus?: 'active' | 'suspended';
+  corporateStatus?: 'active' | 'suspended' | 'pending' | 'closed';
   isNegotiatedRate?: boolean;
 }
 

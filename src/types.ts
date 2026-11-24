@@ -1244,23 +1244,233 @@ export interface LedgerEntry {
     name: string;
     role: string;
   };
+  // City Ledger invoice traceability metadata (optional, backward-compatible)
+  invoiceId?: string;
+  invoiceNumber?: string;
+  cityLedgerTransferId?: string;
 }
+
+export type CityLedgerAccountType =
+  | 'corporate'
+  | 'travel_agency'
+  | 'event_client'
+  | 'government'
+  | 'group_booking'
+  | 'approved_guest';
+
+export type CityLedgerAccountStatus = 'pending' | 'active' | 'suspended' | 'closed';
+
+export type CityLedgerApprovalStatus = 'pending' | 'approved' | 'rejected';
 
 export interface CorporateAccount {
   id: string;
+  hotelId?: string;
   name: string;
+  accountType?: CityLedgerAccountType;
+  accountReference?: string;
   email: string;
   phone: string;
   address: string;
+  billingAddress?: string;
   contactPerson: string;
   taxId: string;
   creditLimit: number;
   currentBalance: number;
   totalDebits?: number;
   totalCredits?: number;
-  billingCycle: 'weekly' | 'monthly' | 'quarterly';
-  status: 'active' | 'suspended';
+  billingCycle: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
+  paymentTerms?: string;
+  settlementDays?: number;
+  status: CityLedgerAccountStatus;
+  approvalStatus?: CityLedgerApprovalStatus;
   createdAt: string;
+  createdBy?: string;
+  createdByName?: string;
+  approvedBy?: string;
+  approvedByName?: string;
+  approvedAt?: string;
+  statusUpdatedAt?: string;
+  statusUpdatedBy?: string;
+  statusUpdatedByName?: string;
+  statusReason?: string;
+  lastReconciledAt?: string;
+  notes?: string;
+}
+
+export type CityLedgerInvoiceStatus =
+  | 'draft'
+  | 'issued'
+  | 'partially_paid'
+  | 'paid'
+  | 'overdue'
+  | 'cancelled';
+
+export interface CityLedgerInvoicePayment {
+  id: string;
+  amount: number;
+  paymentDate: string;
+  paymentMethod: 'cash' | 'card' | 'transfer' | 'cheque' | 'other';
+  reference?: string;
+  notes?: string;
+  recordedBy: string;
+  recordedByName: string;
+  recordedAt: string;
+  ledgerEntryId?: string;
+  idempotencyKey: string;
+}
+
+export interface CityLedgerInvoiceAdjustment {
+  id: string;
+  type: 'credit_note' | 'debit_adjustment' | 'reversal';
+  amount: number;
+  reason: string;
+  approvedBy: string;
+  recordedBy: string;
+  recordedByName: string;
+  recordedAt: string;
+  ledgerEntryId?: string;
+  previousOutstanding: number;
+  newOutstanding: number;
+  idempotencyKey: string;
+}
+
+export interface CityLedgerInvoice {
+  id: string;
+  hotelId: string;
+  invoiceNumber: string;
+  corporateId: string;
+  accountName: string;
+  accountType?: CityLedgerAccountType;
+  accountReference?: string;
+  sourceType: 'folio_transfer' | 'corporate_stay' | 'event_billing' | 'group_booking' | 'direct_invoice';
+  /**
+   * When true, underlying revenue was already recognized on the original guest folio / stay ledger.
+   * Issuing this invoice or collecting payments against it MUST NOT create duplicate revenue.
+   */
+  revenueAlreadyRecognized: boolean;
+  reservationId?: string;
+  guestId?: string;
+  guestName?: string;
+  roomNumber?: string;
+  folioNumber?: string;
+  eventReference?: string;
+  sourceTransferLedgerId?: string;
+  sourceTransferKey?: string;
+  issueDate: string; // YYYY-MM-DD or ISO
+  dueDate: string; // YYYY-MM-DD
+  description: string;
+  lineItems?: Array<{
+    description: string;
+    category?: string;
+    date?: string;
+    amount: number;
+  }>;
+  originalAmount: number;
+  amountPaid: number;
+  adjustmentsNet?: number; // positive increases owed, negative reduces owed (e.g. credit note)
+  outstandingAmount: number;
+  status: CityLedgerInvoiceStatus;
+  payments: CityLedgerInvoicePayment[];
+  adjustments?: CityLedgerInvoiceAdjustment[];
+  createdAt: string;
+  createdBy: string;
+  createdByName: string;
+  issuedAt?: string;
+  issuedBy?: string;
+  issuedByName?: string;
+  lastPaymentAt?: string;
+  cancelledAt?: string;
+  cancelledBy?: string;
+  cancelledByName?: string;
+  cancellationReason?: string;
+  notes?: string;
+  updatedAt?: string;
+}
+
+export interface CityLedgerStatementLine {
+  id: string;
+  date: string;
+  dueDate?: string;
+  reference: string;
+  type: 'invoice' | 'transfer' | 'payment' | 'adjustment' | 'charge';
+  description: string;
+  debit: number;
+  credit: number;
+  runningBalance: number;
+  recordedBy?: string;
+}
+
+export interface CityLedgerStatement {
+  accountId: string;
+  accountName: string;
+  accountType: CityLedgerAccountType;
+  accountReference?: string;
+  periodStart: string;
+  periodEnd: string;
+  generatedAt: string;
+  openingBalance: number;
+  invoicesRaised: number;
+  paymentsReceived: number;
+  adjustmentsNet: number;
+  closingBalance: number;
+  lines: CityLedgerStatementLine[];
+}
+
+export interface CityLedgerAgeingBucketTotals {
+  bucket0To30: number;
+  bucket31To60: number;
+  bucket61To90: number;
+  bucketOver90: number;
+  totalOutstanding: number;
+  overdueTotal: number;
+  overdueInvoiceCount: number;
+  openInvoiceCount: number;
+}
+
+export interface CityLedgerAgeingInvoiceItem {
+  invoiceId: string;
+  invoiceNumber: string;
+  corporateId: string;
+  accountName: string;
+  accountType: CityLedgerAccountType;
+  accountStatus: CityLedgerAccountStatus;
+  issueDate: string;
+  dueDate: string;
+  daysPastDue: number;
+  bucket: '0-30' | '31-60' | '61-90' | '90+';
+  originalAmount: number;
+  amountPaid: number;
+  outstandingAmount: number;
+  status: CityLedgerInvoiceStatus;
+  reservationId?: string;
+  folioNumber?: string;
+  guestName?: string;
+  isUninvoicedLedgerFallback?: boolean;
+}
+
+export interface CityLedgerAccountAgeingRow extends CityLedgerAgeingBucketTotals {
+  accountId: string;
+  accountName: string;
+  accountType: CityLedgerAccountType;
+  accountStatus: CityLedgerAccountStatus;
+  accountReference?: string;
+  creditLimit: number;
+  paymentTerms?: string;
+  invoices: CityLedgerAgeingInvoiceItem[];
+}
+
+export interface CityLedgerReconciliationSummary {
+  revenueEarned: number;
+  directGuestCashBankCollected: number;
+  outstandingGuestBalances: number;
+  transferredToCityLedger: number;
+  corporateReceivablesGross: number;
+  cityLedgerCollections: number;
+  remainingCityLedgerReceivables: number;
+  openInvoicesOutstandingTotal: number;
+  accountBalancesTotal: number;
+  isRevenueFreeOfTransferDuplication: boolean;
+  reconciliationVariance: number;
 }
 
 export interface CorporateRate {

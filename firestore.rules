@@ -243,6 +243,76 @@ service cloud.firestore {
       );
     }
 
+    function canViewCityLedger(hotelId) {
+      let data = getUserData();
+      let roleId = data != null ? data.get('customRoleId', '') : '';
+      let hasCustomRoleDoc = roleId is string && roleId != '' && exists(/databases/$(database)/documents/hotels/$(hotelId)/customRoles/$(roleId));
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        isStrictHotelAdminOf(hotelId) ||
+        (sameHotel(hotelId) && data != null &&
+         data.role != "guest" &&
+         data.get('status', 'active') != "suspended" &&
+         data.get('status', 'active') != "inactive" && (
+          data.role == "manager" ||
+          data.role == "accountant" ||
+          data.get('staffRole', '') == "accountant" ||
+          (hasCustomRoleDoc
+            ? (customRoleHasPermission(hotelId, roleId, 'view_city_ledger') || customRoleHasPermission(hotelId, roleId, 'manage_corporate') || customRoleHasPermission(hotelId, roleId, 'view_ledger'))
+            : (data.get('permissions', []) is list && data.get('permissions', []).hasAny(['view_city_ledger', 'manage_corporate', 'view_ledger', 'all'])))
+        ))
+      );
+    }
+
+    function canManageCityLedger(hotelId) {
+      let data = getUserData();
+      let roleId = data != null ? data.get('customRoleId', '') : '';
+      let hasCustomRoleDoc = roleId is string && roleId != '' && exists(/databases/$(database)/documents/hotels/$(hotelId)/customRoles/$(roleId));
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        isStrictHotelAdminOf(hotelId) ||
+        (sameHotel(hotelId) && data != null &&
+         data.role != "guest" && data.role != "corporate" &&
+         data.get('status', 'active') != "suspended" &&
+         data.get('status', 'active') != "inactive" && (
+          data.role == "manager" ||
+          data.role == "accountant" ||
+          data.get('staffRole', '') == "accountant" ||
+          (hasCustomRoleDoc
+            ? (customRoleHasPermission(hotelId, roleId, 'manage_corporate') || customRoleHasPermission(hotelId, roleId, 'approve_ledger_transactions') || customRoleHasPermission(hotelId, roleId, 'create_ledger_entries') || customRoleHasPermission(hotelId, roleId, 'transfer_debt'))
+            : (data.get('permissions', []) is list && data.get('permissions', []).hasAny(['manage_corporate', 'approve_ledger_transactions', 'create_ledger_entries', 'transfer_debt', 'all'])))
+        ))
+      );
+    }
+
+    function canRecordCityLedgerPayment(hotelId) {
+      let data = getUserData();
+      let roleId = data != null ? data.get('customRoleId', '') : '';
+      let hasCustomRoleDoc = roleId is string && roleId != '' && exists(/databases/$(database)/documents/hotels/$(hotelId)/customRoles/$(roleId));
+      return canManageCityLedger(hotelId) || (
+        isAuthenticated() &&
+        sameHotel(hotelId) &&
+        data != null &&
+        data.role != "guest" &&
+        data.role != "corporate" &&
+        data.get('status', 'active') != "suspended" &&
+        data.get('status', 'active') != "inactive" &&
+        (hasCustomRoleDoc
+          ? (customRoleHasPermission(hotelId, roleId, 'receive_payments') || customRoleHasPermission(hotelId, roleId, 'receive_payment') || customRoleHasPermission(hotelId, roleId, 'process_payments'))
+          : (data.get('permissions', []) is list && data.get('permissions', []).hasAny(['receive_payments', 'receive_payment', 'process_payments', 'all'])))
+      );
+    }
+
+    function isValidCityLedgerInvoice(data, hotelId) {
+      return data.hotelId == hotelId &&
+        data.corporateId is string && data.corporateId.size() >= 1 &&
+        data.invoiceNumber is string && data.invoiceNumber.size() >= 1 && data.invoiceNumber.size() <= 100 &&
+        data.originalAmount is number && data.originalAmount >= 0 &&
+        data.amountPaid is number && data.amountPaid >= 0 &&
+        data.outstandingAmount is number && data.outstandingAmount >= 0 &&
+        data.status in ['draft', 'issued', 'partially_paid', 'paid', 'overdue', 'cancelled'];
+    }
+
     function isValidLoyaltyId(idVal) {
       return idVal is string && idVal.size() >= 1 && idVal.size() <= 160 && idVal.matches('^[a-zA-Z0-9_\\-:.]+$');
     }
@@ -400,17 +470,28 @@ service cloud.firestore {
         allow update, delete: if isSuperAdmin();
       }
 
-      // Corporate Accounts
+      // Corporate Accounts (City Ledger Debtor Accounts)
       match /corporate_accounts/{accountId} {
         allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
-        allow create, update: if isSuperAdmin() || (isAdmin() && sameHotel(hotelId));
+        allow create, update: if isSuperAdmin() || (isAdmin() && sameHotel(hotelId)) || canManageCityLedger(hotelId) || canRecordCityLedgerPayment(hotelId);
         allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
 
         match /rates/{rateId} {
           allow read: if isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId);
-          allow create, update: if isSuperAdmin() || (isAdmin() && sameHotel(hotelId));
+          allow create, update: if isSuperAdmin() || (isAdmin() && sameHotel(hotelId)) || canManageCityLedger(hotelId);
           allow delete: if isSuperAdmin() || (sameHotel(hotelId) && isHotelAdmin());
         }
+      }
+
+      // City Ledger Invoices (Strict tenant isolation & RBAC; deletion restricted to Hotel Admin / SuperAdmin)
+      match /city_ledger_invoices/{invoiceId} {
+        allow read: if canViewCityLedger(hotelId);
+        allow create: if canManageCityLedger(hotelId) && isValidCityLedgerInvoice(request.resource.data, hotelId);
+        allow update: if (canManageCityLedger(hotelId) || canRecordCityLedgerPayment(hotelId)) &&
+                         isValidCityLedgerInvoice(request.resource.data, hotelId) &&
+                         request.resource.data.hotelId == resource.data.hotelId &&
+                         request.resource.data.invoiceNumber == resource.data.invoiceNumber;
+        allow delete: if isStrictHotelAdminOf(hotelId);
       }
 
       // Custom Roles & Permissions (RBAC)
@@ -652,14 +733,14 @@ service cloud.firestore {
         allow delete: if isStrictHotelAdminOf(hotelId);
       }
 
-      // Recursive subcollections (Reservations, Housekeeping, Staff, etc. — excludes hardened loyalty & daily ops collections)
+      // Recursive subcollections (Reservations, Housekeeping, Staff, etc. — excludes hardened loyalty, city ledger invoices & daily ops collections)
       match /{subcol}/{docPath=**} {
-        allow read: if !(subcol in ['loyaltyAccounts', 'loyaltyTransactions', 'dailyOpsReportConfig', 'dailyOpsReportRuns']) && (
+        allow read: if !(subcol in ['loyaltyAccounts', 'loyaltyTransactions', 'dailyOpsReportConfig', 'dailyOpsReportRuns', 'city_ledger_invoices']) && (
                        isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
                        isAuthenticated() ||
                        (resource != null && resource.data.hotelId == hotelId)
                      );
-        allow create, update: if !(subcol in ['loyaltyAccounts', 'loyaltyTransactions', 'dailyOpsReportConfig', 'dailyOpsReportRuns']) && (
+        allow create, update: if !(subcol in ['loyaltyAccounts', 'loyaltyTransactions', 'dailyOpsReportConfig', 'dailyOpsReportRuns', 'city_ledger_invoices']) && (
                                  isSuperAdmin() || isStaffOf(hotelId) || sameHotel(hotelId) ||
                                  isAuthenticated() ||
                                  (exists(/databases/$(database)/documents/hotels/$(hotelId)) &&
@@ -667,7 +748,7 @@ service cloud.firestore {
                                   get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs is list &&
                                   get(/databases/$(database)/documents/hotels/$(hotelId)).data.adminUIDs.hasAny([request.auth.uid]))
                                );
-        allow delete: if !(subcol in ['loyaltyAccounts', 'loyaltyTransactions', 'dailyOpsReportConfig', 'dailyOpsReportRuns']) && (
+        allow delete: if !(subcol in ['loyaltyAccounts', 'loyaltyTransactions', 'dailyOpsReportConfig', 'dailyOpsReportRuns', 'city_ledger_invoices']) && (
                          isSuperAdmin() || (sameHotel(hotelId) && (isHotelAdmin() || isAdmin() || isStaffOf(hotelId))) || isAuthenticated()
                        );
       }

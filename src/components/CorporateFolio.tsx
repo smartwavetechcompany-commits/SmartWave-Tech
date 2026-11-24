@@ -3,9 +3,23 @@ import { collection, query, where, onSnapshot, orderBy, doc, getDocs } from 'fir
 import { db, handleFirestoreError } from '../firebase';
 import { database } from '../utils/database';
 import { useAuth } from '../contexts/AuthContext';
-import { CorporateAccount, LedgerEntry, OperationType, Reservation } from '../types';
+import { CorporateAccount, LedgerEntry, OperationType, Reservation, CityLedgerInvoice } from '../types';
 import { ReceiptGenerator } from './ReceiptGenerator';
 import { printDocument } from '../utils/printUtils';
+import {
+  CorporateFolioInvoicesPanel,
+  CorporateFolioStatementPanel,
+  CorporateFolioAuditTrailPanel,
+  CityLedgerAgeingAndReconciliationPanel,
+} from './CityLedgerPanels';
+import { subscribeCityLedgerInvoices } from '../services/cityLedgerService';
+import {
+  CITY_LEDGER_ACCOUNT_STATUS_LABELS,
+  CITY_LEDGER_ACCOUNT_TYPE_LABELS,
+  getEffectiveAccountStatus,
+  getEffectiveAccountType,
+  resolveAccountSettlementDays,
+} from '../services/cityLedgerCore';
 import { 
   Receipt, 
   Building2, 
@@ -37,11 +51,14 @@ import { Pagination } from './Pagination';
 interface CorporateFolioProps {
   account: CorporateAccount;
   onClose: () => void;
+  initialTab?: 'overview' | 'invoices' | 'statement' | 'ageing' | 'audit';
 }
 
-export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
-  const { hotel, currency, exchangeRate, profile } = useAuth();
+export function CorporateFolio({ account, onClose, initialTab = 'overview' }: CorporateFolioProps) {
+  const { hotel, currency, exchangeRate, profile, customRoles } = useAuth();
   const [currentAccount, setCurrentAccount] = useState<CorporateAccount>(account);
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'overview' | 'invoices' | 'statement' | 'ageing' | 'audit'>(initialTab);
+  const [cityLedgerInvoices, setCityLedgerInvoices] = useState<CityLedgerInvoice[]>([]);
 
   useEffect(() => {
     setCurrentAccount(account);
@@ -122,10 +139,15 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
       console.warn("Corporate reservations snapshot error:", err);
     });
 
+    const unsubInvoices = subscribeCityLedgerInvoices(hotel.id, allInvoices => {
+      setCityLedgerInvoices(allInvoices.filter(inv => inv.corporateId === account.id));
+    });
+
     return () => {
       try { unsubAccount(); } catch (_) {}
       try { unsubLedger(); } catch (_) {}
       try { unsubRes(); } catch (_) {}
+      try { unsubInvoices(); } catch (_) {}
     };
   }, [hotel?.id, account.id]);
 
@@ -384,8 +406,24 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
               <Building2 size={24} />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-zinc-50">Corporate Folio</h2>
-              <p className="text-sm text-zinc-500">{currentAccount.name}</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-xl font-bold text-zinc-50">City Ledger Folio</h2>
+                <span className={cn(
+                  'px-2 py-0.5 rounded text-[10px] font-bold uppercase border',
+                  getEffectiveAccountStatus(currentAccount) === 'active'
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                    : getEffectiveAccountStatus(currentAccount) === 'pending'
+                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                    : 'bg-red-500/10 text-red-400 border-red-500/20'
+                )}>
+                  {CITY_LEDGER_ACCOUNT_STATUS_LABELS[getEffectiveAccountStatus(currentAccount)]}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                {currentAccount.name} • {CITY_LEDGER_ACCOUNT_TYPE_LABELS[getEffectiveAccountType(currentAccount)]}
+                {currentAccount.accountReference ? ` • ${currentAccount.accountReference}` : ''}
+                {` • ${currentAccount.paymentTerms || `Net ${resolveAccountSettlementDays(currentAccount)}`}`}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -410,6 +448,31 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
               <XCircle size={24} />
             </button>
           </div>
+        </div>
+
+        {/* City Ledger Workspace Tabs */}
+        <div className="px-6 pt-3 pb-0 border-b border-zinc-800 bg-zinc-950/60 flex items-center gap-1 overflow-x-auto shrink-0">
+          {([
+            { id: 'overview', label: 'Overview & Ledger' },
+            { id: 'invoices', label: `Invoices & Payments (${cityLedgerInvoices.length})` },
+            { id: 'statement', label: 'Account Statement' },
+            { id: 'ageing', label: 'Debt Ageing' },
+            { id: 'audit', label: 'Audit Trail' },
+          ] as const).map(tab => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveWorkspaceTab(tab.id)}
+              className={cn(
+                'px-4 py-2.5 text-xs font-bold border-b-2 whitespace-nowrap transition-all',
+                activeWorkspaceTab === tab.id
+                  ? 'border-emerald-500 text-emerald-400'
+                  : 'border-transparent text-zinc-400 hover:text-zinc-200'
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         {showReceipt && hotel && (
@@ -449,6 +512,54 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
         )}
 
         <div className="flex-1 overflow-y-auto p-6 space-y-8">
+          {activeWorkspaceTab === 'invoices' && hotel && (
+            <CorporateFolioInvoicesPanel
+              hotel={hotel}
+              account={currentAccount}
+              invoices={cityLedgerInvoices}
+              profile={profile}
+              customRoles={customRoles || []}
+              currency={currency}
+              exchangeRate={exchangeRate}
+            />
+          )}
+
+          {activeWorkspaceTab === 'statement' && hotel && (
+            <CorporateFolioStatementPanel
+              hotel={hotel}
+              account={currentAccount}
+              ledgerEntries={ledgerEntries}
+              invoices={cityLedgerInvoices}
+              profile={profile}
+              currency={currency}
+              exchangeRate={exchangeRate}
+            />
+          )}
+
+          {activeWorkspaceTab === 'ageing' && (
+            <CityLedgerAgeingAndReconciliationPanel
+              hotel={hotel}
+              profile={profile}
+              corporateAccounts={[currentAccount]}
+              invoices={cityLedgerInvoices}
+              ledgerEntries={ledgerEntries}
+              reservations={individualReservations}
+              outstandingGuestBalancesTotal={0}
+              currency={currency}
+              exchangeRate={exchangeRate}
+              lockedAccountId={currentAccount.id}
+            />
+          )}
+
+          {activeWorkspaceTab === 'audit' && hotel?.id && (
+            <CorporateFolioAuditTrailPanel
+              hotelId={hotel.id}
+              accountId={currentAccount.id}
+            />
+          )}
+
+          {activeWorkspaceTab === 'overview' && (
+          <>
           {/* Quick Actions Bar */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <button
@@ -740,6 +851,8 @@ export function CorporateFolio({ account, onClose }: CorporateFolioProps) {
               />
             </div>
           </div>
+          </>
+          )}
         </div>
 
         {/* Footer Actions */}

@@ -16,6 +16,11 @@ import {
 } from '../utils/restaurantPostingGuard';
 import { notifyPlatformEvent, notifyReservationEmailEvent } from './transactionalEmailClient';
 import { buildPolicyPenaltyLedgerEntry, hasExistingPostedPenalty } from '../utils/policyUtils';
+import {
+  enforceCityLedgerTenantIsolation,
+  isDuplicateCityLedgerTransfer,
+  validateAccountReceivableEligibility,
+} from './cityLedgerCore';
 
 /**
  * Distinguishes corporate account credits (corporate payments, bulk settlements, deposits, or adjustments)
@@ -170,6 +175,18 @@ export const postToLedger = async (
     if (hasExistingPostedPenalty(existingEntries, reservationId, penaltyType)) {
       console.warn(`Duplicate ${penaltyType} skipped for reservation ${reservationId}`);
       return;
+    }
+  }
+
+  // 0e. Prevent duplicate payments or City Ledger transfers when an idempotencyKey is provided
+  if (entry.idempotencyKey && (entry.category === 'payment' || entry.category === 'city_ledger' || entry.category === 'corporate')) {
+    const matchingExisting = querySnap.docs.find((d: any) => {
+      const e = d.data() as LedgerEntry;
+      return e.idempotencyKey === entry.idempotencyKey && e.type === entry.type && (e.corporateId || '') === (corporateId || '');
+    });
+    if (matchingExisting) {
+      console.warn(`Duplicate ${entry.category} entry skipped for idempotencyKey ${entry.idempotencyKey}`);
+      return { id: matchingExisting.id, ...(matchingExisting.data() as LedgerEntry) };
     }
   }
 
@@ -1002,6 +1019,9 @@ export const settleLedger = async (
     masterReservationId?: string;
     sourceRoomNumber?: string;
     sourceReservationId?: string;
+    invoiceId?: string;
+    invoiceNumber?: string;
+    idempotencyKey?: string;
   }
 ) => {
   const result = await postToLedger(hotelId, guestId, reservationId, {
@@ -1016,7 +1036,10 @@ export const settleLedger = async (
     settlementSource: settlementSource || 'Front Desk',
     ...(extraFields?.masterReservationId ? { masterReservationId: extraFields.masterReservationId } : {}),
     ...(extraFields?.sourceRoomNumber ? { sourceRoomNumber: extraFields.sourceRoomNumber } : {}),
-    ...(extraFields?.sourceReservationId ? { sourceReservationId: extraFields.sourceReservationId } : {})
+    ...(extraFields?.sourceReservationId ? { sourceReservationId: extraFields.sourceReservationId } : {}),
+    ...(extraFields?.invoiceId ? { invoiceId: extraFields.invoiceId } : {}),
+    ...(extraFields?.invoiceNumber ? { invoiceNumber: extraFields.invoiceNumber } : {}),
+    ...(extraFields?.idempotencyKey ? { idempotencyKey: extraFields.idempotencyKey } : {})
   } as any, postedBy, corporateId, paymentMethod, userContext);
 
   // Synchronize any F&B kitchen orders charged to this room that are settled via Front Desk or Corporate Folio
@@ -1224,16 +1247,55 @@ export const transferToCityLedger = async (
   amount: number,
   postedBy: string,
   corporateId?: string,
-  userContext?: { uid?: string; email?: string; role?: string; displayName?: string }
+  userContext?: { uid?: string; email?: string; role?: string; displayName?: string },
+  options?: { idempotencyKey?: string; notes?: string; skipDuplicateCheck?: boolean }
 ) => {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Transfer amount must be greater than zero.');
+  }
+
+  const transferKey =
+    options?.idempotencyKey ||
+    (corporateId ? `cl_xfer_${hotelId}_${reservationId}_${corporateId}_${Math.round(amount * 100)}` : undefined);
+
+  // Enforce approved & active City Ledger account eligibility, tenant isolation, and duplicate-transfer guard
+  if (corporateId) {
+    enforceCityLedgerTenantIsolation(hotelId);
+    const corpSnap = await getDoc(doc(db, 'hotels', hotelId, 'corporate_accounts', corporateId));
+    if (!corpSnap.exists()) {
+      throw new Error('Target City Ledger account does not exist.');
+    }
+    const corpData = { id: corpSnap.id, ...(corpSnap.data() as Omit<CorporateAccount, 'id'>) } as CorporateAccount;
+    enforceCityLedgerTenantIsolation(hotelId, corpData.hotelId);
+
+    const eligibility = validateAccountReceivableEligibility(corpData);
+    if (!eligibility.eligible) {
+      throw new Error(eligibility.reason || 'Target City Ledger account is not approved and active.');
+    }
+
+    if (!options?.skipDuplicateCheck && reservationId) {
+      const existingSnap = await getDocs(
+        query(collection(db, 'hotels', hotelId, 'ledger'), where('reservationId', '==', reservationId))
+      );
+      const existingEntries = existingSnap.docs.map(d => ({ id: d.id, ...d.data() } as LedgerEntry));
+      const dup = isDuplicateCityLedgerTransfer(existingEntries, reservationId, corporateId, amount, transferKey);
+      if (dup.isDuplicate) {
+        throw new Error(dup.reason || 'Duplicate City Ledger transfer blocked.');
+      }
+    }
+  }
+
+  const noteSuffix = options?.notes?.trim() ? ` - ${options.notes.trim()}` : '';
+
   // 1. Credit the reservation (Guest/Folio side) - removes debt from reservation's guest folio
   await postToLedger(hotelId, guestId, reservationId, {
     amount,
     type: 'credit',
     category: 'city_ledger',
-    description: 'Transfer to City Ledger (Folio Credit)',
+    description: `Transfer to City Ledger (Folio Credit)${noteSuffix}`,
     referenceId: reservationId,
-    postedBy
+    postedBy,
+    ...(transferKey ? { idempotencyKey: `${transferKey}_credit`, cityLedgerTransferId: transferKey } : {})
   }, postedBy, undefined, 'cash', userContext); // NO corporateId here for the guest credit
 
   // 2. Debit the corporate (Company side) - adds debt to corporate account
@@ -1242,9 +1304,10 @@ export const transferToCityLedger = async (
       amount,
       type: 'debit',
       category: 'city_ledger',
-      description: 'Transfer from Guest Folio (Folio Debit)',
+      description: `Transfer from Guest Folio (Folio Debit)${noteSuffix}`,
       referenceId: reservationId,
-      postedBy
+      postedBy,
+      ...(transferKey ? { idempotencyKey: transferKey, cityLedgerTransferId: transferKey } : {})
     }, postedBy, corporateId, 'cash', userContext);
 
     // Link the reservation to the corporate account as well

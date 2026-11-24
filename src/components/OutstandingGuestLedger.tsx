@@ -38,6 +38,13 @@ import {
   syncOutstandingDebtWithReservation
 } from '../services/debtService';
 import { reconcileLedgerEntries } from '../services/financialService';
+import {
+  CITY_LEDGER_ACCOUNT_STATUS_LABELS,
+  CITY_LEDGER_ACCOUNT_TYPE_LABELS,
+  getEffectiveAccountStatus,
+  getEffectiveAccountType,
+  isCityLedgerAccountActive,
+} from '../services/cityLedgerCore';
 import { getReservationLiveBalance } from '../utils/billingEngine';
 import { hasPermission } from '../utils/permissions';
 import { toast } from 'sonner';
@@ -515,8 +522,9 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
     setActiveTransferDebt(debt);
     setTransferAmount(debt.outstandingAmount);
     setTransferType('corporate');
-    setTransferTargetId(corporateAccounts[0]?.id || '');
-    setTransferTargetName(corporateAccounts[0]?.name || 'City Ledger Corporate');
+    const firstActive = corporateAccounts.find(isCityLedgerAccountActive);
+    setTransferTargetId(firstActive?.id || '');
+    setTransferTargetName(firstActive?.name || '');
     setTransferNotes('');
   };
 
@@ -1206,8 +1214,9 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
                     const val = e.target.value as any;
                     setTransferType(val);
                     if (val === 'corporate' && corporateAccounts.length > 0) {
-                      setTransferTargetId(corporateAccounts[0].id);
-                      setTransferTargetName(corporateAccounts[0].name);
+                      const firstActive = corporateAccounts.find(isCityLedgerAccountActive);
+                      setTransferTargetId(firstActive?.id || '');
+                      setTransferTargetName(firstActive?.name || '');
                     } else if (val === 'city_ledger') {
                       setTransferTargetId('city_ledger_general');
                       setTransferTargetName('City Ledger (Accounts Receivable)');
@@ -1244,11 +1253,17 @@ export const OutstandingGuestLedger: React.FC<OutstandingGuestLedgerProps> = ({
                     }}
                     className="w-full px-3 py-2 text-xs bg-zinc-950 border border-zinc-800 text-zinc-100 rounded-xl focus:outline-none focus:border-emerald-500/50"
                   >
-                    {corporateAccounts.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({formatCurrency(c.currentBalance || 0, currency, exchangeRate)} balance)
-                      </option>
-                    ))}
+                    <option value="">Select Approved Active City Ledger Account</option>
+                    {corporateAccounts.map(c => {
+                      const active = isCityLedgerAccountActive(c);
+                      const status = getEffectiveAccountStatus(c);
+                      const typeLabel = CITY_LEDGER_ACCOUNT_TYPE_LABELS[getEffectiveAccountType(c)];
+                      return (
+                        <option key={c.id} value={c.id} disabled={!active}>
+                          {c.name} [{typeLabel}] {!active ? `— ${CITY_LEDGER_ACCOUNT_STATUS_LABELS[status]} (Blocked)` : `(${formatCurrency(c.currentBalance || 0, currency, exchangeRate)} balance)`}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               ) : (

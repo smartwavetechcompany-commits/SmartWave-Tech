@@ -21,8 +21,8 @@ export function shouldLogActivity(moduleName: string, actionName: string): boole
   const act = (actionName || '').toUpperCase();
   const mod = (moduleName || '').toLowerCase();
 
-  // Always preserve Admin Controls audit trail
-  if (act.includes('ADMIN_SETTINGS') || mod === 'admin settings' || mod === 'configuration engine') {
+  // Always preserve Admin Controls & City Ledger financial audit trail
+  if (act.includes('ADMIN_SETTINGS') || mod === 'admin settings' || mod === 'configuration engine' || mod === 'city ledger') {
     return true;
   }
 

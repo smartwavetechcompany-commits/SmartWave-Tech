@@ -7,6 +7,15 @@ import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { Reservation, LedgerEntry, OperationType, Guest, Room, CorporateAccount, Promotion } from '../types';
 import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, refundGuest, validateRefundRequest, transferToCityLedger, purgeCorruptedLedgerEntries, detectAndPurgeDuplicateOverstayCharges, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials, applyPolicyPenaltyForReservation } from '../services/ledgerService';
+import { transferUnpaidBalanceToCityLedger } from '../services/cityLedgerService';
+import {
+  CITY_LEDGER_ACCOUNT_STATUS_LABELS,
+  CITY_LEDGER_ACCOUNT_TYPE_LABELS,
+  getEffectiveAccountStatus,
+  getEffectiveAccountType,
+  isCityLedgerAccountActive,
+  validateCreditLimitHeadroom,
+} from '../services/cityLedgerCore';
 import { principalRoomService, GroupFinancialSummary } from '../services/principalRoomService';
 import { validatePromotion, recordPromotionRedemption, subscribePromotions } from '../services/promotionService';
 import { logActivity } from '../utils/activityLogger';
@@ -1007,21 +1016,26 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
             }
           );
         } else {
-          // Corporate transfer (City Ledger)
-          await transferToCityLedger(
+          // Approved City Ledger transfer (validates account status, prevents duplicates, creates linked invoice, zero duplicate revenue)
+          const res = await transferUnpaidBalanceToCityLedger(
             hotel.id,
-            currentReservation.guestId!,
-            currentReservation.id,
-            balance,
-            profile.uid,
-            transferTargetId, // This is the corporateId in this case
             {
-              uid: profile?.uid,
-              email: profile?.email,
-              role: profile?.role || 'staff',
-              displayName: profile?.displayName || (profile as any)?.name || 'Staff'
-            }
+              reservation: currentReservation,
+              corporateId: transferTargetId,
+              amount: balance,
+              createInvoice: true,
+            },
+            profile,
+            customRoles
           );
+          toast.success(
+            res.invoice
+              ? `Balance transferred to City Ledger (Invoice ${res.invoice.invoiceNumber} issued)`
+              : 'Balance transferred to City Ledger successfully'
+          );
+          setShowTransferBalanceModal(false);
+          setTransferTargetId('');
+          return;
         }
         toast.success('Balance transferred successfully');
         setShowTransferBalanceModal(false);
@@ -2624,13 +2638,43 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
                           </option>
                         ))
                       ) : (
-                        corporateAccountsList.map(c => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} (Ref: {c.taxId || c.id.slice(-4)})
-                          </option>
-                        ))
+                        corporateAccountsList.map(c => {
+                          const active = isCityLedgerAccountActive(c);
+                          const status = getEffectiveAccountStatus(c);
+                          const typeLabel = CITY_LEDGER_ACCOUNT_TYPE_LABELS[getEffectiveAccountType(c)];
+                          return (
+                            <option key={c.id} value={c.id} disabled={!active}>
+                              {c.name} [{typeLabel}]{!active ? ` — ${CITY_LEDGER_ACCOUNT_STATUS_LABELS[status]} (Blocked)` : ` (Ref: ${c.accountReference || c.taxId || c.id.slice(-4)})`}
+                            </option>
+                          );
+                        })
                       )}
                     </select>
+                    {transferType === 'corporate' && transferTargetId && (() => {
+                      const targetAcc = corporateAccountsList.find(c => c.id === transferTargetId);
+                      if (!targetAcc) return null;
+                      const headroom = validateCreditLimitHeadroom(targetAcc, balance);
+                      return (
+                        <div className={cn(
+                          'mt-2 p-2.5 rounded-lg text-[11px] border',
+                          headroom.exceedsLimit
+                            ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                            : 'bg-zinc-950 border-zinc-800 text-zinc-400'
+                        )}>
+                          <div>
+                            Credit Limit: <strong className="text-zinc-200">{formatCurrency(headroom.creditLimit, currency, exchangeRate)}</strong> | Available:{' '}
+                            <strong className={headroom.exceedsLimit ? 'text-red-400' : 'text-emerald-400'}>
+                              {formatCurrency(headroom.availableCredit, currency, exchangeRate)}
+                            </strong>
+                          </div>
+                          {headroom.exceedsLimit && (
+                            <div className="mt-1 font-semibold">
+                              Transfer exceeds available credit limit by {formatCurrency(headroom.excessAmount, currency, exchangeRate)}.
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="flex gap-3 pt-4">
                     <button 
