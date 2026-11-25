@@ -1,6 +1,6 @@
-import * as originalDateFns from '../../node_modules/date-fns/index.js';
+import * as originalDateFns from 'date-fns-raw';
 
-export * from '../../node_modules/date-fns/index.js';
+export * from 'date-fns-raw';
 
 /**
  * Universal safe parser for any date input, Firestore Timestamp, ISO string, etc.

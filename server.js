@@ -9,6 +9,12 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, ".env") });
 dotenv.config();
 
+// Production hosting entry point: default NODE_ENV to production unless explicitly set
+// so managed Node.js hosts (e.g., Hostinger) serve the compiled dist/ bundle instead of Vite dev middleware.
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = "production";
+}
+
 // Root deployment entry point for Node.js 22 Express hosting.
 // Reuses the existing Express + Vite application in ./server.ts without duplicating server logic.
 async function start() {

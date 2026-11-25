@@ -6589,11 +6589,17 @@ async function startServer() {
   const distIndexPath = path.join(distPath, "index.html");
   const hasDistBuild = fs.existsSync(distIndexPath);
 
-  // Vite middleware for development (and safe fallback if production build was skipped by host)
-  if (process.env.NODE_ENV !== "production" || !hasDistBuild) {
+  const isExplicitDevMode =
+    process.env.NODE_ENV === "development" ||
+    process.env.npm_lifecycle_event === "dev";
+
+  // Use Vite middleware strictly in explicit development mode (or as a fallback only if dist/index.html is missing).
+  // In hosted production environments (even if NODE_ENV is unset), always prefer the pre-built static dist/ bundle
+  // so the server never attempts heavy on-the-fly Vite compilation under production traffic.
+  if (isExplicitDevMode || !hasDistBuild) {
     const isHmrDisabled =
-      process.env.DISABLE_HMR === "true" || process.env.NODE_ENV === "production";
-    if (process.env.NODE_ENV === "production" && !hasDistBuild) {
+      process.env.DISABLE_HMR === "true" || !isExplicitDevMode;
+    if (!isExplicitDevMode && !hasDistBuild) {
       console.warn(
         `[FRONTEND] Production build not found at ${distIndexPath}. Serving via Vite SPA middleware fallback.`
       );
@@ -6634,14 +6640,46 @@ async function startServer() {
 
     app.use(vite.middlewares);
   } else {
-    // Serve static files from dist in production
-    app.use(express.static(distPath));
+    console.log(`[FRONTEND] Serving production static build from ${distPath}`);
 
-    // Root route & SPA fallback: serve index.html for all non-API frontend routes
+    // Serve content-hashed assets with long immutable caching
+    const distAssetsPath = path.join(distPath, "assets");
+    if (fs.existsSync(distAssetsPath)) {
+      app.use(
+        "/assets",
+        express.static(distAssetsPath, {
+          maxAge: "1y",
+          immutable: true,
+          fallthrough: false,
+        })
+      );
+      app.use("/assets", (_err: any, _req: any, res: any, _next: any) => {
+        res.status(404).type("text/plain").send("Asset not found");
+      });
+    }
+
+    // Serve remaining static files from dist without caching index.html
+    app.use(
+      express.static(distPath, {
+        index: false,
+        maxAge: "1h",
+      })
+    );
+
+    const STATIC_ASSET_EXT_RE =
+      /\.(?:js|mjs|cjs|css|map|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|eot|otf|json|webmanifest|txt|xml)$/i;
+
+    // Root route & SPA fallback: serve index.html with no-store so CDNs/browsers never reference stale bundle hashes
     app.get(["/", "*"], (req, res, next) => {
       if (req.path.startsWith("/api/")) {
         return next();
       }
+      if (req.path.startsWith("/assets/") || STATIC_ASSET_EXT_RE.test(req.path)) {
+        return res.status(404).type("text/plain").send("Not found");
+      }
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
       res.sendFile(distIndexPath);
     });
   }

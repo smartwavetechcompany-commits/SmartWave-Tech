@@ -46,9 +46,28 @@ export default defineConfig(({mode}) => {
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
-      alias: {
-        '@': path.resolve(__dirname, '.'),
-        'date-fns': path.resolve(__dirname, 'src/utils/safeDateFns.ts'),
+      alias: [
+        { find: '@', replacement: path.resolve(__dirname, '.') },
+        { find: /^date-fns$/, replacement: path.resolve(__dirname, 'src/utils/safeDateFns.ts') },
+        { find: 'date-fns-raw', replacement: path.resolve(__dirname, 'node_modules/date-fns/index.js') },
+      ],
+    },
+    optimizeDeps: {
+      include: ['date-fns-raw'],
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined;
+            if (id.includes('/firebase/') || id.includes('/@firebase/')) return 'vendor-firebase';
+            if (id.includes('/xlsx/')) return 'vendor-xlsx';
+            if (id.includes('/jspdf') || id.includes('/html2canvas/')) return 'vendor-pdf';
+            if (id.includes('/recharts/') || id.includes('/d3-')) return 'vendor-charts';
+            if (id.includes('/lucide-react/')) return 'vendor-icons';
+            return undefined;
+          },
+        },
       },
     },
     server: {

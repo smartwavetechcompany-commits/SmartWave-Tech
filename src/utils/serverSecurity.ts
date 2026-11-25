@@ -141,9 +141,14 @@ export function isAllowedOrigin(
     }
   }
 
-  // Known hosted runtime platforms for this PMS (HTTPS only)
+  // Known hosted runtime platforms & primary production domain for this PMS (HTTPS only)
   if (parsed.protocol === 'https:') {
-    if (originHost.endsWith('.run.app') || originHost.endsWith('.vercel.app')) {
+    if (
+      originHost === 'tidehotels.de' ||
+      originHost.endsWith('.tidehotels.de') ||
+      originHost.endsWith('.run.app') ||
+      originHost.endsWith('.vercel.app')
+    ) {
       return true;
     }
   }

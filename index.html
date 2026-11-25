@@ -101,6 +101,72 @@
     <div id="root"></div>
     <div id="print-root" aria-hidden="true"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      (function() {
+        var root = document.getElementById('root');
+        if (!root) return;
+        var RELOAD_KEY = 'pms_boot_retry_at';
+
+        function isMounted() {
+          return root && root.childElementCount > 0;
+        }
+
+        function showRecoveryUI(reason) {
+          if (isMounted() || document.getElementById('pms-boot-fallback')) return;
+          var panel = document.createElement('div');
+          panel.id = 'pms-boot-fallback';
+          panel.style.cssText = 'min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;font-family:Inter,system-ui,sans-serif;text-align:center;';
+          panel.innerHTML =
+            '<div style="max-width:420px;width:100%;background:#18181b;border:1px solid #27272a;border-radius:16px;padding:28px;box-shadow:0 20px 50px rgba(0,0,0,0.5);">' +
+              '<h2 style="margin:0 0 8px;font-size:18px;font-weight:700;color:#fafafa;">Unable to load application</h2>' +
+              '<p style="margin:0 0 20px;font-size:13px;line-height:1.5;color:#a1a1aa;">' +
+                (reason || 'A network or script loading interruption prevented the interface from starting.') +
+              '</p>' +
+              '<button type="button" id="pms-boot-reload-btn" style="width:100%;padding:11px 16px;border:0;border-radius:10px;background:#10b981;color:#052e16;font-weight:700;font-size:14px;cursor:pointer;">Reload Application</button>' +
+            '</div>';
+          root.appendChild(panel);
+          var btn = document.getElementById('pms-boot-reload-btn');
+          if (btn) {
+            btn.addEventListener('click', function() {
+              try { sessionStorage.removeItem(RELOAD_KEY); } catch (e) {}
+              window.location.reload();
+            });
+          }
+        }
+
+        function attemptSafeRecovery(reason) {
+          if (isMounted()) return;
+          try {
+            var last = Number(sessionStorage.getItem(RELOAD_KEY) || '0');
+            var now = Date.now();
+            if (!last || now - last > 30000) {
+              sessionStorage.setItem(RELOAD_KEY, String(now));
+              window.location.reload();
+              return;
+            }
+          } catch (e) {}
+          showRecoveryUI(reason);
+        }
+
+        window.addEventListener('error', function(e) {
+          if (isMounted()) return;
+          var target = e && e.target;
+          if (target && target.tagName === 'SCRIPT') {
+            attemptSafeRecovery('Failed to load application scripts from the server. Please reload to retry.');
+          }
+        }, true);
+
+        window.addEventListener('vite:preloadError', function() {
+          attemptSafeRecovery('A newer version of the application was deployed. Reloading...');
+        });
+
+        setTimeout(function() {
+          if (!isMounted()) {
+            showRecoveryUI('The application is taking longer than expected to initialize. Please reload.');
+          }
+        }, 15000);
+      })();
+    </script>
   </body>
 </html>
 
