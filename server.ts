@@ -6207,10 +6207,34 @@ async function startServer() {
         `[FRONTEND] Production build not found at ${distIndexPath}. Serving via Vite SPA middleware fallback.`
       );
     }
+    const viteAllowedHosts = Array.from(
+      new Set<string>([
+        "tidehotels.de",
+        ".tidehotels.de",
+        ".run.app",
+        ".vercel.app",
+        ...[process.env.APP_URL, process.env.VITE_APP_URL]
+          .filter((raw): raw is string => Boolean(raw && raw.trim()))
+          .map((raw) => {
+            try {
+              return new URL(raw.startsWith("http") ? raw : `https://${raw}`).hostname;
+            } catch {
+              return "";
+            }
+          })
+          .filter(Boolean),
+        ...(process.env.ALLOWED_HOSTS || "")
+          .split(",")
+          .map((h) => h.trim())
+          .filter(Boolean),
+      ])
+    );
+
     const vite = await createViteServer({
       root: __dirname,
       server: {
         middlewareMode: true,
+        allowedHosts: viteAllowedHosts,
         hmr: isHmrDisabled ? false : { server: httpServer },
         ...(isHmrDisabled ? { ws: false } : {}),
       },
