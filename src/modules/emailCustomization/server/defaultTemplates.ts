@@ -115,25 +115,8 @@ export function buildSamplePreviewContext(
     checkOutDate: "2026-11-27",
     checkOutTime: "12:00",
     nights: 3,
-    extraNights: 2,
-    previousRoom: "Room 108 (Standard Queen)",
-    previousCheckOut: "2026-11-25",
-    rateAdjustment: "+NGN 25,000.00",
     bookingReference: "RES8A4F2",
-    chargeAmount: 20000,
-    itemDescription: "Main Restaurant — Grilled Fish & Fresh Juice",
-    chargeCategory: "F & B",
-    transferTarget: "Meridian Travel Group City Ledger",
-    totalAmount:
-      options?.eventType === "fnb_order_posted" ||
-      options?.eventType === "fnb_order_voided" ||
-      options?.eventType === "folio_charge_posted" ||
-      options?.eventType === "folio_charge_voided" ||
-      options?.eventType === "folio_discount_applied" ||
-      options?.eventType === "folio_balance_transferred" ||
-      options?.eventType === "corporate_city_ledger_transfer"
-        ? 20000
-        : 100000,
+    totalAmount: 100000,
     originalAmount: 100000,
     discountAmount: 20000,
     amountPaid: 80000,

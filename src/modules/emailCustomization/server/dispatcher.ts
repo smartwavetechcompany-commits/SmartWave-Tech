@@ -26,7 +26,6 @@ import { EMAIL_EVENT_CATALOG, buildDefaultTemplateForHotel } from "./defaultTemp
 import {
   fsListCollection,
   fsPatchFields,
-  fsQueryReservationLedger,
   fsReadDoc,
   fsReadDocWithMeta,
   fsSetDoc,
@@ -52,7 +51,6 @@ export interface SendHotelEmailContext {
     reservationUpdateTime?: string;
     guest?: Record<string, any> | null;
     room?: Record<string, any> | null;
-    ledgerEntries?: Array<Record<string, any>>;
     trackingRequest?: Record<string, any> | null;
     systemSettings?: Record<string, any> | null;
   };
@@ -121,11 +119,10 @@ function buildRenderContextFromRecords(params: {
   reservation: Record<string, any>;
   guest: Record<string, any> | null;
   room: Record<string, any> | null;
-  ledgerEntries?: Array<Record<string, any>>;
   appUrl: string;
   paymentAmount?: number;
 }): EmailRenderContext {
-  const { hotelId, hotel, reservation, guest, room, ledgerEntries, appUrl, paymentAmount } = params;
+  const { hotelId, hotel, reservation, guest, room, appUrl, paymentAmount } = params;
   const branding = (hotel?.branding && typeof hotel.branding === "object"
     ? hotel.branding
     : {}) as Record<string, any>;
@@ -151,17 +148,12 @@ function buildRenderContextFromRecords(params: {
   const bookingReference = String(reservation?.id || "").slice(0, 8).toUpperCase();
   const financial = computeEmailFinancialBreakdown({
     reservation,
-    ledgerEntries,
     paymentAmount,
   });
   const totalAmount = financial.hasFinancialData ? financial.originalAmount : undefined;
   const originalAmount = financial.hasFinancialData ? financial.originalAmount : undefined;
   const discountAmount = financial.discountAmount > 0 ? financial.discountAmount : undefined;
   const amountPaid = financial.hasFinancialData ? financial.amountPaid : undefined;
-  const chargeAmount =
-    typeof paymentAmount === "number" && Number.isFinite(paymentAmount) && paymentAmount > 0
-      ? paymentAmount
-      : undefined;
   const depositAmount =
     typeof paymentAmount === "number" && Number.isFinite(paymentAmount) && paymentAmount > 0
       ? paymentAmount
@@ -236,7 +228,6 @@ function buildRenderContextFromRecords(params: {
         ? reservation.nights
         : computeNights(reservation?.checkIn, reservation?.checkOut),
     bookingReference,
-    chargeAmount,
     totalAmount,
     originalAmount,
     discountAmount,
@@ -533,22 +524,24 @@ export async function sendHotelEmail(
       };
     }
 
-    // Load guest, room, and read-only ledger records server-side
-    const [guestDoc, roomDoc, ledgerEntries] = await Promise.all([
+    // Load guest & room records server-side
+    const guestDoc =
       context.preloaded?.guest !== undefined
-        ? Promise.resolve(context.preloaded.guest)
+        ? context.preloaded.guest
         : reservationDoc.guestId
-          ? fsReadDoc(`hotels/${hotelId}/guests/${reservationDoc.guestId}`, bearer).catch(() => null)
-          : Promise.resolve(null),
+          ? await fsReadDoc(`hotels/${hotelId}/guests/${reservationDoc.guestId}`, bearer).catch(
+              () => null
+            )
+          : null;
+
+    const roomDoc =
       context.preloaded?.room !== undefined
-        ? Promise.resolve(context.preloaded.room)
+        ? context.preloaded.room
         : reservationDoc.roomId
-          ? fsReadDoc(`hotels/${hotelId}/rooms/${reservationDoc.roomId}`, bearer).catch(() => null)
-          : Promise.resolve(null),
-      context.preloaded?.ledgerEntries !== undefined
-        ? Promise.resolve(context.preloaded.ledgerEntries)
-        : fsQueryReservationLedger(hotelId, reservationId, bearer).catch(() => []),
-    ]);
+          ? await fsReadDoc(`hotels/${hotelId}/rooms/${reservationDoc.roomId}`, bearer).catch(
+              () => null
+            )
+          : null;
 
     const renderCtx = buildRenderContextFromRecords({
       hotelId,
@@ -556,7 +549,6 @@ export async function sendHotelEmail(
       reservation: { ...reservationDoc, id: reservationId },
       guest: guestDoc,
       room: roomDoc,
-      ledgerEntries,
       appUrl,
       paymentAmount: context.paymentAmount,
     });

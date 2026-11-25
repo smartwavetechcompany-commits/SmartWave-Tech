@@ -62,11 +62,7 @@ import {
   renderLoyaltyTierBenefitsText,
   resolveLoyaltyTierBenefitsForEmail,
 } from "./src/modules/loyalty/shared/loyaltyPolicyCore.ts";
-import {
-  computeEmailFinancialBreakdown,
-  resolveNotificationEventFinancials,
-} from "./src/modules/emailCustomization/shared/financialEmailBreakdown.ts";
-import { fsQueryReservationLedger } from "./src/modules/emailCustomization/server/firestoreRest.ts";
+import { computeEmailFinancialBreakdown } from "./src/modules/emailCustomization/shared/financialEmailBreakdown.ts";
 import { resolveEffectiveTemplate } from "./src/modules/emailCustomization/server/resolver.ts";
 import { renderHotelEmailServerSide } from "./src/modules/emailCustomization/server/renderer.ts";
 import {
@@ -4942,7 +4938,7 @@ async function startServer() {
       const platformBrand = resolvePlatformBrandContext(systemSettings, appUrl);
 
       // Load optional authoritative tenant records server-side (strictly under hotels/{hotelId})
-      const [reservationDoc, guestDoc, corporateDoc, staffDoc, reservationLedgerEntries] = await Promise.all([
+      const [reservationDoc, guestDoc, corporateDoc, staffDoc] = await Promise.all([
         safeResId
           ? readFirestoreDocServerSide(`hotels/${hotelId}/reservations/${safeResId}`, caller.idToken)
           : Promise.resolve(null),
@@ -4958,9 +4954,6 @@ async function startServer() {
         safeStaffUid
           ? readFirestoreDocServerSide(`users/${safeStaffUid}`, caller.idToken)
           : Promise.resolve(null),
-        safeResId
-          ? fsQueryReservationLedger(hotelId, safeResId, caller.idToken).catch(() => [])
-          : Promise.resolve([]),
       ]);
 
       // Verify any fetched cross-collection staff record belongs to this exact hotel
@@ -5031,17 +5024,14 @@ async function startServer() {
         (reservationDoc?.roomNumber ? `Room ${reservationDoc.roomNumber}` : undefined) ||
         (cleanMetaStr("roomNumber") ? `Room ${cleanMetaStr("roomNumber")}` : undefined);
 
-      const resolvedFin = resolveNotificationEventFinancials({
-        eventType: typedEvent,
+      const financialBreakdown = computeEmailFinancialBreakdown({
         reservation: reservationDoc,
-        ledgerEntries: reservationLedgerEntries,
-        meta,
-        corporateCurrentBalance:
-          corporateDoc?.currentBalance !== undefined && Number.isFinite(Number(corporateDoc.currentBalance))
-            ? Number(corporateDoc.currentBalance)
-            : null,
+        paymentAmount: meta.amount !== undefined ? Number(meta.amount) : undefined,
+        fallbackOutstandingBalance:
+          meta.outstandingBalance !== undefined ? Number(meta.outstandingBalance) : undefined,
+        fallbackDiscountAmount:
+          meta.discountAmount !== undefined ? Number(meta.discountAmount) : undefined,
       });
-      const financialBreakdown = resolvedFin.financialBreakdown;
 
       switch (typedEvent) {
         case "deposit.received": {
@@ -5965,11 +5955,10 @@ async function startServer() {
         } | null = null;
 
         const rawMappedEvent =
-          plan.audience === "platform_superadmin"
-            ? null
-            : typedEvent === "fnb.order_voided" && plan.audience === "guest"
-              ? "folio_charge_voided"
-              : normalizeHotelEmailEvent(typedEvent);
+          plan.audience !== "platform_superadmin" &&
+          !(typedEvent === "fnb.order_voided" && plan.audience === "guest")
+            ? normalizeHotelEmailEvent(typedEvent)
+            : null;
         let mappedEvent =
           rawMappedEvent && isCustomizableEvent(rawMappedEvent) ? rawMappedEvent : null;
 
@@ -6022,37 +6011,6 @@ async function startServer() {
               minute: "2-digit",
             });
 
-            const prevRoomNum = cleanMetaStr("previousRoomNumber");
-            const prevRoomType = cleanMetaStr("previousRoomType");
-            const newRoomNum =
-              cleanMetaStr("roomNumber") ||
-              (reservationDoc?.roomNumber ? String(reservationDoc.roomNumber) : undefined);
-            const newRoomType =
-              cleanMetaStr("newRoomType") ||
-              (reservationDoc?.roomType ? String(reservationDoc.roomType) : undefined);
-            const effectiveRoomName =
-              typedEvent === "reservation.room_transferred" && newRoomNum
-                ? `Room ${newRoomNum}${newRoomType ? ` (${newRoomType})` : ""}`
-                : roomStr;
-
-            const rawPriceDiff =
-              meta.priceDifference !== undefined && Number.isFinite(Number(meta.priceDifference))
-                ? Number(meta.priceDifference)
-                : undefined;
-            const formattedRateAdjustment =
-              typedEvent === "reservation.room_transferred"
-                ? rawPriceDiff && rawPriceDiff !== 0
-                  ? `${rawPriceDiff > 0 ? "+" : "-"}${formatMoneyForEmail(Math.abs(rawPriceDiff), plan.brand.currency || "NGN")}`
-                  : "No change"
-                : undefined;
-
-            const rawCategory = cleanMetaStr("category");
-            const formattedCategory = rawCategory
-              ? rawCategory.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
-              : typedEvent.startsWith("fnb.")
-                ? "F & B"
-                : undefined;
-
             const renderCtx: EmailRenderContext = {
               hotelId,
               hotelName: plan.brand.hotelName,
@@ -6070,47 +6028,45 @@ async function startServer() {
               guestName: plan.recipientName || resolvedGuestName,
               guestEmail: resolvedGuestEmail || undefined,
               bookingReference: safeResId ? safeResId.slice(0, 8).toUpperCase() : undefined,
-              roomName: effectiveRoomName,
-              roomType: newRoomType,
-              roomNumber: newRoomNum,
-              previousRoom: prevRoomNum
-                ? `Room ${prevRoomNum}${prevRoomType ? ` (${prevRoomType})` : ""}`
-                : undefined,
+              roomName: roomStr,
+              roomType: reservationDoc?.roomType ? String(reservationDoc.roomType) : undefined,
+              roomNumber:
+                (reservationDoc?.roomNumber ? String(reservationDoc.roomNumber) : undefined) ||
+                cleanMetaStr("roomNumber"),
               checkInDate: reservationDoc?.checkIn ? String(reservationDoc.checkIn) : undefined,
-              checkOutDate:
-                cleanMetaStr("newCheckOut") ||
-                (reservationDoc?.checkOut ? String(reservationDoc.checkOut) : undefined),
-              previousCheckOut: cleanMetaStr("previousCheckOut"),
-              nights:
-                meta.totalNights !== undefined &&
-                Number.isFinite(Number(meta.totalNights)) &&
-                Number(meta.totalNights) > 0
-                  ? Number(meta.totalNights)
-                  : typeof reservationDoc?.nights === "number" && reservationDoc.nights > 0
-                    ? reservationDoc.nights
-                    : undefined,
-              extraNights:
-                meta.extraNights !== undefined &&
-                Number.isFinite(Number(meta.extraNights)) &&
-                Number(meta.extraNights) > 0
-                  ? Number(meta.extraNights)
+              checkOutDate: reservationDoc?.checkOut ? String(reservationDoc.checkOut) : undefined,
+              originalAmount:
+                financialBreakdown.originalAmount > 0
+                  ? financialBreakdown.originalAmount
                   : undefined,
-              rateAdjustment: formattedRateAdjustment,
-              chargeAmount: resolvedFin.chargeAmount,
-              itemDescription:
-                cleanMetaStr("items", 240) || cleanMetaStr("description", 240),
-              chargeCategory: formattedCategory,
-              transferTarget:
-                cleanMetaStr("transferTarget", 180) ||
-                (typedEvent === "corporate.city_ledger_transfer"
-                  ? String(corporateDoc?.name || cleanMetaStr("corporateName") || "") || undefined
-                  : undefined),
-              originalAmount: resolvedFin.originalAmount,
-              discountAmount: resolvedFin.discountAmount,
-              totalAmount: resolvedFin.totalAmount,
-              amountPaid: resolvedFin.amountPaid,
-              balanceDue: resolvedFin.balanceDue,
-              paymentStatus: resolvedFin.paymentStatus,
+              discountAmount:
+                financialBreakdown.discountAmount > 0
+                  ? financialBreakdown.discountAmount
+                  : undefined,
+              totalAmount:
+                financialBreakdown.netPayableAmount > 0
+                  ? financialBreakdown.netPayableAmount
+                  : meta.amount !== undefined
+                    ? Number(meta.amount)
+                    : undefined,
+              amountPaid:
+                typedEvent === "payment.received" || typedEvent === "receipt.sent"
+                  ? meta.amount !== undefined
+                    ? Number(meta.amount)
+                    : financialBreakdown.amountPaid
+                  : financialBreakdown.amountPaid > 0
+                    ? financialBreakdown.amountPaid
+                    : undefined,
+              balanceDue:
+                typedEvent === "refund.processed"
+                  ? undefined
+                  : reservationDoc || meta.outstandingBalance !== undefined
+                    ? financialBreakdown.remainingBalance
+                    : undefined,
+              paymentStatus:
+                typedEvent === "refund.processed"
+                  ? "Refund Processed"
+                  : financialBreakdown.paymentStatus,
               paymentMethod: cleanMetaStr("paymentMethod")?.toUpperCase(),
               transactionReference:
                 cleanMetaStr("reference") ||
@@ -6120,9 +6076,18 @@ async function startServer() {
                 typedEvent === "deposit.received"
                   ? depositDateFormatted
                   : cleanMetaStr("transactionDate") || depositDateFormatted,
-              depositAmount: resolvedFin.depositAmount,
-              depositBalance: resolvedFin.depositBalance,
-              refundAmount: resolvedFin.refundAmount,
+              depositAmount:
+                typedEvent === "deposit.received" && meta.amount !== undefined
+                  ? Number(meta.amount)
+                  : undefined,
+              depositBalance:
+                meta.depositBalanceAfter !== undefined
+                  ? Number(meta.depositBalanceAfter)
+                  : undefined,
+              refundAmount:
+                typedEvent === "refund.processed" && meta.amount !== undefined
+                  ? Number(meta.amount)
+                  : undefined,
               loyaltyPointsFormatted: cleanMetaStr("pointsFormatted") || null,
               loyaltyPointsBalance: (() => {
                 if (meta.updatedBalance !== undefined && Number.isFinite(Number(meta.updatedBalance))) {

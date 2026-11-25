@@ -2057,12 +2057,6 @@ export function buildTemplateVariablesMap(
   const checkInTime = formatEmailTime(ctx.checkInTime, settings.timeFormat);
   const checkOutDate = formatEmailDate(ctx.checkOutDate, settings.dateFormat, settings.timeZone, language);
   const checkOutTime = formatEmailTime(ctx.checkOutTime, settings.timeFormat);
-  const previousCheckOut = formatEmailDate(
-    ctx.previousCheckOut,
-    settings.dateFormat,
-    settings.timeZone,
-    language
-  );
   const transactionDate = formatEmailDate(
     ctx.transactionDate,
     settings.dateFormat,
@@ -2087,7 +2081,6 @@ export function buildTemplateVariablesMap(
     ctx.originalAmount !== undefined && ctx.originalAmount !== null
       ? ctx.originalAmount
       : ctx.totalAmount;
-  const chargeAmount = fmtMoney(ctx.chargeAmount);
   const totalAmount = fmtMoney(ctx.totalAmount);
   const originalAmount = fmtMoney(originalAmountVal);
   const discountAmount = fmtMoney(ctx.discountAmount);
@@ -2132,24 +2125,13 @@ export function buildTemplateVariablesMap(
     room_name: roomNameStr,
     room_number: roomNumberStr,
     room_type: String(ctx.roomType || "").trim(),
-    previous_room: String(ctx.previousRoom || "").trim(),
     check_in_date: checkInDate,
     check_in_time: checkInTime,
     check_out_date: checkOutDate,
     check_out_time: checkOutTime,
-    previous_check_out: previousCheckOut,
     nights: ctx.nights !== undefined && ctx.nights !== null && Number(ctx.nights) > 0 ? String(ctx.nights) : "",
-    extra_nights:
-      ctx.extraNights !== undefined && ctx.extraNights !== null && Number(ctx.extraNights) > 0
-        ? String(ctx.extraNights)
-        : "",
     booking_reference: bookingRef,
     reservation_number: bookingRef,
-    charge_amount: chargeAmount,
-    item_description: String(ctx.itemDescription || "").trim(),
-    charge_category: String(ctx.chargeCategory || "").trim(),
-    rate_adjustment: String(ctx.rateAdjustment || "").trim(),
-    transfer_target: String(ctx.transferTarget || "").trim(),
     total_amount: totalAmount,
     original_amount: originalAmount,
     discount_amount: discountAmount,

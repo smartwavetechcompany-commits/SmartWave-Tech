@@ -25,18 +25,13 @@ const GUEST_STAY_VARS: AllowedTemplateVariable[] = [
   "room_name",
   "room_number",
   "room_type",
-  "previous_room",
   "check_in_date",
   "check_in_time",
   "check_out_date",
   "check_out_time",
-  "previous_check_out",
   "nights",
-  "extra_nights",
   "booking_reference",
   "reservation_number",
-  "charge_amount",
-  "rate_adjustment",
   "total_amount",
   "original_amount",
   "discount_amount",
@@ -67,12 +62,6 @@ const BILLING_VARS: AllowedTemplateVariable[] = [
   "room_number",
   "booking_reference",
   "reservation_number",
-  "charge_amount",
-  "charge_category",
-  "item_description",
-  "outlet_name",
-  "bill_number",
-  "transfer_target",
   "total_amount",
   "original_amount",
   "discount_amount",
@@ -114,9 +103,6 @@ const CORPORATE_VARS: AllowedTemplateVariable[] = [
   ...COMMON_HOTEL_VARS,
   "booking_reference",
   "reservation_number",
-  "charge_amount",
-  "item_description",
-  "transfer_target",
   "total_amount",
   "amount_paid",
   "balance_due",
@@ -138,9 +124,6 @@ const STAFF_OPS_VARS: AllowedTemplateVariable[] = [
   "check_in_date",
   "check_out_date",
   "nights",
-  "charge_amount",
-  "charge_category",
-  "item_description",
   "total_amount",
   "amount_paid",
   "outlet_name",
@@ -237,30 +220,10 @@ export const EMAIL_EVENT_CATALOG: Record<CustomizableEmailEventType, EventCatalo
     markerKey: "guestProfileCreated",
     allowedVariables: ["guest_name", "guest_first_name", ...COMMON_HOTEL_VARS],
   },
-  room_transferred: {
-    eventType: "room_transferred",
-    name: "Room Transfer Confirmation",
-    description: "Sent to an in-house guest when transferred from one room to another, detailing previous room, new room, rate adjustment, and updated stay total.",
-    category: "guest_stays",
-    audience: "guest",
-    canDisable: true,
-    markerKey: "roomTransferred",
-    allowedVariables: GUEST_STAY_VARS,
-  },
-  stay_extended: {
-    eventType: "stay_extended",
-    name: "Stay Extended / Postponed Confirmation",
-    description: "Sent to a guest when their check-out date is extended or postponed, showing previous check-out, new check-out, additional nights, and updated balance.",
-    category: "guest_stays",
-    audience: "guest",
-    canDisable: true,
-    markerKey: "stayExtended",
-    allowedVariables: GUEST_STAY_VARS,
-  },
   fnb_order_posted: {
     eventType: "fnb_order_posted",
     name: "Restaurant / F&B Folio Charge Notice",
-    description: "Sent to the guest when a restaurant or room-service charge is posted to their folio, showing the exact posted amount and updated remaining balance.",
+    description: "Sent to the guest when a restaurant or room-service charge is posted to their folio.",
     category: "guest_stays",
     audience: "guest",
     canDisable: true,
@@ -269,20 +232,11 @@ export const EMAIL_EVENT_CATALOG: Record<CustomizableEmailEventType, EventCatalo
       "guest_name",
       "guest_first_name",
       ...COMMON_HOTEL_VARS,
-      "booking_reference",
-      "reservation_number",
       "room_name",
       "room_number",
       "outlet_name",
       "bill_number",
-      "item_description",
-      "charge_category",
-      "charge_amount",
       "total_amount",
-      "remaining_balance",
-      "balance_due",
-      "payment_status",
-      "transaction_reference",
       "transaction_date",
     ],
   },
@@ -348,46 +302,6 @@ export const EMAIL_EVENT_CATALOG: Record<CustomizableEmailEventType, EventCatalo
     markerKey: "discountSettlement",
     allowedVariables: BILLING_VARS,
   },
-  folio_charge_posted: {
-    eventType: "folio_charge_posted",
-    name: "Folio / Room Charge Posted",
-    description: "Sent to the guest whenever an incidental, service, laundry, or room charge is posted to their folio, showing the exact charge amount and updated remaining balance.",
-    category: "payments_billing",
-    audience: "guest",
-    canDisable: true,
-    markerKey: "folioChargePosted",
-    allowedVariables: BILLING_VARS,
-  },
-  folio_charge_voided: {
-    eventType: "folio_charge_voided",
-    name: "Folio Charge Voided / Reversed",
-    description: "Sent to the guest when a folio or F&B charge is reversed or voided, showing the reversed amount and updated remaining balance.",
-    category: "payments_billing",
-    audience: "guest",
-    canDisable: true,
-    markerKey: "folioChargeVoided",
-    allowedVariables: BILLING_VARS,
-  },
-  folio_discount_applied: {
-    eventType: "folio_discount_applied",
-    name: "Folio Discount / Credit Applied",
-    description: "Sent to the guest when a discount or credit adjustment is applied to their folio, showing the discount amount and updated balance.",
-    category: "payments_billing",
-    audience: "guest",
-    canDisable: true,
-    markerKey: "folioDiscountApplied",
-    allowedVariables: BILLING_VARS,
-  },
-  folio_balance_transferred: {
-    eventType: "folio_balance_transferred",
-    name: "Folio Balance Transferred",
-    description: "Sent to the guest when a folio balance is transferred to a corporate account, city ledger, or another account.",
-    category: "payments_billing",
-    audience: "guest",
-    canDisable: true,
-    markerKey: "folioBalanceTransferred",
-    allowedVariables: BILLING_VARS,
-  },
 
   // ── Guest Loyalty & Rewards ──
   loyalty_account_activated: {
@@ -448,16 +362,6 @@ export const EMAIL_EVENT_CATALOG: Record<CustomizableEmailEventType, EventCatalo
     audience: "guest",
     canDisable: true,
     markerKey: "loyaltyExpiring",
-    allowedVariables: LOYALTY_VARS,
-  },
-  loyalty_points_expired: {
-    eventType: "loyalty_points_expired",
-    name: "Loyalty Points Expired Notice",
-    description: "Sent to inform guests when unused loyalty points have expired and their available points balance has been updated.",
-    category: "loyalty_rewards",
-    audience: "guest",
-    canDisable: true,
-    markerKey: "loyaltyExpired",
     allowedVariables: LOYALTY_VARS,
   },
 
@@ -967,63 +871,6 @@ export function buildDefaultTemplateVariant(
         ],
       });
 
-    case "room_transferred":
-      return makeSimpleVariant({
-        branding,
-        language,
-        subject: isDe
-          ? "Zimmerwechsel bestätigt - {{hotel_name}} ({{booking_reference}})"
-          : "Room Transfer Confirmation - {{hotel_name}} ({{booking_reference}})",
-        preheader: isDe
-          ? "Ihr Zimmerwechsel im {{hotel_name}} wurde abgeschlossen."
-          : "Your room transfer at {{hotel_name}} has been completed.",
-        heading: isDe ? "Zimmerwechsel bestätigt" : "Room Transfer Confirmation",
-        greeting: isDe ? "Hallo {{guest_name}}," : "Hello {{guest_name}},",
-        intro: isDe
-          ? "Ihr Zimmer im {{hotel_name}} wurde aktualisiert. Unten finden Sie die Details zu Ihrem Zimmerwechsel."
-          : "Your room assignment at {{hotel_name}} has been updated. Please review your transfer details below.",
-        rows: [
-          { id: "row_ref", label: isDe ? "Buchungsreferenz" : "Booking Reference", valueTemplate: "{{booking_reference}}" },
-          { id: "row_guest", label: isDe ? "Gastname" : "Guest Name", valueTemplate: "{{guest_name}}" },
-          { id: "row_prev_room", label: isDe ? "Vorheriges Zimmer" : "Previous Room", valueTemplate: "{{previous_room}}" },
-          { id: "row_new_room", label: isDe ? "Neues Zimmer" : "New Room", valueTemplate: "{{room_name}}" },
-          { id: "row_checkin", label: isDe ? "Anreise" : "Check-In", valueTemplate: "{{check_in_date}}" },
-          { id: "row_checkout", label: isDe ? "Abreise" : "Check-Out", valueTemplate: "{{check_out_date}}" },
-          { id: "row_rate_adj", label: isDe ? "Preisanpassung" : "Rate Adjustment", valueTemplate: "{{rate_adjustment}}" },
-          { id: "row_total", label: isDe ? "Aktualisierter Gesamtbetrag" : "Updated Stay Total", valueTemplate: "{{total_amount}}" },
-          { id: "row_balance", label: isDe ? "Restbetrag" : "Remaining Balance", valueTemplate: "{{remaining_balance}}" },
-        ],
-      });
-
-    case "stay_extended":
-      return makeSimpleVariant({
-        branding,
-        language,
-        subject: isDe
-          ? "Aufenthaltsverlängerung bestätigt - {{hotel_name}} ({{booking_reference}})"
-          : "Stay Extension Confirmed - {{hotel_name}} ({{booking_reference}})",
-        preheader: isDe
-          ? "Ihr Aufenthalt im {{hotel_name}} wurde bis {{check_out_date}} verlängert."
-          : "Your stay at {{hotel_name}} has been extended through {{check_out_date}}.",
-        heading: isDe ? "Aufenthalt verlängert" : "Stay Extended / Updated",
-        greeting: isDe ? "Hallo {{guest_name}}," : "Hello {{guest_name}},",
-        intro: isDe
-          ? "Ihr Aufenthalt im {{hotel_name}} wurde erfolgreich verlängert. Unten finden Sie Ihre aktualisierten Aufenthalts- und Abrechnungsdaten."
-          : "Your stay at {{hotel_name}} has been extended. Please review your updated departure date and account summary below.",
-        rows: [
-          { id: "row_ref", label: isDe ? "Buchungsreferenz" : "Booking Reference", valueTemplate: "{{booking_reference}}" },
-          { id: "row_guest", label: isDe ? "Gastname" : "Guest Name", valueTemplate: "{{guest_name}}" },
-          { id: "row_room", label: isDe ? "Zimmer" : "Room", valueTemplate: "{{room_name}}" },
-          { id: "row_prev_out", label: isDe ? "Vorherige Abreise" : "Previous Check-Out", valueTemplate: "{{previous_check_out}}" },
-          { id: "row_new_out", label: isDe ? "Neue Abreise" : "New Check-Out Date", valueTemplate: "{{check_out_date}}" },
-          { id: "row_extra_nights", label: isDe ? "Zusätzliche Nächte" : "Additional Nights", valueTemplate: "{{extra_nights}}" },
-          { id: "row_nights", label: isDe ? "Gesamtnächte" : "Updated Total Nights", valueTemplate: "{{nights}}" },
-          { id: "row_add_charge", label: isDe ? "Zusätzlicher Betrag" : "Additional Charge", valueTemplate: "{{charge_amount}}" },
-          { id: "row_total", label: isDe ? "Aktualisierter Gesamtbetrag" : "Updated Stay Total", valueTemplate: "{{total_amount}}" },
-          { id: "row_balance", label: isDe ? "Restbetrag" : "Remaining Balance", valueTemplate: "{{remaining_balance}}" },
-        ],
-      });
-
     case "fnb_order_posted":
       return makeSimpleVariant({
         branding,
@@ -1032,23 +879,19 @@ export function buildDefaultTemplateVariant(
           ? "Restaurant- & F&B-Buchung - {{hotel_name}}"
           : "Restaurant & F&B Charge Notice - {{hotel_name}}",
         preheader: isDe
-          ? "Eine Restaurantbuchung über {{charge_amount}} wurde Ihrem Zimmerkonto im {{hotel_name}} belastet."
-          : "A restaurant or F&B charge of {{charge_amount}} has been posted to your room folio at {{hotel_name}}.",
+          ? "Eine Restaurantbuchung wurde Ihrem Zimmerkonto im {{hotel_name}} belastet."
+          : "A restaurant or F&B order has been posted to your room folio at {{hotel_name}}.",
         heading: isDe ? "F&B-Bestellung verbucht" : "F&B Order Posted to Folio",
         greeting: isDe ? "Hallo {{guest_name}}," : "Hello {{guest_name}},",
         intro: isDe
-          ? "Eine Restaurant- / F&B-Bestellung im {{hotel_name}} wurde Ihrem Zimmerkonto belastet. Unten finden Sie die genauen Buchungsdetails."
-          : "A restaurant / F&B order at {{hotel_name}} has been posted to your room folio. Please review the charge details below.",
+          ? "Eine Restaurant- / F&B-Bestellung im {{hotel_name}} wurde Ihrem Zimmerkonto gutgeschrieben."
+          : "A restaurant / F&B order at {{hotel_name}} has been posted to your room folio.",
         rows: [
-          { id: "row_ref", label: isDe ? "Buchungsreferenz" : "Booking Reference", valueTemplate: "{{booking_reference}}" },
           { id: "row_guest", label: isDe ? "Gastname" : "Guest Name", valueTemplate: "{{guest_name}}" },
           { id: "row_room", label: isDe ? "Zimmer" : "Room", valueTemplate: "{{room_name}}" },
           { id: "row_outlet", label: isDe ? "Bereich" : "Outlet", valueTemplate: "{{outlet_name}}" },
           { id: "row_bill", label: isDe ? "Belegnummer" : "Order / Bill #", valueTemplate: "{{bill_number}}" },
-          { id: "row_items", label: isDe ? "Artikel / Beschreibung" : "Items / Description", valueTemplate: "{{item_description}}" },
-          { id: "row_amt", label: isDe ? "Gebuchter Betrag" : "Amount Posted", valueTemplate: "{{charge_amount}}" },
-          { id: "row_date", label: isDe ? "Buchungsdatum" : "Posted On", valueTemplate: "{{transaction_date}}" },
-          { id: "row_balance", label: isDe ? "Aktualisierter Restbetrag" : "Updated Remaining Balance", valueTemplate: "{{remaining_balance}}" },
+          { id: "row_amt", label: isDe ? "Betrag" : "Amount Posted", valueTemplate: "{{total_amount}}" },
         ],
       });
 
@@ -1072,15 +915,11 @@ export function buildDefaultTemplateVariant(
           { id: "row_ref", label: isDe ? "Buchungsreferenz" : "Booking Reference", valueTemplate: "{{booking_reference}}" },
           { id: "row_guest", label: isDe ? "Gastname" : "Guest Name", valueTemplate: "{{guest_name}}" },
           { id: "row_room", label: isDe ? "Zimmer" : "Room", valueTemplate: "{{room_name}}" },
-          { id: "row_outlet", label: isDe ? "Bereich / Quelle" : "Outlet / Source", valueTemplate: "{{outlet_name}}" },
-          { id: "row_bill", label: isDe ? "Belegnummer" : "Order / Bill #", valueTemplate: "{{bill_number}}" },
-          { id: "row_items", label: isDe ? "Artikel / Beschreibung" : "Items / Description", valueTemplate: "{{item_description}}" },
           { id: "row_orig", label: isDe ? "Ursprünglicher Betrag" : "Original Amount", valueTemplate: "{{original_amount}}" },
           { id: "row_discount", label: isDe ? "Gewährter Rabatt" : "Discount Granted", valueTemplate: "{{discount_amount}}" },
           { id: "row_paid", label: isDe ? "Bezahlter Betrag" : "Amount Paid / Settled", valueTemplate: "{{amount_paid}}" },
           { id: "row_method", label: isDe ? "Zahlungsart" : "Payment Method", valueTemplate: "{{payment_method}}" },
           { id: "row_txref", label: isDe ? "Referenz" : "Transaction Reference", valueTemplate: "{{transaction_reference}}" },
-          { id: "row_dep_bal", label: isDe ? "Verbleibendes Guthaben" : "Remaining Deposit Balance", valueTemplate: "{{deposit_balance}}" },
           { id: "row_balance", label: isDe ? "Restbetrag" : "Remaining Balance", valueTemplate: "{{remaining_balance}}" },
           { id: "row_status", label: isDe ? "Zahlungsstatus" : "Payment Status", valueTemplate: "{{payment_status}}" },
         ],
@@ -1219,115 +1058,6 @@ export function buildDefaultTemplateVariant(
           { id: "row_paid", label: isDe ? "Bezahlter Betrag" : "Amount Paid / Settled", valueTemplate: "{{amount_paid}}" },
           { id: "row_balance", label: isDe ? "Offener Restbetrag" : "Actual Remaining Balance", valueTemplate: "{{remaining_balance}}" },
           { id: "row_status", label: isDe ? "Zahlungsstatus" : "Payment Status", valueTemplate: "{{payment_status}}" },
-        ],
-      });
-
-    case "folio_charge_posted":
-      return makeSimpleVariant({
-        branding,
-        language,
-        subject: isDe
-          ? "Neue Buchung auf Ihrem Zimmerkonto - {{hotel_name}}"
-          : "New Charge Posted to Your Folio - {{hotel_name}}",
-        preheader: isDe
-          ? "Eine Buchung über {{charge_amount}} wurde Ihrem Zimmerkonto im {{hotel_name}} belastet."
-          : "A charge of {{charge_amount}} has been posted to your guest folio at {{hotel_name}}.",
-        heading: isDe ? "Buchung auf Zimmerkonto" : "New Folio Charge Posted",
-        greeting: isDe ? "Hallo {{guest_name}}," : "Hello {{guest_name}},",
-        intro: isDe
-          ? "Eine neue Leistung oder Gebühr wurde Ihrem Zimmerkonto im {{hotel_name}} belastet. Unten finden Sie die Buchungsdetails."
-          : "A new charge has been posted to your guest folio at {{hotel_name}}. Please review the details below.",
-        rows: [
-          { id: "row_ref", label: isDe ? "Buchungsreferenz" : "Booking Reference", valueTemplate: "{{booking_reference}}" },
-          { id: "row_guest", label: isDe ? "Gastname" : "Guest Name", valueTemplate: "{{guest_name}}" },
-          { id: "row_room", label: isDe ? "Zimmer" : "Room", valueTemplate: "{{room_name}}" },
-          { id: "row_cat", label: isDe ? "Kategorie" : "Category", valueTemplate: "{{charge_category}}" },
-          { id: "row_desc", label: isDe ? "Artikel / Beschreibung" : "Item / Description", valueTemplate: "{{item_description}}" },
-          { id: "row_amt", label: isDe ? "Gebuchter Betrag" : "Amount Charged", valueTemplate: "{{charge_amount}}" },
-          { id: "row_txref", label: isDe ? "Referenz" : "Reference", valueTemplate: "{{transaction_reference}}" },
-          { id: "row_date", label: isDe ? "Datum" : "Posted On", valueTemplate: "{{transaction_date}}" },
-          { id: "row_balance", label: isDe ? "Aktualisierter Restbetrag" : "Updated Remaining Balance", valueTemplate: "{{remaining_balance}}" },
-          { id: "row_status", label: isDe ? "Kontostatus" : "Account Status", valueTemplate: "{{payment_status}}" },
-        ],
-      });
-
-    case "folio_charge_voided":
-      return makeSimpleVariant({
-        branding,
-        language,
-        subject: isDe
-          ? "Buchung auf Ihrem Zimmerkonto storniert - {{hotel_name}}"
-          : "Folio Charge Reversed / Voided - {{hotel_name}}",
-        preheader: isDe
-          ? "Eine Buchung über {{charge_amount}} auf Ihrem Konto im {{hotel_name}} wurde storniert."
-          : "A charge of {{charge_amount}} on your folio at {{hotel_name}} has been reversed.",
-        heading: isDe ? "Kontobuchung storniert" : "Folio Charge Reversed",
-        greeting: isDe ? "Hallo {{guest_name}}," : "Hello {{guest_name}},",
-        intro: isDe
-          ? "Eine zuvor verbuchte Position auf Ihrem Zimmerkonto im {{hotel_name}} wurde storniert. Unten finden Sie Ihren aktualisierten Saldo."
-          : "A previously posted charge on your guest folio at {{hotel_name}} has been reversed. Please review your updated balance below.",
-        rows: [
-          { id: "row_ref", label: isDe ? "Buchungsreferenz" : "Booking Reference", valueTemplate: "{{booking_reference}}" },
-          { id: "row_guest", label: isDe ? "Gastname" : "Guest Name", valueTemplate: "{{guest_name}}" },
-          { id: "row_room", label: isDe ? "Zimmer" : "Room", valueTemplate: "{{room_name}}" },
-          { id: "row_bill", label: isDe ? "Belegnummer" : "Order / Bill #", valueTemplate: "{{bill_number}}" },
-          { id: "row_desc", label: isDe ? "Stornierte Position" : "Reversed Entry", valueTemplate: "{{item_description}}" },
-          { id: "row_amt", label: isDe ? "Stornierter Betrag" : "Reversed Amount", valueTemplate: "{{charge_amount}}" },
-          { id: "row_reason", label: isDe ? "Grund" : "Reason", valueTemplate: "{{reason}}" },
-          { id: "row_balance", label: isDe ? "Aktualisierter Restbetrag" : "Updated Remaining Balance", valueTemplate: "{{remaining_balance}}" },
-        ],
-      });
-
-    case "folio_discount_applied":
-      return makeSimpleVariant({
-        branding,
-        language,
-        subject: isDe
-          ? "Rabatt auf Ihrem Zimmerkonto gutgeschrieben - {{hotel_name}}"
-          : "Discount Applied to Your Folio - {{hotel_name}}",
-        preheader: isDe
-          ? "Ein Rabatt von {{discount_amount}} wurde Ihrem Konto im {{hotel_name}} gutgeschrieben."
-          : "A discount of {{discount_amount}} has been credited to your folio at {{hotel_name}}.",
-        heading: isDe ? "Rabatt / Gutschrift angewendet" : "Folio Discount Applied",
-        greeting: isDe ? "Hallo {{guest_name}}," : "Hello {{guest_name}},",
-        intro: isDe
-          ? "Ein Rabatt bzw. eine Gutschrift wurde auf Ihr Zimmerkonto im {{hotel_name}} angewendet. Unten finden Sie Ihren aktualisierten Kontostand."
-          : "A discount or credit has been applied to your guest folio at {{hotel_name}}. Please review your updated account balance below.",
-        rows: [
-          { id: "row_ref", label: isDe ? "Buchungsreferenz" : "Booking Reference", valueTemplate: "{{booking_reference}}" },
-          { id: "row_guest", label: isDe ? "Gastname" : "Guest Name", valueTemplate: "{{guest_name}}" },
-          { id: "row_room", label: isDe ? "Zimmer" : "Room", valueTemplate: "{{room_name}}" },
-          { id: "row_desc", label: isDe ? "Beschreibung" : "Discount / Credit", valueTemplate: "{{item_description}}" },
-          { id: "row_discount", label: isDe ? "Rabattbetrag" : "Discount Amount", valueTemplate: "{{discount_amount}}" },
-          { id: "row_balance", label: isDe ? "Aktualisierter Restbetrag" : "Updated Remaining Balance", valueTemplate: "{{remaining_balance}}" },
-          { id: "row_status", label: isDe ? "Kontostatus" : "Account Status", valueTemplate: "{{payment_status}}" },
-        ],
-      });
-
-    case "folio_balance_transferred":
-      return makeSimpleVariant({
-        branding,
-        language,
-        subject: isDe
-          ? "Foliosaldo übertragen - {{hotel_name}}"
-          : "Folio Balance Transfer Notice - {{hotel_name}}",
-        preheader: isDe
-          ? "Ein Betrag von {{charge_amount}} wurde von Ihrem Konto im {{hotel_name}} übertragen."
-          : "A balance of {{charge_amount}} has been transferred from your folio at {{hotel_name}}.",
-        heading: isDe ? "Saldoübertragung bestätigt" : "Folio Balance Transferred",
-        greeting: isDe ? "Hallo {{guest_name}}," : "Hello {{guest_name}},",
-        intro: isDe
-          ? "Ein Foliosaldo auf Ihrem Konto im {{hotel_name}} wurde übertragen. Unten finden Sie die Zusammenfassung."
-          : "A balance on your guest folio at {{hotel_name}} has been transferred. Please review the transfer summary below.",
-        rows: [
-          { id: "row_ref", label: isDe ? "Buchungsreferenz" : "Booking Reference", valueTemplate: "{{booking_reference}}" },
-          { id: "row_guest", label: isDe ? "Gastname" : "Guest Name", valueTemplate: "{{guest_name}}" },
-          { id: "row_room", label: isDe ? "Zimmer" : "Room", valueTemplate: "{{room_name}}" },
-          { id: "row_amt", label: isDe ? "Übertragener Betrag" : "Amount Transferred", valueTemplate: "{{charge_amount}}" },
-          { id: "row_target", label: isDe ? "Übertragen an" : "Transferred To", valueTemplate: "{{transfer_target}}" },
-          { id: "row_desc", label: isDe ? "Details" : "Details", valueTemplate: "{{item_description}}" },
-          { id: "row_reason", label: isDe ? "Hinweise" : "Notes", valueTemplate: "{{reason}}" },
-          { id: "row_balance", label: isDe ? "Aktualisierter Restbetrag" : "Updated Remaining Balance", valueTemplate: "{{remaining_balance}}" },
         ],
       });
 
@@ -1475,31 +1205,6 @@ export function buildDefaultTemplateVariant(
           { id: "row_pts", label: isDe ? "Verfallende Punkte" : "Expiring Points", valueTemplate: "{{loyalty_points}}" },
           { id: "row_exp", label: isDe ? "Ablaufdatum" : "Expiry Date", valueTemplate: "{{expiry_date}}" },
           { id: "row_bal", label: isDe ? "Aktueller Punktestand" : "Available Points Balance", valueTemplate: "{{points_balance}}" },
-        ],
-      });
-
-    case "loyalty_points_expired":
-      return makeSimpleVariant({
-        branding,
-        language,
-        subject: isDe
-          ? "Hinweis: Treuepunkte abgelaufen - {{hotel_name}}"
-          : "Loyalty Points Expiry Update - {{hotel_name}}",
-        preheader: isDe
-          ? "Einige Ihrer Treuepunkte im {{hotel_name}} sind abgelaufen."
-          : "Unused loyalty points on your {{hotel_name}} account have expired.",
-        heading: isDe ? "Treuepunkte abgelaufen" : "Loyalty Points Expired",
-        greeting: isDe ? "Hallo {{guest_name}}," : "Hello {{guest_name}},",
-        intro: isDe
-          ? "Einige ungenutzte Treuepunkte auf Ihrem Konto im {{hotel_name}} sind abgelaufen. Unten finden Sie Ihren aktuellen Punktestand."
-          : "Some unused loyalty points on your {{hotel_name}} rewards account have reached their expiry date. Review your updated balance below.",
-        rows: [
-          { id: "row_guest", label: isDe ? "Gastname" : "Guest Name", valueTemplate: "{{guest_name}}" },
-          { id: "row_pts", label: isDe ? "Abgelaufene Punkte" : "Expired Points", valueTemplate: "{{loyalty_points}}" },
-          { id: "row_tier", label: isDe ? "Mitgliedsstufe" : "Membership Level", valueTemplate: "{{loyalty_tier}}" },
-          { id: "row_bal", label: isDe ? "Verfügbarer Punktestand" : "Available Points Balance", valueTemplate: "{{points_balance}}" },
-          { id: "row_date", label: isDe ? "Datum" : "Date", valueTemplate: "{{transaction_date}}" },
-          { id: "row_reason", label: isDe ? "Details" : "Details", valueTemplate: "{{reason}}" },
         ],
       });
 

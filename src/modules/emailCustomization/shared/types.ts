@@ -21,8 +21,6 @@ export type CustomizableEmailEventType =
   | "post_stay_feedback_request"
   | "guest_profile_created"
   | "fnb_order_posted"
-  | "room_transferred"
-  | "stay_extended"
   // Payments, Deposits, Discounts & Refunds
   | "payment_receipt"
   | "deposit_received"
@@ -30,10 +28,6 @@ export type CustomizableEmailEventType =
   | "invoice_issued"
   | "receipt_sent"
   | "discount_settlement_confirmation"
-  | "folio_charge_posted"
-  | "folio_charge_voided"
-  | "folio_discount_applied"
-  | "folio_balance_transferred"
   // Guest Loyalty & Rewards
   | "loyalty_account_activated"
   | "loyalty_points_awarded"
@@ -41,7 +35,6 @@ export type CustomizableEmailEventType =
   | "loyalty_points_redeemed"
   | "loyalty_tier_upgraded"
   | "loyalty_points_expiring"
-  | "loyalty_points_expired"
   // Corporate & City Ledger
   | "corporate_account_created"
   | "corporate_city_ledger_transfer"
@@ -86,8 +79,6 @@ export const CUSTOMIZABLE_EMAIL_EVENTS: CustomizableEmailEventType[] = [
   "post_stay_feedback_request",
   "guest_profile_created",
   "fnb_order_posted",
-  "room_transferred",
-  "stay_extended",
   // Payments, Deposits, Discounts & Refunds
   "payment_receipt",
   "deposit_received",
@@ -95,10 +86,6 @@ export const CUSTOMIZABLE_EMAIL_EVENTS: CustomizableEmailEventType[] = [
   "invoice_issued",
   "receipt_sent",
   "discount_settlement_confirmation",
-  "folio_charge_posted",
-  "folio_charge_voided",
-  "folio_discount_applied",
-  "folio_balance_transferred",
   // Guest Loyalty & Rewards
   "loyalty_account_activated",
   "loyalty_points_awarded",
@@ -106,7 +93,6 @@ export const CUSTOMIZABLE_EMAIL_EVENTS: CustomizableEmailEventType[] = [
   "loyalty_points_redeemed",
   "loyalty_tier_upgraded",
   "loyalty_points_expiring",
-  "loyalty_points_expired",
   // Corporate & City Ledger
   "corporate_account_created",
   "corporate_city_ledger_transfer",
@@ -147,21 +133,13 @@ export const ALLOWED_TEMPLATE_VARIABLES = [
   "room_name",
   "room_number",
   "room_type",
-  "previous_room",
   "check_in_date",
   "check_in_time",
   "check_out_date",
   "check_out_time",
-  "previous_check_out",
   "nights",
-  "extra_nights",
   "booking_reference",
   "reservation_number",
-  "charge_amount",
-  "item_description",
-  "charge_category",
-  "rate_adjustment",
-  "transfer_target",
   "total_amount",
   "original_amount",
   "discount_amount",
@@ -247,21 +225,13 @@ export const VARIABLE_DESCRIPTIONS: Record<
   room_name: { label: "Room Name / Number", group: "Stay", sample: "Room 204" },
   room_number: { label: "Room Number", group: "Stay", sample: "204" },
   room_type: { label: "Room Type", group: "Stay", sample: "Deluxe King Suite" },
-  previous_room: { label: "Previous Room (Room Transfer)", group: "Stay", sample: "Room 108 (Standard Queen)" },
   check_in_date: { label: "Check-In Date", group: "Stay", sample: "2026-11-24" },
   check_in_time: { label: "Check-In Time", group: "Stay", sample: "14:00" },
   check_out_date: { label: "Check-Out Date", group: "Stay", sample: "2026-11-27" },
   check_out_time: { label: "Check-Out Time", group: "Stay", sample: "12:00" },
-  previous_check_out: { label: "Previous Check-Out Date", group: "Stay", sample: "2026-11-25" },
   nights: { label: "Nights", group: "Stay", sample: "3" },
-  extra_nights: { label: "Additional Nights Added", group: "Stay", sample: "2" },
   booking_reference: { label: "Booking Reference", group: "Stay", sample: "RES8A4F2" },
   reservation_number: { label: "Reservation Number", group: "Stay", sample: "RES8A4F2" },
-  charge_amount: { label: "Posted / Transaction Amount", group: "Billing", sample: "NGN 20,000.00" },
-  item_description: { label: "Item / Charge Description", group: "Billing", sample: "Main Restaurant — Grilled Fish & Juice" },
-  charge_category: { label: "Charge Category", group: "Billing", sample: "F & B" },
-  rate_adjustment: { label: "Room Rate Adjustment", group: "Billing", sample: "+NGN 25,000.00" },
-  transfer_target: { label: "Transfer Destination", group: "Billing", sample: "Meridian Travel Group City Ledger" },
   total_amount: { label: "Total Amount", group: "Billing", sample: "NGN 100,000.00" },
   original_amount: { label: "Original Amount (Before Discount)", group: "Billing", sample: "NGN 100,000.00" },
   discount_amount: { label: "Discount Granted", group: "Billing", sample: "NGN 20,000.00" },
@@ -1156,20 +1126,12 @@ export interface EmailRenderContext {
   roomName?: string;
   roomNumber?: string;
   roomType?: string;
-  previousRoom?: string;
   checkInDate?: string;
   checkInTime?: string;
   checkOutDate?: string;
   checkOutTime?: string;
-  previousCheckOut?: string;
   nights?: number;
-  extraNights?: number;
   bookingReference?: string;
-  chargeAmount?: number;
-  itemDescription?: string;
-  chargeCategory?: string;
-  rateAdjustment?: string;
-  transferTarget?: string;
   totalAmount?: number;
   originalAmount?: number;
   discountAmount?: number;
