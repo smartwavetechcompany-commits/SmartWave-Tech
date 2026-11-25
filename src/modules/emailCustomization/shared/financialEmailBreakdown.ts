@@ -291,3 +291,178 @@ export function computeEmailFinancialBreakdown(
     hasFinancialData: originalAmount > 0 || amountPaid > 0 || discountAmount > 0,
   };
 }
+
+const PAYMENT_TRIGGER_EVENTS = new Set<string>([
+  "payment.received",
+  "receipt.sent",
+  "invoice.issued",
+]);
+
+const TRANSACTION_AMOUNT_EVENTS = new Set<string>([
+  "fnb.order_posted",
+  "fnb.order_voided",
+  "folio.charge_posted",
+  "folio.charge_voided",
+  "folio.discount_applied",
+  "folio.balance_transferred",
+  "corporate.city_ledger_transfer",
+  "corporate.payment_settled",
+  "system.daily_revenue_deficit",
+  "system.operational_alert",
+]);
+
+export interface NotificationEventFinancialResolution {
+  financialBreakdown: EmailFinancialBreakdown;
+  totalAmount?: number;
+  chargeAmount?: number;
+  originalAmount?: number;
+  discountAmount?: number;
+  amountPaid?: number;
+  balanceDue?: number;
+  paymentStatus?: string;
+  depositAmount?: number;
+  depositBalance?: number;
+  refundAmount?: number;
+}
+
+/**
+ * Pure, read-only resolver for email render-context financial amounts across all platform events.
+ *
+ * Prevents two critical inaccuracies:
+ * 1. Non-payment events (F&B charge, folio charge, void, discount, balance transfer, stay extension,
+ *    room transfer) NEVER pass `meta.amount` as `paymentAmount` into `computeEmailFinancialBreakdown`.
+ * 2. Transaction-scoped events (e.g. posting a ₦20,000 F&B order on a ₦239,100 stay) strictly bind
+ *    both `chargeAmount` ({{charge_amount}}) and `totalAmount` ({{total_amount}}) to the exact
+ *    transaction amount (₦20,000), NEVER overwriting it with the cumulative stay total (₦239,100).
+ */
+export function resolveNotificationEventFinancials(params: {
+  eventType: string;
+  reservation?: Record<string, any> | null;
+  ledgerEntries?: Array<Record<string, any>>;
+  meta?: Record<string, any> | null;
+  corporateCurrentBalance?: number | null;
+}): NotificationEventFinancialResolution {
+  const { eventType, reservation, ledgerEntries, corporateCurrentBalance } = params;
+  const meta = params.meta && typeof params.meta === "object" ? params.meta : {};
+
+  const metaAmount = toFiniteNumber(meta.amount);
+  const metaOutstanding = toFiniteNumber(meta.outstandingBalance);
+  const metaDiscount = toFiniteNumber(meta.discountAmount);
+  const metaDepositBalanceAfter = toFiniteNumber(meta.depositBalanceAfter);
+  const metaAdditionalCharge = toFiniteNumber(meta.additionalCharge);
+  const metaNewTotalAmount = toFiniteNumber(meta.newTotalAmount);
+  const metaPriceDifference = toFiniteNumber(meta.priceDifference);
+  const corpBalance = toFiniteNumber(corporateCurrentBalance);
+
+  const isPaymentEvent = PAYMENT_TRIGGER_EVENTS.has(eventType);
+  const isTransactionEvent = TRANSACTION_AMOUNT_EVENTS.has(eventType);
+  const isCorporateEvent = eventType.startsWith("corporate.");
+
+  const financialBreakdown = computeEmailFinancialBreakdown({
+    reservation,
+    ledgerEntries,
+    paymentAmount: isPaymentEvent ? metaAmount : undefined,
+    fallbackOutstandingBalance: metaOutstanding,
+    fallbackDiscountAmount: metaDiscount,
+  });
+
+  // Base reservation/folio figures
+  const originalAmount =
+    financialBreakdown.originalAmount > 0 ? financialBreakdown.originalAmount : undefined;
+  let discountAmount =
+    financialBreakdown.discountAmount > 0 ? financialBreakdown.discountAmount : undefined;
+  let amountPaid: number | undefined =
+    financialBreakdown.amountPaid > 0 ? financialBreakdown.amountPaid : undefined;
+  let balanceDue: number | undefined =
+    isCorporateEvent && corpBalance !== undefined
+      ? round2(Math.max(0, corpBalance))
+      : reservation || metaOutstanding !== undefined
+        ? financialBreakdown.remainingBalance
+        : undefined;
+  let paymentStatus: string | undefined = financialBreakdown.hasFinancialData
+    ? financialBreakdown.paymentStatus
+    : undefined;
+
+  let chargeAmount: number | undefined;
+  let totalAmount: number | undefined;
+  let depositAmount: number | undefined;
+  let depositBalance: number | undefined =
+    metaDepositBalanceAfter !== undefined ? round2(Math.max(0, metaDepositBalanceAfter)) : undefined;
+  let refundAmount: number | undefined;
+
+  if (eventType === "refund.processed") {
+    refundAmount = metaAmount !== undefined ? round2(Math.max(0, metaAmount)) : undefined;
+    chargeAmount = refundAmount;
+    totalAmount = refundAmount;
+    balanceDue = undefined;
+    paymentStatus = "Refund Processed";
+  } else if (eventType === "deposit.received") {
+    depositAmount = metaAmount !== undefined ? round2(Math.max(0, metaAmount)) : undefined;
+    chargeAmount = depositAmount;
+    totalAmount = depositAmount;
+  } else if (isTransactionEvent) {
+    // Strictly bind transaction amount to the posted/voided/discounted/transferred figure (e.g. 20,000),
+    // never to the cumulative reservation total (e.g. 239,100).
+    const txVal = metaAmount !== undefined ? round2(Math.max(0, metaAmount)) : undefined;
+    chargeAmount = txVal;
+    totalAmount = txVal;
+
+    if (eventType === "folio.discount_applied" && txVal !== undefined) {
+      discountAmount = txVal;
+    }
+    if (eventType === "corporate.payment_settled" && txVal !== undefined) {
+      amountPaid = txVal;
+    }
+  } else if (eventType === "reservation.stay_extended") {
+    chargeAmount =
+      metaAdditionalCharge !== undefined ? round2(Math.max(0, metaAdditionalCharge)) : undefined;
+    totalAmount =
+      metaNewTotalAmount !== undefined
+        ? round2(Math.max(0, metaNewTotalAmount))
+        : financialBreakdown.netPayableAmount > 0
+          ? financialBreakdown.netPayableAmount
+          : undefined;
+  } else if (eventType === "reservation.room_transferred") {
+    chargeAmount =
+      metaPriceDifference !== undefined ? round2(Math.abs(metaPriceDifference)) : undefined;
+    totalAmount =
+      metaNewTotalAmount !== undefined
+        ? round2(Math.max(0, metaNewTotalAmount))
+        : financialBreakdown.netPayableAmount > 0
+          ? financialBreakdown.netPayableAmount
+          : undefined;
+  } else if (eventType === "payment.received" || eventType === "receipt.sent") {
+    chargeAmount = metaAmount !== undefined ? round2(Math.max(0, metaAmount)) : undefined;
+    amountPaid =
+      metaAmount !== undefined
+        ? round2(Math.max(0, metaAmount))
+        : financialBreakdown.amountPaid > 0
+          ? financialBreakdown.amountPaid
+          : undefined;
+    totalAmount =
+      financialBreakdown.netPayableAmount > 0
+        ? financialBreakdown.netPayableAmount
+        : chargeAmount;
+  } else {
+    chargeAmount = metaAmount !== undefined ? round2(Math.max(0, metaAmount)) : undefined;
+    totalAmount =
+      financialBreakdown.netPayableAmount > 0
+        ? financialBreakdown.netPayableAmount
+        : chargeAmount;
+  }
+
+  return {
+    financialBreakdown,
+    totalAmount,
+    chargeAmount,
+    originalAmount,
+    discountAmount,
+    amountPaid,
+    balanceDue,
+    paymentStatus,
+    depositAmount,
+    depositBalance,
+    refundAmount,
+  };
+}
+

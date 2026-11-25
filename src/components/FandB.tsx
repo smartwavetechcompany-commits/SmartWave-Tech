@@ -1244,6 +1244,8 @@ export function FandB() {
               roomNumber: res.roomNumber || settleOrderModal.roomNumber || undefined,
               amount: settleAmount,
               outletName: settleOrderModal.outletName || 'Restaurant',
+              items: settleOrderModal.items || undefined,
+              description: `${settleOrderModal.outletName || 'Restaurant'} — F&B Charge (Bill #${billNo}): ${settleOrderModal.items || 'Restaurant Order'}`,
             },
           });
         } catch {

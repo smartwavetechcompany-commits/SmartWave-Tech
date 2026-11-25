@@ -225,3 +225,61 @@ export async function fsDeleteDoc(
   }
   return { ok: true, status: resp.status };
 }
+
+/**
+ * Strictly read-only, tenant-isolated query for a reservation's folio ledger entries
+ * under `hotels/{hotelId}/ledger` (`where reservationId == reservationId`).
+ * Used solely for computing accurate email balances without ever mutating ledger data.
+ */
+export async function fsQueryReservationLedger(
+  hotelId: string,
+  reservationId: string,
+  bearerToken?: string
+): Promise<Array<Record<string, any> & { id: string }>> {
+  if (!hotelId || !reservationId) return [];
+  try {
+    const url = `${getFirestoreBaseUrl()}/hotels/${encodeURIComponent(hotelId)}:runQuery`;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (bearerToken) headers.Authorization = `Bearer ${bearerToken}`;
+
+    const body = {
+      structuredQuery: {
+        from: [{ collectionId: "ledger" }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: "reservationId" },
+            op: "EQUAL",
+            value: { stringValue: reservationId },
+          },
+        },
+        limit: 500,
+      },
+    };
+
+    const resp = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) return [];
+    const rows = await resp.json();
+    if (!Array.isArray(rows)) return [];
+
+    const entries: Array<Record<string, any> & { id: string }> = [];
+    for (const row of rows) {
+      if (!row?.document?.fields) continue;
+      const decoded = decodeFirestoreDocument(row.document);
+      const id =
+        typeof row.document?.name === "string"
+          ? row.document.name.split("/").pop() || decoded.id || ""
+          : decoded.id || "";
+      if (String(decoded.reservationId || "") === reservationId) {
+        entries.push({ ...decoded, id });
+      }
+    }
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
