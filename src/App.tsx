@@ -102,6 +102,7 @@ function DashboardRoute() {
 
 function AppContent() {
   const { user, loading, profile, hotel, isSubscriptionActive, isOffline, retryConnection, hasHotelError, theme } = useAuth();
+  const { canAccessPMSModule } = useModuleAccess();
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const [resetCompletedInfo, setResetCompletedInfo] = React.useState<{ email?: string; message?: string } | null>(null);
   const location = useLocation();
@@ -133,29 +134,30 @@ function AppContent() {
   }, [location.pathname]);
 
   // Silent background heartbeat for Automated Daily Operations Report schedule
+  const dailyOpsActiveHotelId =
+    hotel?.id || (profile?.hotelId && profile.hotelId !== 'system' ? profile.hotelId : '');
   const canTriggerDailyOpsHeartbeat = Boolean(
     user &&
       profile &&
       profile.status === 'active' &&
       !profile.forcePasswordChange &&
-      hotel?.id &&
+      dailyOpsActiveHotelId &&
       (profile.role === 'hotelAdmin' ||
-        profile.role === 'admin' ||
         profile.role === 'superAdmin' ||
-        profile.staffRole === 'admin')
+        profile.staffRole === 'admin' ||
+        canAccessPMSModule('email_templates'))
   );
 
   React.useEffect(() => {
-    if (!canTriggerDailyOpsHeartbeat || !hotel?.id) return;
-    const activeHotelId = hotel.id;
+    if (!canTriggerDailyOpsHeartbeat || !dailyOpsActiveHotelId) return;
     let cancelled = false;
 
     const runCheck = () => {
       if (cancelled) return;
-      void emailCustomizationApi.checkDailyOpsDue(activeHotelId).catch(() => {});
+      void emailCustomizationApi.checkDailyOpsDue(dailyOpsActiveHotelId).catch(() => {});
     };
 
-    const initialTimer = window.setTimeout(runCheck, 6_000);
+    const initialTimer = window.setTimeout(runCheck, 5_000);
     const intervalTimer = window.setInterval(runCheck, 30_000);
 
     return () => {
@@ -163,7 +165,7 @@ function AppContent() {
       window.clearTimeout(initialTimer);
       window.clearInterval(intervalTimer);
     };
-  }, [canTriggerDailyOpsHeartbeat, hotel?.id]);
+  }, [canTriggerDailyOpsHeartbeat, dailyOpsActiveHotelId]);
 
   if (loading) {
     return <LandingLoadingScreen />;

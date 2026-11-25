@@ -7,7 +7,6 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
-    "postinstall": "node -e \"import('fs').then(async fs=>{if(!fs.existsSync('dist/index.html')&&fs.existsSync('vite.config.ts')){const{execSync}=await import('child_process');execSync('npm run build',{stdio:'inherit'});}})\"",
     "start": "node server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",

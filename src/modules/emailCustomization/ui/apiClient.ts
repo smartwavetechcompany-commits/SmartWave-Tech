@@ -394,9 +394,101 @@ export const emailCustomizationApi = {
       sent?: number;
       partial?: number;
       failed?: number;
+      lastReportDate?: string;
+      lastDeliveryStatus?: string;
+      lastSuccessfulDeliveryAt?: string;
+      nextScheduledDelivery?: {
+        iso: string;
+        localDisplay: string;
+        targetReportDate: string;
+      };
     }>("/api/email-customization/daily-ops-report/check-due", {
       method: "POST",
       body: {},
+      hotelId,
+    });
+  },
+
+  dryRunDailyOpsReport(payload: { reportDate?: string } = {}, hotelId?: string) {
+    return apiFetch<{
+      ok: boolean;
+      diagnostic: {
+        dryRun: true;
+        emailsSent: 0;
+        hotelId: string;
+        checkedAtIso: string;
+        verdict:
+          | "due_now"
+          | "scheduled_ready"
+          | "already_sent"
+          | "disabled"
+          | "no_active_recipients"
+          | "provider_unconfigured"
+          | "render_failed";
+        verdictLabel: string;
+        verdictSummary: string;
+        wouldSendNow: boolean;
+        emailProviderReady: boolean;
+        schedule: {
+          enabled: boolean;
+          scheduledTime: string;
+          timezone: string;
+          hotelLocalDate: string;
+          hotelLocalTime: string;
+          targetReportDate: string;
+          dueNow: boolean;
+          scheduledForIso: string;
+          nextScheduledDelivery: {
+            iso: string;
+            localDisplay: string;
+            targetReportDate: string;
+          };
+        };
+        recipients: {
+          activeCount: number;
+          pausedCount: number;
+          activeEmails: string[];
+        };
+        existingRunForDate: {
+          exists: boolean;
+          deliveryStatus?: string;
+          generationStatus?: string;
+          deliveredAt?: string;
+          retryCount?: number;
+        };
+        checks: Array<{
+          id: string;
+          label: string;
+          status: "pass" | "warn" | "fail";
+          detail: string;
+        }>;
+        rendered: {
+          ok: boolean;
+          error?: string;
+          subject?: string;
+          fromName?: string;
+          replyTo?: string;
+          periodLabel?: string;
+          html?: string;
+          htmlBytes?: number;
+          textBytes?: number;
+          summarySnapshot?: {
+            totalRooms: number;
+            occupiedRooms: number;
+            occupancyPercentage: number;
+            arrivalsCount: number;
+            departuresCount: number;
+            noShowsCount: number;
+            cancelledCount: number;
+            pendingHousekeepingTasks: number;
+            outstandingMaintenanceRequests: number;
+          };
+          limitations?: string[];
+        };
+      };
+    }>("/api/email-customization/daily-ops-report/dry-run", {
+      method: "POST",
+      body: payload,
       hotelId,
     });
   },

@@ -66,6 +66,7 @@ import {
   manualResendDailyOpsRun,
   registerHotelDailyOpsSessionToken,
   retryFailedDailyOpsRun,
+  runDailyOpsDryRunDiagnostic,
   runScheduledDailyOpsTick,
   saveDailyOpsConfig,
   sendDailyOpsTestReport,
@@ -973,7 +974,7 @@ export function mountEmailCustomizationRoutes(
         return res.status(200).json({ ok: true, skipped: true, reason: "insufficient_permissions" });
       }
 
-      const rate = previewLimiter.check(`daily-ops-check:${caller.uid}`, 6, 60_000);
+      const rate = previewLimiter.check(`daily-ops-check:${caller.uid}`, 20, 60_000);
       if (!rate.allowed) {
         return res.status(200).json({ ok: true, skipped: true, reason: "rate_limited" });
       }
@@ -985,12 +986,22 @@ export function mountEmailCustomizationRoutes(
         bearerToken,
       });
 
+      const latestCfg = await getDailyOpsConfig(
+        check.resolvedHotelId,
+        undefined,
+        bearerToken
+      ).catch(() => null);
+
       return res.json({
         ok: true,
         triggered: summary.dueHotels > 0,
         sent: summary.sent,
         partial: summary.partial,
         failed: summary.failed,
+        lastReportDate: latestCfg?.config.lastReportDate,
+        lastDeliveryStatus: latestCfg?.config.lastDeliveryStatus,
+        lastSuccessfulDeliveryAt: latestCfg?.config.lastSuccessfulDeliveryAt,
+        nextScheduledDelivery: latestCfg?.nextScheduledDelivery,
         summary,
       });
     } catch (err) {
@@ -1061,6 +1072,41 @@ export function mountEmailCustomizationRoutes(
       return res
         .status(500)
         .json({ error: sanitizeErrorForClient(err, "Failed to generate Daily Operations Report preview.") });
+    }
+  });
+
+  // Read-only Dry-Run Diagnostic: verifies schedule readiness, recipient status, provider config & template rendering without sending emails
+  app.post("/api/email-customization/daily-ops-report/dry-run", async (req, res) => {
+    try {
+      const ctx = await requireEmailModuleAccess(req, res, "manage");
+      if (!ctx) return;
+
+      const rate = previewLimiter.check(`daily-ops-dry-run:${ctx.caller.uid}`, 20, 60_000);
+      if (!rate.allowed) {
+        return res.status(429).json({ error: "Too many diagnostic requests. Please wait a moment." });
+      }
+
+      registerHotelDailyOpsSessionToken(ctx.hotelId, ctx.bearerToken);
+
+      const reportDate =
+        typeof req.body?.reportDate === "string" && req.body.reportDate.trim()
+          ? req.body.reportDate.trim()
+          : undefined;
+      if (reportDate && !isValidReportDate(reportDate)) {
+        return res.status(400).json({ error: "reportDate must be a valid YYYY-MM-DD date." });
+      }
+
+      const diagnostic = await runDailyOpsDryRunDiagnostic({
+        hotelId: ctx.hotelId,
+        reportDate,
+        bearerToken: ctx.bearerToken,
+      });
+
+      return res.json({ ok: true, diagnostic });
+    } catch (err) {
+      return res
+        .status(500)
+        .json({ error: sanitizeErrorForClient(err, "Failed to run Daily Operations Report dry-run diagnostic.") });
     }
   });
 

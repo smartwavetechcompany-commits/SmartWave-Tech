@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Activity,
   AlertCircle,
   CalendarClock,
   Check,
@@ -28,6 +29,7 @@ import {
   DEFAULT_DAILY_OPS_SECTIONS,
   DEFAULT_DAILY_OPS_TIME,
   DEFAULT_DAILY_OPS_TIMEZONE,
+  isValidScheduledTime,
   validateDailyOpsEmail,
   type DailyOpsRecipient,
   type DailyOpsReportConfig,
@@ -142,11 +144,48 @@ export function DailyOperationsReportPanel({
   } | null>(null);
   const [testEmail, setTestEmail] = useState(callerEmail || "");
   const [sendingTest, setSendingTest] = useState(false);
+  const [runningDryRun, setRunningDryRun] = useState(false);
+  const [dryRunResult, setDryRunResult] = useState<
+    Awaited<ReturnType<typeof emailCustomizationApi.dryRunDailyOpsReport>>["diagnostic"] | null
+  >(null);
 
   // History row action states
   const [viewingRunId, setViewingRunId] = useState<string | null>(null);
   const [retryingRunId, setRetryingRunId] = useState<string | null>(null);
   const [resendingRunId, setResendingRunId] = useState<string | null>(null);
+
+  // Refs for fresh state inside debounced auto-save and 15s polling loops
+  const configRef = useRef<DailyOpsReportConfig | null>(null);
+  const dirtyRef = useRef(false);
+  const scheduledTimeSaveTimerRef = useRef<number | null>(null);
+  const lastKnownDeliveryRef = useRef<{
+    lastSuccessfulDeliveryAt?: string;
+    lastReportDate?: string;
+    lastDeliveryStatus?: string;
+  }>({});
+
+  useEffect(() => {
+    configRef.current = config;
+    if (config) {
+      lastKnownDeliveryRef.current = {
+        lastSuccessfulDeliveryAt: config.lastSuccessfulDeliveryAt,
+        lastReportDate: config.lastReportDate,
+        lastDeliveryStatus: config.lastDeliveryStatus,
+      };
+    }
+  }, [config]);
+
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+
+  useEffect(() => {
+    return () => {
+      if (scheduledTimeSaveTimerRef.current !== null) {
+        window.clearTimeout(scheduledTimeSaveTimerRef.current);
+      }
+    };
+  }, []);
 
   const loadData = useCallback(async () => {
     try {
@@ -174,7 +213,7 @@ export function DailyOperationsReportPanel({
     void loadData();
   }, [loadData]);
 
-  const refreshRuns = async () => {
+  const refreshRuns = useCallback(async () => {
     try {
       setLoadingRuns(true);
       const [cfgRes, runsRes] = await Promise.all([
@@ -183,60 +222,78 @@ export function DailyOperationsReportPanel({
       ]);
       setRuns(runsRes.runs || []);
       setNextScheduled(cfgRes.nextScheduledDelivery);
-      if (!dirty) {
+      if (!dirtyRef.current) {
         setConfig(cfgRes.config);
+      } else {
+        setConfig((prev) =>
+          prev
+            ? {
+                ...prev,
+                lastSuccessfulDeliveryAt: cfgRes.config.lastSuccessfulDeliveryAt,
+                lastReportDate: cfgRes.config.lastReportDate,
+                lastDeliveryStatus: cfgRes.config.lastDeliveryStatus,
+                lastError: cfgRes.config.lastError,
+              }
+            : cfgRes.config
+        );
       }
     } catch (err: any) {
       toast.error(err?.message || "Failed to refresh delivery history.");
     } finally {
       setLoadingRuns(false);
     }
-  };
+  }, [hotelId]);
 
   const updateLocalConfig = (updater: (prev: DailyOpsReportConfig) => DailyOpsReportConfig) => {
     setConfig((prev) => (prev ? updater(prev) : prev));
     setDirty(true);
   };
 
-  const handleSaveConfig = async (
-    overrideConfig?: DailyOpsReportConfig,
-    customSuccessMessage?: string
-  ) => {
-    const target = overrideConfig || config;
-    if (!target || !canManage) return;
+  const handleSaveConfig = useCallback(
+    async (overrideConfig?: DailyOpsReportConfig, customSuccessMessage?: string) => {
+      const target = overrideConfig || configRef.current;
+      if (!target || !canManage) return;
 
-    // Client-side validation guard before API call
-    if (target.enabled && target.recipients.filter((r) => r.enabled).length === 0) {
-      toast.error("Add and enable at least one report recipient email before enabling automated daily delivery.");
-      return;
-    }
+      // Client-side validation guard before API call
+      if (target.enabled && target.recipients.filter((r) => r.enabled).length === 0) {
+        toast.error(
+          "Add and enable at least one report recipient email before enabling automated daily delivery."
+        );
+        return;
+      }
 
-    try {
-      setSaving(true);
-      const res = await emailCustomizationApi.saveDailyOpsConfig(
-        {
-          enabled: target.enabled,
-          scheduledTime: target.scheduledTime,
-          timezone: target.timezone,
-          recipients: target.recipients,
-          sections: target.sections,
-        },
-        hotelId
-      );
-      setConfig(res.config);
-      setNextScheduled(res.nextScheduledDelivery);
-      setTimezoneFallbackUsed(false);
-      setDirty(false);
-      toast.success(customSuccessMessage || "Daily Hotel Operations Report settings saved.");
-    } catch (err: any) {
-      toast.error(err?.message || "Could not save Daily Operations Report settings.");
-    } finally {
-      setSaving(false);
-    }
-  };
+      try {
+        setSaving(true);
+        const res = await emailCustomizationApi.saveDailyOpsConfig(
+          {
+            enabled: target.enabled,
+            scheduledTime: target.scheduledTime,
+            timezone: target.timezone,
+            recipients: target.recipients,
+            sections: target.sections,
+          },
+          hotelId
+        );
+        setConfig(res.config);
+        setNextScheduled(res.nextScheduledDelivery);
+        setTimezoneFallbackUsed(false);
+        setDirty(false);
+        toast.success(customSuccessMessage || "Daily Hotel Operations Report settings saved.");
+      } catch (err: any) {
+        toast.error(err?.message || "Could not save Daily Operations Report settings.");
+      } finally {
+        setSaving(false);
+      }
+    },
+    [canManage, hotelId]
+  );
 
   const handleToggleScheduleEnabled = async () => {
     if (!canManage || !config || saving) return;
+    if (scheduledTimeSaveTimerRef.current !== null) {
+      window.clearTimeout(scheduledTimeSaveTimerRef.current);
+      scheduledTimeSaveTimerRef.current = null;
+    }
     const nextEnabled = !config.enabled;
     const nextConfig: DailyOpsReportConfig = { ...config, enabled: nextEnabled };
     await handleSaveConfig(
@@ -247,7 +304,66 @@ export function DailyOperationsReportPanel({
     );
   };
 
-  // Live 30-second due check while automation is enabled so scheduled deliveries trigger on time and update UI immediately
+  const handleScheduledTimeChange = (rawValue: string) => {
+    const nextTime = rawValue || DEFAULT_DAILY_OPS_TIME;
+    updateLocalConfig((prev) => ({
+      ...prev,
+      scheduledTime: nextTime,
+    }));
+
+    if (scheduledTimeSaveTimerRef.current !== null) {
+      window.clearTimeout(scheduledTimeSaveTimerRef.current);
+      scheduledTimeSaveTimerRef.current = null;
+    }
+
+    if (!canManage || !isValidScheduledTime(nextTime)) return;
+
+    scheduledTimeSaveTimerRef.current = window.setTimeout(() => {
+      scheduledTimeSaveTimerRef.current = null;
+      const latest = configRef.current;
+      if (!latest || !isValidScheduledTime(latest.scheduledTime)) return;
+      void handleSaveConfig(
+        latest,
+        `Scheduled delivery time saved (${latest.scheduledTime} ${latest.timezone}).`
+      );
+    }, 600);
+  };
+
+  const handleScheduledTimeBlur = () => {
+    if (!canManage || !dirtyRef.current) return;
+    const latest = configRef.current;
+    if (!latest || !isValidScheduledTime(latest.scheduledTime)) return;
+    if (scheduledTimeSaveTimerRef.current !== null) {
+      window.clearTimeout(scheduledTimeSaveTimerRef.current);
+      scheduledTimeSaveTimerRef.current = null;
+      void handleSaveConfig(
+        latest,
+        `Scheduled delivery time saved (${latest.scheduledTime} ${latest.timezone}).`
+      );
+    }
+  };
+
+  const handleTimezoneChange = (nextTimezone: string) => {
+    if (!config) return;
+    if (scheduledTimeSaveTimerRef.current !== null) {
+      window.clearTimeout(scheduledTimeSaveTimerRef.current);
+      scheduledTimeSaveTimerRef.current = null;
+    }
+    const nextConfig: DailyOpsReportConfig = {
+      ...config,
+      timezone: nextTimezone,
+    };
+    setConfig(nextConfig);
+    setDirty(true);
+    if (canManage) {
+      void handleSaveConfig(
+        nextConfig,
+        `Hotel timezone saved (${nextTimezone}).`
+      );
+    }
+  };
+
+  // Live 15-second due check while automation is enabled so scheduled deliveries trigger on time and update UI immediately
   useEffect(() => {
     if (!config?.enabled || !canManage || !hotelId) return;
     let cancelled = false;
@@ -256,28 +372,47 @@ export function DailyOperationsReportPanel({
       try {
         const res = await emailCustomizationApi.checkDailyOpsDue(hotelId);
         if (cancelled) return;
-        if (res.triggered && ((res.sent || 0) > 0 || (res.partial || 0) > 0 || (res.failed || 0) > 0)) {
-          if ((res.sent || 0) > 0) {
+
+        const prevKnown = lastKnownDeliveryRef.current;
+        const deliveryMetadataChanged = Boolean(
+          (res.lastSuccessfulDeliveryAt &&
+            res.lastSuccessfulDeliveryAt !== prevKnown.lastSuccessfulDeliveryAt) ||
+            (res.lastReportDate && res.lastReportDate !== prevKnown.lastReportDate)
+        );
+
+        if (
+          (res.triggered && ((res.sent || 0) > 0 || (res.partial || 0) > 0 || (res.failed || 0) > 0)) ||
+          deliveryMetadataChanged
+        ) {
+          if ((res.sent || 0) > 0 || (deliveryMetadataChanged && res.lastDeliveryStatus === "sent")) {
             toast.success("Scheduled Daily Operations Report delivered automatically.");
           } else if ((res.partial || 0) > 0) {
             toast.warning("Scheduled Daily Operations Report partially delivered. Check Delivery History.");
           }
           await refreshRuns();
+        } else if (res.nextScheduledDelivery) {
+          setNextScheduled(res.nextScheduledDelivery);
         }
       } catch {
         // Non-blocking background check
       }
     };
 
-    const timer = window.setInterval(() => {
+    // Quick initial check 3s after enabling or saving a new scheduled time/timezone
+    const initialTimer = window.setTimeout(() => {
       void checkDueNow();
-    }, 30_000);
+    }, 3_000);
+
+    const intervalTimer = window.setInterval(() => {
+      void checkDueNow();
+    }, 15_000);
 
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      window.clearTimeout(initialTimer);
+      window.clearInterval(intervalTimer);
     };
-  }, [config?.enabled, canManage, hotelId]);
+  }, [config?.enabled, config?.scheduledTime, config?.timezone, canManage, hotelId, refreshRuns]);
 
   const persistRecipientsUpdate = async (
     nextConfig: DailyOpsReportConfig,
@@ -479,6 +614,22 @@ export function DailyOperationsReportPanel({
       toast.error(err?.message || "Failed to send test report.");
     } finally {
       setSendingTest(false);
+    }
+  };
+
+  const handleRunDryRunDiagnostic = async () => {
+    if (!canManage) return;
+    try {
+      setRunningDryRun(true);
+      const res = await emailCustomizationApi.dryRunDailyOpsReport(
+        { reportDate: previewDate || undefined },
+        hotelId
+      );
+      setDryRunResult(res.diagnostic);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to run dry-run diagnostic.");
+    } finally {
+      setRunningDryRun(false);
     }
   };
 
@@ -689,16 +840,12 @@ export function DailyOperationsReportPanel({
                   type="time"
                   value={config.scheduledTime}
                   disabled={!canManage}
-                  onChange={(e) =>
-                    updateLocalConfig((prev) => ({
-                      ...prev,
-                      scheduledTime: e.target.value || DEFAULT_DAILY_OPS_TIME,
-                    }))
-                  }
+                  onChange={(e) => handleScheduledTimeChange(e.target.value)}
+                  onBlur={handleScheduledTimeBlur}
                   className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-xs font-mono text-zinc-100 focus:outline-none focus:border-emerald-500/60 disabled:opacity-60"
                 />
                 <p className="text-[10px] text-zinc-500 mt-1">
-                  Default: 00:00 (12:00 AM). Report always covers the preceding full calendar day (00:00–23:59).
+                  Auto-saves when changed. Report always covers the preceding full calendar day (00:00–23:59).
                 </p>
               </div>
 
@@ -709,9 +856,7 @@ export function DailyOperationsReportPanel({
                 <select
                   value={config.timezone}
                   disabled={!canManage}
-                  onChange={(e) =>
-                    updateLocalConfig((prev) => ({ ...prev, timezone: e.target.value }))
-                  }
+                  onChange={(e) => handleTimezoneChange(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500/60 disabled:opacity-60"
                 >
                   {timezoneOptions.map((tz) => (
@@ -722,11 +867,35 @@ export function DailyOperationsReportPanel({
                 </select>
                 {timezoneFallbackUsed && (
                   <p className="text-[10px] text-amber-400 mt-1">
-                    Using explicit fallback timezone ({DEFAULT_DAILY_OPS_TIMEZONE}). Save to lock in your property&apos;s timezone.
+                    Using explicit fallback timezone ({DEFAULT_DAILY_OPS_TIMEZONE}). Selecting a timezone or toggling automation locks it in automatically.
                   </p>
                 )}
               </div>
             </div>
+
+            {canManage && (saving || dirty) && (
+              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-[11px]">
+                <span className="text-zinc-400 inline-flex items-center gap-1.5">
+                  {saving ? (
+                    <>
+                      <Loader2 size={12} className="animate-spin text-emerald-400" />
+                      Saving schedule changes...
+                    </>
+                  ) : (
+                    "Unsaved configuration changes pending."
+                  )}
+                </span>
+                {!saving && dirty && (
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveConfig()}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-[11px] font-bold text-white transition-colors"
+                  >
+                    <Save size={11} /> Save Now
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Report Content Sections */}
             <div className="pt-2 border-t border-zinc-800 space-y-2.5">
@@ -1024,15 +1193,27 @@ export function DailyOperationsReportPanel({
                   Preview Report
                 </button>
                 {canManage && (
-                  <button
-                    type="button"
-                    disabled={sendingTest}
-                    onClick={() => void handleSendTestReport()}
-                    className="w-full px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
-                  >
-                    {sendingTest ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                    Send Test
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      disabled={sendingTest}
+                      onClick={() => void handleSendTestReport()}
+                      className="w-full px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                    >
+                      {sendingTest ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                      Send Test
+                    </button>
+                    <button
+                      type="button"
+                      disabled={runningDryRun}
+                      onClick={() => void handleRunDryRunDiagnostic()}
+                      className="w-full px-3 py-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-xs font-bold text-amber-300 inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                      title="Verify delivery readiness and template rendering without sending any email"
+                    >
+                      {runningDryRun ? <Loader2 size={13} className="animate-spin" /> : <Activity size={13} />}
+                      Dry-Run Diagnostic
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -1253,6 +1434,168 @@ export function DailyOperationsReportPanel({
                 srcDoc={previewModal.html}
                 className="w-full h-[70vh] rounded-xl bg-white border border-zinc-800"
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dry-Run Diagnostic Modal (Strictly Read-Only — Zero Emails Sent) */}
+      {dryRunResult && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
+            <div className="p-4 border-b border-zinc-800 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                    <Activity size={16} className="text-amber-400" />
+                    Automated Daily Report — Dry-Run Diagnostic
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-zinc-800 text-zinc-300 border border-zinc-700">
+                    Dry-Run Only • 0 Emails Sent
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-400 mt-1">
+                  Target reporting date:{" "}
+                  <span className="font-mono text-zinc-200">{dryRunResult.schedule.targetReportDate}</span>{" "}
+                  • Hotel clock:{" "}
+                  <span className="font-mono text-zinc-200">
+                    {dryRunResult.schedule.hotelLocalDate} {dryRunResult.schedule.hotelLocalTime} ({dryRunResult.schedule.timezone})
+                  </span>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDryRunResult(null)}
+                className="p-2 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-5 bg-zinc-950/60">
+              {/* Overall Verdict Banner */}
+              <div
+                className={`rounded-xl p-4 border flex flex-wrap items-start justify-between gap-3 ${
+                  dryRunResult.verdict === "due_now" || dryRunResult.verdict === "scheduled_ready"
+                    ? "bg-emerald-500/10 border-emerald-500/30"
+                    : dryRunResult.verdict === "disabled" || dryRunResult.verdict === "already_sent"
+                      ? "bg-amber-500/10 border-amber-500/30"
+                      : "bg-rose-500/10 border-rose-500/30"
+                }`}
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-xs font-bold uppercase tracking-wider ${
+                        dryRunResult.verdict === "due_now" || dryRunResult.verdict === "scheduled_ready"
+                          ? "text-emerald-300"
+                          : dryRunResult.verdict === "disabled" || dryRunResult.verdict === "already_sent"
+                            ? "text-amber-300"
+                            : "text-rose-300"
+                      }`}
+                    >
+                      {dryRunResult.verdictLabel}
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-200">{dryRunResult.verdictSummary}</p>
+                </div>
+                <div className="text-right text-[11px] text-zinc-400 shrink-0">
+                  <div>Next Run: <span className="text-zinc-200 font-semibold">{dryRunResult.schedule.nextScheduledDelivery.localDisplay}</span></div>
+                  <div>Active Recipients: <span className="text-zinc-200 font-semibold">{dryRunResult.recipients.activeCount}</span></div>
+                </div>
+              </div>
+
+              {/* Verification Checklist */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {dryRunResult.checks.map((chk) => (
+                  <div
+                    key={chk.id}
+                    className="rounded-xl bg-zinc-900 border border-zinc-800 p-3.5 flex items-start gap-3"
+                  >
+                    <div className="mt-0.5 shrink-0">
+                      {chk.status === "pass" ? (
+                        <CheckCircle2 size={15} className="text-emerald-400" />
+                      ) : chk.status === "warn" ? (
+                        <AlertCircle size={15} className="text-amber-400" />
+                      ) : (
+                        <XCircle size={15} className="text-rose-400" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-zinc-100">{chk.label}</div>
+                      <div className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">{chk.detail}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Resolved Target Recipients */}
+              <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4 space-y-2">
+                <div className="text-xs font-bold text-zinc-200">
+                  Target Recipients ({dryRunResult.recipients.activeCount} active
+                  {dryRunResult.recipients.pausedCount > 0 ? `, ${dryRunResult.recipients.pausedCount} paused` : ""})
+                </div>
+                {dryRunResult.recipients.activeEmails.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {dryRunResult.recipients.activeEmails.map((em) => (
+                      <span
+                        key={em}
+                        className="px-2.5 py-1 rounded-md bg-zinc-950 border border-zinc-800 text-[11px] font-mono text-zinc-200"
+                      >
+                        {em}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-rose-300">
+                    No active recipient email addresses configured. Add and enable at least one recipient above.
+                  </p>
+                )}
+              </div>
+
+              {/* Template Rendering Verification & Live Preview */}
+              <div className="rounded-xl bg-zinc-900 border border-zinc-800 overflow-hidden">
+                <div className="p-3.5 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-zinc-100">
+                      Rendered Template Preview
+                    </div>
+                    {dryRunResult.rendered.ok && (
+                      <div className="text-[11px] text-zinc-400 truncate mt-0.5">
+                        Subject: <span className="text-zinc-200">{dryRunResult.rendered.subject}</span>{" "}
+                        • HTML Size:{" "}
+                        <span className="font-mono text-zinc-200">
+                          {((dryRunResult.rendered.htmlBytes || 0) / 1024).toFixed(1)} KB
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  {dryRunResult.rendered.summarySnapshot && (
+                    <div className="text-[11px] text-zinc-400">
+                      Occupancy:{" "}
+                      <span className="text-emerald-400 font-bold">
+                        {dryRunResult.rendered.summarySnapshot.occupancyPercentage}%
+                      </span>{" "}
+                      ({dryRunResult.rendered.summarySnapshot.occupiedRooms}/{dryRunResult.rendered.summarySnapshot.totalRooms} rooms)
+                    </div>
+                  )}
+                </div>
+
+                {dryRunResult.rendered.ok && dryRunResult.rendered.html ? (
+                  <div className="p-3 bg-zinc-950">
+                    <iframe
+                      title="Dry-Run Daily Operations Report Template Preview"
+                      sandbox=""
+                      srcDoc={dryRunResult.rendered.html}
+                      className="w-full h-[52vh] rounded-lg bg-white border border-zinc-800"
+                    />
+                  </div>
+                ) : (
+                  <div className="p-4 text-xs text-rose-300">
+                    {dryRunResult.rendered.error || "Unable to render template preview."}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

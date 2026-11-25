@@ -8,7 +8,7 @@
  */
 
 import crypto from "crypto";
-import { sendEmail, type SendEmailParams, type SendEmailResult } from "../../../services/emailService.ts";
+import { sendEmail, validateEmailConfig, type SendEmailParams, type SendEmailResult } from "../../../services/emailService.ts";
 import { isSafeIdentifier } from "../../../utils/serverSecurity.ts";
 import {
   computeCalendarDayWindow,
@@ -594,12 +594,33 @@ async function logEmailNotificationAudit(params: {
 }
 
 const inFlightDailyOpsHotels = new Set<string>();
+const RECENTLY_DELIVERED_TTL_MS = 12 * 60 * 60 * 1000; // 12h volatile in-memory duplicate guard
+const recentlyDeliveredDailyOps = new Map<string, number>();
 const AUTO_RETRY_BACKOFF_MS = 15 * 60 * 1000;
 const MAX_AUTO_RETRIES = 3;
 
+export function clearRecentlyDeliveredDailyOps(): void {
+  recentlyDeliveredDailyOps.clear();
+}
+
+function isRecentlyDeliveredInMemory(lockKey: string, nowMs = Date.now()): boolean {
+  const expiresAt = recentlyDeliveredDailyOps.get(lockKey);
+  if (!expiresAt) return false;
+  if (expiresAt <= nowMs) {
+    recentlyDeliveredDailyOps.delete(lockKey);
+    return false;
+  }
+  return true;
+}
+
+function markRecentlyDeliveredInMemory(lockKey: string, nowMs = Date.now()): void {
+  recentlyDeliveredDailyOps.set(lockKey, nowMs + RECENTLY_DELIVERED_TTL_MS);
+}
+
 /**
  * Executes a single scheduled daily operations report run for a hotel & reporting date.
- * Strictly idempotent via deterministic runId = reportDate (`YYYY-MM-DD`) and in-flight mutex.
+ * Strictly idempotent via deterministic runId = reportDate (`YYYY-MM-DD`), in-flight mutex,
+ * and volatile in-memory duplicate guard in case of transient Firestore write blips.
  */
 export async function executeScheduledDailyOpsRun(params: {
   hotelId: string;
@@ -622,12 +643,16 @@ export async function executeScheduledDailyOpsRun(params: {
   if (inFlightDailyOpsHotels.has(lockKey)) {
     return { status: "skipped", reason: "in_flight" };
   }
+  if (!dryRun && isRecentlyDeliveredInMemory(lockKey)) {
+    return { status: "skipped", reason: "already_sent" };
+  }
   inFlightDailyOpsHotels.add(lockKey);
 
   try {
     // 1. Check existing scheduled run for strict duplicate prevention & failed-run auto-retry backoff
     const existingRun = await getDailyOpsRun(hotelId, runId, bearerToken);
     if (existingRun && existingRun.deliveryStatus === "sent") {
+      markRecentlyDeliveredInMemory(lockKey);
       return { status: "skipped", reason: "already_sent", run: existingRun };
     }
     if (
@@ -723,6 +748,9 @@ export async function executeScheduledDailyOpsRun(params: {
   });
 
   const deliveredAt = delivery.deliveryStatus === "sent" ? new Date().toISOString() : undefined;
+  if (delivery.deliveryStatus === "sent") {
+    markRecentlyDeliveredInMemory(lockKey);
+  }
 
   // 4. Persist complete run record including preserved HTML snapshot for audit & retry
   const runRecord: DailyOpsReportRun = {
@@ -749,7 +777,12 @@ export async function executeScheduledDailyOpsRun(params: {
     idempotencyKey,
   };
 
-  await writeDoc(buildRunPath(hotelId, runId), runRecord, bearerToken);
+  const runWriteRes = await writeDoc(buildRunPath(hotelId, runId), runRecord, bearerToken);
+  if (!runWriteRes.ok) {
+    console.warn(
+      `[DailyOpsScheduler] Could not persist run record for hotel=${hotelId} date=${reportDate}: ${runWriteRes.error || "write failed"}`
+    );
+  }
 
   // 5. Update config status fields without touching recipients or schedule settings
   const updatedConfig: DailyOpsReportConfig = {
@@ -766,7 +799,12 @@ export async function executeScheduledDailyOpsRun(params: {
         }),
     updatedAt: new Date().toISOString(),
   };
-  await writeDoc(buildConfigPath(hotelId), updatedConfig, bearerToken);
+  const cfgWriteRes = await writeDoc(buildConfigPath(hotelId), updatedConfig, bearerToken);
+  if (!cfgWriteRes.ok) {
+    console.warn(
+      `[DailyOpsScheduler] Could not update config status for hotel=${hotelId} date=${reportDate}: ${cfgWriteRes.error || "write failed"}`
+    );
+  }
 
   await logEmailNotificationAudit({
     hotelId,
@@ -889,6 +927,10 @@ export async function retryFailedDailyOpsRun(params: {
     recipientResults: mergedResults,
     retryCount: nextRetryNumber,
   };
+
+  if (allSent && existing.triggerType === "scheduled") {
+    markRecentlyDeliveredInMemory(`${hotelId}:${existing.reportDate}`);
+  }
 
   await writeDoc(buildRunPath(hotelId, runId), updatedRun, bearerToken);
 
@@ -1075,6 +1117,271 @@ export async function sendDailyOpsTestReport(params: {
     sentTo: cleanedEmail,
     reportDate: generated.report.reportDate,
     messageId: sendRes.messageId,
+  };
+}
+
+export interface DailyOpsDryRunCheckItem {
+  id: string;
+  label: string;
+  status: "pass" | "warn" | "fail";
+  detail: string;
+}
+
+export interface DailyOpsDryRunDiagnosticResult {
+  dryRun: true;
+  emailsSent: 0;
+  hotelId: string;
+  checkedAtIso: string;
+  verdict:
+    | "due_now"
+    | "scheduled_ready"
+    | "already_sent"
+    | "disabled"
+    | "no_active_recipients"
+    | "provider_unconfigured"
+    | "render_failed";
+  verdictLabel: string;
+  verdictSummary: string;
+  wouldSendNow: boolean;
+  emailProviderReady: boolean;
+  schedule: {
+    enabled: boolean;
+    scheduledTime: string;
+    timezone: string;
+    hotelLocalDate: string;
+    hotelLocalTime: string;
+    targetReportDate: string;
+    dueNow: boolean;
+    scheduledForIso: string;
+    nextScheduledDelivery: ReturnType<typeof computeNextScheduledDelivery>;
+  };
+  recipients: {
+    activeCount: number;
+    pausedCount: number;
+    activeEmails: string[];
+  };
+  existingRunForDate: {
+    exists: boolean;
+    deliveryStatus?: string;
+    generationStatus?: string;
+    deliveredAt?: string;
+    retryCount?: number;
+  };
+  checks: DailyOpsDryRunCheckItem[];
+  rendered: {
+    ok: boolean;
+    error?: string;
+    subject?: string;
+    fromName?: string;
+    replyTo?: string;
+    periodLabel?: string;
+    html?: string;
+    htmlBytes?: number;
+    textBytes?: number;
+    summarySnapshot?: DailyOpsReportSummarySnapshot;
+    limitations?: string[];
+  };
+}
+
+/**
+ * Strictly read-only, side-effect-free dry-run diagnostic for a hotel's automated
+ * Daily Hotel Operations Report. Verifies configuration, schedule evaluation,
+ * recipient readiness, email provider availability, duplicate-run guard, and full
+ * HTML/text template rendering without sending any emails or writing to Firestore.
+ */
+export async function runDailyOpsDryRunDiagnostic(params: {
+  hotelId: string;
+  reportDate?: string;
+  now?: Date;
+  bearerToken?: string;
+}): Promise<DailyOpsDryRunDiagnosticResult> {
+  const { hotelId, bearerToken } = params;
+  const now = params.now || new Date();
+  const checkedAtIso = now.toISOString();
+
+  const { config, nextScheduledDelivery } = await getDailyOpsConfig(
+    hotelId,
+    undefined,
+    bearerToken
+  );
+
+  const dueEval = evaluateDailyOpsScheduleDue(
+    now,
+    config.timezone,
+    config.scheduledTime,
+    config.lastReportDate
+  );
+
+  const targetReportDate =
+    params.reportDate && isValidReportDate(params.reportDate)
+      ? params.reportDate
+      : dueEval.reportDate;
+
+  const existingRun = await getDailyOpsRun(hotelId, targetReportDate, bearerToken).catch(() => null);
+
+  const activeEmails = config.recipients
+    .filter((r) => r.enabled && validateDailyOpsEmail(r.email))
+    .map((r) => r.email.toLowerCase());
+  const pausedCount = Math.max(0, config.recipients.length - activeEmails.length);
+
+  const providerCheck = validateEmailConfig();
+  const emailProviderReady = Boolean(providerCheck.ok);
+
+  // Verify live data aggregation & HTML/text template rendering (strictly read-only)
+  let renderedInfo: DailyOpsDryRunDiagnosticResult["rendered"] = { ok: false };
+  try {
+    const generated = await generateDailyOpsReportForHotel({
+      hotelId,
+      reportDate: targetReportDate,
+      bearerToken,
+    });
+    const htmlBytes = Buffer.byteLength(generated.rendered.html || "", "utf8");
+    const textBytes = Buffer.byteLength(generated.rendered.text || "", "utf8");
+    renderedInfo = {
+      ok: true,
+      subject: generated.rendered.subject,
+      fromName: generated.rendered.fromName,
+      replyTo: generated.rendered.replyTo,
+      periodLabel: generated.report.periodLabel,
+      html: generated.rendered.html,
+      htmlBytes,
+      textBytes,
+      summarySnapshot: summarizeReport(generated.report),
+      limitations: generated.report.limitations || [],
+    };
+  } catch (err: any) {
+    renderedInfo = {
+      ok: false,
+      error: err?.message || "Template rendering failed during dry-run.",
+    };
+  }
+
+  const alreadySentForDate = existingRun?.deliveryStatus === "sent";
+  const checks: DailyOpsDryRunCheckItem[] = [
+    {
+      id: "automation_enabled",
+      label: "Automation Schedule Switch",
+      status: config.enabled ? "pass" : "warn",
+      detail: config.enabled
+        ? `Enabled — scheduled daily at ${config.scheduledTime} (${config.timezone}).`
+        : `Currently paused (disabled). Switch automation ON to trigger automatically at ${config.scheduledTime}.`,
+    },
+    {
+      id: "recipients",
+      label: "Active Recipients",
+      status: activeEmails.length > 0 ? "pass" : "fail",
+      detail:
+        activeEmails.length > 0
+          ? `${activeEmails.length} active recipient${activeEmails.length === 1 ? "" : "s"} ready${pausedCount > 0 ? ` (${pausedCount} paused)` : ""}.`
+          : "No active valid email recipients configured.",
+    },
+    {
+      id: "email_provider",
+      label: "Email Delivery Provider",
+      status: emailProviderReady ? "pass" : "fail",
+      detail: emailProviderReady
+        ? "Resend email delivery service is configured and ready."
+        : "Email delivery service is not configured on the server.",
+    },
+    {
+      id: "schedule_clock",
+      label: "Schedule Clock & Window",
+      status: "pass",
+      detail: `Hotel local clock: ${dueEval.localDateStr} ${dueEval.localTimeStr} (${config.timezone}). Target reporting date: ${targetReportDate}. Next scheduled run: ${nextScheduledDelivery.localDisplay}.`,
+    },
+    {
+      id: "duplicate_guard",
+      label: "Duplicate-Delivery Guard",
+      status: alreadySentForDate ? "warn" : "pass",
+      detail: alreadySentForDate
+        ? `Report for ${targetReportDate} was already delivered${existingRun?.deliveredAt ? ` at ${existingRun.deliveredAt}` : ""}; scheduler will skip duplicates.`
+        : existingRun
+          ? `Prior attempt for ${targetReportDate} recorded status "${existingRun.deliveryStatus}" (retries: ${existingRun.retryCount || 0}).`
+          : `No existing sent run for ${targetReportDate} — eligible for delivery when due.`,
+    },
+    {
+      id: "template_render",
+      label: "Report Template Rendering",
+      status: renderedInfo.ok ? "pass" : "fail",
+      detail: renderedInfo.ok
+        ? `Rendered cleanly (${((renderedInfo.htmlBytes || 0) / 1024).toFixed(1)} KB HTML) — Subject: "${renderedInfo.subject}".`
+        : renderedInfo.error || "Failed to render report template.",
+    },
+  ];
+
+  let verdict: DailyOpsDryRunDiagnosticResult["verdict"];
+  let verdictLabel: string;
+  let verdictSummary: string;
+  let wouldSendNow = false;
+
+  if (!renderedInfo.ok) {
+    verdict = "render_failed";
+    verdictLabel = "Template Render Failed";
+    verdictSummary = renderedInfo.error || "The report template could not be rendered.";
+  } else if (!emailProviderReady) {
+    verdict = "provider_unconfigured";
+    verdictLabel = "Email Provider Not Configured";
+    verdictSummary = "Template rendered cleanly, but the server email provider is not configured.";
+  } else if (!config.enabled) {
+    verdict = "disabled";
+    verdictLabel = "Automation Paused (Disabled)";
+    verdictSummary =
+      "Template rendered cleanly, but automated daily delivery is switched OFF. Toggle the schedule switch ON to deliver automatically.";
+  } else if (activeEmails.length === 0) {
+    verdict = "no_active_recipients";
+    verdictLabel = "No Active Recipients";
+    verdictSummary =
+      "Template rendered cleanly, but there are no enabled recipient email addresses configured.";
+  } else if (alreadySentForDate) {
+    verdict = "already_sent";
+    verdictLabel = "Already Delivered for Date";
+    verdictSummary = `Report for ${targetReportDate} has already been delivered. Next scheduled delivery: ${nextScheduledDelivery.localDisplay}.`;
+  } else if (dueEval.due) {
+    verdict = "due_now";
+    verdictLabel = "Due Now — Ready to Deliver";
+    verdictSummary = `All checks passed. A live scheduled run would immediately deliver this report to ${activeEmails.length} active recipient${activeEmails.length === 1 ? "" : "s"}.`;
+    wouldSendNow = true;
+  } else {
+    verdict = "scheduled_ready";
+    verdictLabel = "Scheduled & Ready";
+    verdictSummary = `All checks passed. Automated delivery will trigger for ${activeEmails.length} active recipient${activeEmails.length === 1 ? "" : "s"} at ${nextScheduledDelivery.localDisplay}.`;
+  }
+
+  return {
+    dryRun: true,
+    emailsSent: 0,
+    hotelId,
+    checkedAtIso,
+    verdict,
+    verdictLabel,
+    verdictSummary,
+    wouldSendNow,
+    emailProviderReady,
+    schedule: {
+      enabled: config.enabled,
+      scheduledTime: config.scheduledTime,
+      timezone: config.timezone,
+      hotelLocalDate: dueEval.localDateStr,
+      hotelLocalTime: dueEval.localTimeStr,
+      targetReportDate,
+      dueNow: dueEval.due,
+      scheduledForIso: dueEval.scheduledForIso,
+      nextScheduledDelivery,
+    },
+    recipients: {
+      activeCount: activeEmails.length,
+      pausedCount,
+      activeEmails,
+    },
+    existingRunForDate: {
+      exists: Boolean(existingRun),
+      deliveryStatus: existingRun?.deliveryStatus,
+      generationStatus: existingRun?.generationStatus,
+      deliveredAt: existingRun?.deliveredAt,
+      retryCount: existingRun?.retryCount,
+    },
+    checks,
+    rendered: renderedInfo,
   };
 }
 
@@ -1353,7 +1660,7 @@ export async function runDailyOpsBackgroundSchedulerPass(options: {
 let schedulerStarted = false;
 let schedulerInFlight = false;
 
-export function startDailyOpsBackgroundScheduler(intervalMs = 30_000): void {
+export function startDailyOpsBackgroundScheduler(intervalMs = 15_000): void {
   if (schedulerStarted) return;
   schedulerStarted = true;
 
