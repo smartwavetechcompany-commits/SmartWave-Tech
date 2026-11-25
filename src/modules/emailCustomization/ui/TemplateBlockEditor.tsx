@@ -3,8 +3,10 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowLeft,
+  Braces,
   ChevronDown,
   ChevronRight,
+  Columns2,
   History,
   Image as ImageIcon,
   LayoutTemplate,
@@ -79,6 +81,13 @@ interface TemplateBlockEditorProps {
   onBack: () => void;
   onDocumentUpdated: (doc: EmailTemplateDocument) => void;
   onSettingsUpdated?: (settings: HotelEmailSettings) => void;
+  splitPreview?: boolean;
+  onToggleSplitPreview?: () => void;
+  variablesDrawerOpen?: boolean;
+  onToggleVariablesDrawer?: () => void;
+  onActiveFieldLabelChange?: (label: string | null) => void;
+  onResolvedVariablesChange?: (vars: Record<string, string>) => void;
+  insertVariableHandlerRef?: React.MutableRefObject<((varName: string) => void) | null>;
 }
 
 const MODERN_BLOCK_SET = new Set<string>(MODERN_EMAIL_BLOCK_TYPES);
@@ -88,6 +97,48 @@ const ALLOWED_DEFAULT_FOOTER_SET = new Set<string>(ALLOWED_DEFAULT_FOOTER_BLOCK_
 
 function makeId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function isInsertableTextControl(
+  node: EventTarget | null
+): node is HTMLInputElement | HTMLTextAreaElement {
+  if (!node || !(node instanceof HTMLElement)) return false;
+  if (node instanceof HTMLTextAreaElement) {
+    return !node.disabled && !node.readOnly;
+  }
+  if (node instanceof HTMLInputElement) {
+    const t = (node.type || "text").toLowerCase();
+    const allowed = t === "text" || t === "url" || t === "email" || t === "search";
+    return allowed && !node.disabled && !node.readOnly;
+  }
+  return false;
+}
+
+function deriveFieldLabel(el: HTMLInputElement | HTMLTextAreaElement): string {
+  const explicit = el.getAttribute("data-field-label") || el.getAttribute("aria-label");
+  if (explicit && explicit.trim()) return explicit.trim();
+
+  if (el.id) {
+    const matchingLabel = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    if (matchingLabel?.textContent?.trim()) {
+      return matchingLabel.textContent.trim();
+    }
+  }
+
+  const parentDiv = el.parentElement;
+  if (parentDiv) {
+    const siblingLabel = parentDiv.querySelector(":scope > label, :scope > div > label");
+    if (siblingLabel?.textContent?.trim()) {
+      return siblingLabel.textContent.trim().slice(0, 60);
+    }
+  }
+
+  const placeholder = el.getAttribute("placeholder");
+  if (placeholder && placeholder.trim()) {
+    return placeholder.trim().slice(0, 48);
+  }
+
+  return el instanceof HTMLTextAreaElement ? "Text Area" : "Text Field";
 }
 
 export function TemplateBlockEditor({
@@ -102,6 +153,13 @@ export function TemplateBlockEditor({
   onBack,
   onDocumentUpdated,
   onSettingsUpdated,
+  splitPreview,
+  onToggleSplitPreview,
+  variablesDrawerOpen,
+  onToggleVariablesDrawer,
+  onActiveFieldLabelChange,
+  onResolvedVariablesChange,
+  insertVariableHandlerRef,
 }: TemplateBlockEditorProps) {
   const [doc, setDoc] = useState<EmailTemplateDocument>(initialDoc);
   const [language, setLanguage] = useState<SupportedEmailLanguage>(
@@ -117,6 +175,7 @@ export function TemplateBlockEditor({
   const [dirty, setDirty] = useState(false);
 
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
+  const [internalSplitPreview, setInternalSplitPreview] = useState(true);
   const [includeLoyaltySample, setIncludeLoyaltySample] = useState(false);
   const [brandingOpen, setBrandingOpen] = useState(false);
   const [linksOverviewOpen, setLinksOverviewOpen] = useState(false);
@@ -125,6 +184,31 @@ export function TemplateBlockEditor({
   const [starterPickerOpen, setStarterPickerOpen] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+
+  const isSplitPreview =
+    typeof splitPreview === "boolean" ? splitPreview : internalSplitPreview;
+  const handleToggleSplitPreview = useCallback(() => {
+    if (onToggleSplitPreview) {
+      onToggleSplitPreview();
+    } else {
+      setInternalSplitPreview((v) => !v);
+    }
+  }, [onToggleSplitPreview]);
+
+  const isVariablesDrawerOpen =
+    typeof variablesDrawerOpen === "boolean" ? variablesDrawerOpen : variablesOpen;
+  const handleToggleVariablesDrawer = useCallback(() => {
+    if (onToggleVariablesDrawer) {
+      onToggleVariablesDrawer();
+    } else {
+      setVariablesOpen((v) => !v);
+    }
+  }, [onToggleVariablesDrawer]);
+
+  const subjectInputRef = useRef<HTMLInputElement | null>(null);
+  const lastFocusedInputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  const lastSelectionRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
+  const lastFieldLabelRef = useRef<string>("Subject Line");
 
   const [expandedBlockId, setExpandedBlockId] = useState<string | null>(
     () => (initialDoc.draft.en || initialDoc.published.en)?.blocks[0]?.id || null
@@ -229,6 +313,106 @@ export function TemplateBlockEditor({
     );
     return built.variables as Record<string, string>;
   }, [effectiveSampleContext, settings, variant.portalUrlOverride, language]);
+
+  useEffect(() => {
+    onResolvedVariablesChange?.(resolvedVariables);
+  }, [resolvedVariables, onResolvedVariablesChange]);
+
+  const recordEditorFocusOrSelection = useCallback(
+    (target: EventTarget | null) => {
+      if (!isInsertableTextControl(target)) return;
+      lastFocusedInputRef.current = target;
+      const len = target.value.length;
+      const start = typeof target.selectionStart === "number" ? target.selectionStart : len;
+      const end = typeof target.selectionEnd === "number" ? target.selectionEnd : start;
+      lastSelectionRef.current = { start, end };
+      const label = deriveFieldLabel(target);
+      lastFieldLabelRef.current = label;
+      onActiveFieldLabelChange?.(label);
+    },
+    [onActiveFieldLabelChange]
+  );
+
+  const insertVariableAtCursor = useCallback((varName: string) => {
+    const tag = `{{${varName}}}`;
+    const tracked = lastFocusedInputRef.current;
+    const targetEl =
+      tracked && tracked.isConnected && !tracked.disabled && !tracked.readOnly
+        ? tracked
+        : subjectInputRef.current;
+
+    if (!targetEl) {
+      if (navigator?.clipboard?.writeText) {
+        void navigator.clipboard.writeText(tag);
+        toast.success(`Copied ${tag} — paste into any text field`);
+      }
+      return;
+    }
+
+    const currentValue = targetEl.value || "";
+    const isTrackedActive = targetEl === tracked;
+    const rawStart =
+      document.activeElement === targetEl && typeof targetEl.selectionStart === "number"
+        ? targetEl.selectionStart
+        : isTrackedActive
+        ? lastSelectionRef.current.start
+        : currentValue.length;
+    const rawEnd =
+      document.activeElement === targetEl && typeof targetEl.selectionEnd === "number"
+        ? targetEl.selectionEnd
+        : isTrackedActive
+        ? lastSelectionRef.current.end
+        : rawStart;
+
+    const start = Math.max(0, Math.min(rawStart, currentValue.length));
+    const end = Math.max(start, Math.min(rawEnd, currentValue.length));
+    let nextValue = currentValue.slice(0, start) + tag + currentValue.slice(end);
+    if (targetEl.maxLength > 0 && nextValue.length > targetEl.maxLength) {
+      toast.warning(`Field character limit (${targetEl.maxLength}) reached.`);
+      return;
+    }
+
+    const proto =
+      targetEl instanceof HTMLTextAreaElement
+        ? window.HTMLTextAreaElement.prototype
+        : window.HTMLInputElement.prototype;
+    const nativeSetter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+    if (nativeSetter) {
+      nativeSetter.call(targetEl, nextValue);
+    } else {
+      targetEl.value = nextValue;
+    }
+
+    targetEl.dispatchEvent(new Event("input", { bubbles: true }));
+
+    const nextCaret = start + tag.length;
+    lastFocusedInputRef.current = targetEl;
+    lastSelectionRef.current = { start: nextCaret, end: nextCaret };
+    const label = deriveFieldLabel(targetEl);
+    lastFieldLabelRef.current = label;
+    onActiveFieldLabelChange?.(label);
+
+    window.requestAnimationFrame(() => {
+      try {
+        targetEl.focus({ preventScroll: true });
+        targetEl.setSelectionRange(nextCaret, nextCaret);
+      } catch {
+        // Ignore selection errors on input types that disallow setSelectionRange (e.g., email/url)
+      }
+    });
+
+    toast.success(`Inserted ${tag} into ${label}`);
+  }, [onActiveFieldLabelChange]);
+
+  useEffect(() => {
+    if (!insertVariableHandlerRef) return;
+    insertVariableHandlerRef.current = insertVariableAtCursor;
+    return () => {
+      if (insertVariableHandlerRef.current === insertVariableAtCursor) {
+        insertVariableHandlerRef.current = null;
+      }
+    };
+  }, [insertVariableHandlerRef, insertVariableAtCursor]);
 
   const templateLinksSummary = useMemo(() => {
     const all = extractTemplateLinksOverview(variant, effectiveSampleContext, settings, language);
@@ -899,6 +1083,37 @@ export function TemplateBlockEditor({
 
           <button
             type="button"
+            onClick={handleToggleVariablesDrawer}
+            aria-pressed={isVariablesDrawerOpen}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium whitespace-nowrap transition-colors ${
+              isVariablesDrawerOpen
+                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+                : "border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
+            }`}
+          >
+            <Braces size={13} /> Available Variables
+          </button>
+
+          <button
+            type="button"
+            onClick={handleToggleSplitPreview}
+            aria-pressed={isSplitPreview}
+            title={
+              isSplitPreview
+                ? "Hide split-screen live preview"
+                : "Show live preview alongside editor"
+            }
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium whitespace-nowrap transition-colors ${
+              isSplitPreview
+                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+                : "border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
+            }`}
+          >
+            <Columns2 size={13} /> {isSplitPreview ? "Split Preview: On" : "Split Preview"}
+          </button>
+
+          <button
+            type="button"
             onClick={() => setLinksOverviewOpen((v) => !v)}
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium whitespace-nowrap transition-colors ${
               linksOverviewOpen
@@ -1054,10 +1269,22 @@ export function TemplateBlockEditor({
         />
       )}
 
-      {/* Split Workspace: Left Editor / Right Live Sandboxed Preview */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+      {/* Split Workspace: Left Editor / Optional Right Live Sandboxed Preview */}
+      <div
+        className={
+          isSplitPreview
+            ? "grid grid-cols-1 lg:grid-cols-12 gap-5 items-start"
+            : "max-w-4xl mx-auto"
+        }
+      >
         {/* LEFT PANE: Metadata, Branding, and Modular BlockEditor */}
-        <div className="xl:col-span-6 space-y-4">
+        <div
+          className={isSplitPreview ? "lg:col-span-6 space-y-4" : "space-y-4"}
+          onFocusCapture={(e) => recordEditorFocusOrSelection(e.target)}
+          onKeyUpCapture={(e) => recordEditorFocusOrSelection(e.target)}
+          onMouseUpCapture={(e) => recordEditorFocusOrSelection(e.target)}
+          onSelectCapture={(e) => recordEditorFocusOrSelection(e.target)}
+        >
           {/* Enable Toggle + Subject + Preheader */}
           <div className="rounded-xl bg-zinc-900/60 border border-zinc-800 p-4 space-y-3">
             <div className="flex items-center justify-between gap-2 pb-2 border-b border-zinc-800/80">
@@ -1094,13 +1321,17 @@ export function TemplateBlockEditor({
                 <label className="text-xs font-medium text-zinc-300">Subject Line</label>
                 <button
                   type="button"
-                  onClick={() => setVariablesOpen((v) => !v)}
-                  className="text-[11px] text-emerald-400 hover:text-emerald-300 font-medium"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={handleToggleVariablesDrawer}
+                  className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 font-medium"
                 >
-                  {variablesOpen ? "Hide Merge Variables" : "Browse Merge Variables"}
+                  <Braces size={11} />
+                  {isVariablesDrawerOpen ? "Hide Available Variables" : "Insert Variable"}
                 </button>
               </div>
               <input
+                ref={subjectInputRef}
+                data-field-label="Subject Line"
                 type="text"
                 maxLength={180}
                 value={variant.subject}
@@ -1116,6 +1347,7 @@ export function TemplateBlockEditor({
                 Preheader Text (Inbox preview snippet)
               </label>
               <input
+                data-field-label="Preheader Text"
                 type="text"
                 maxLength={220}
                 value={variant.preheader}
@@ -1127,18 +1359,19 @@ export function TemplateBlockEditor({
               />
             </div>
 
-            {variablesOpen && (
+            {!onToggleVariablesDrawer && variablesOpen && (
               <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-3 space-y-2">
                 <div className="text-[11px] text-zinc-400">
-                  Click any allowed variable to copy it. Unknown variables or code syntax are
-                  blocked automatically.
+                  Click any allowed variable to insert it at your cursor. Unknown variables or code
+                  syntax are blocked automatically.
                 </div>
                 <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
                   {ALLOWED_TEMPLATE_VARIABLES.map((v) => (
                     <button
                       key={v}
                       type="button"
-                      onClick={() => copyVariableTag(v)}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => insertVariableAtCursor(v)}
                       title={`${VARIABLE_DESCRIPTIONS[v].label} (e.g. ${VARIABLE_DESCRIPTIONS[v].sample})`}
                       className="px-2 py-1 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[11px] font-mono text-emerald-400 transition-colors"
                     >
@@ -1450,8 +1683,9 @@ export function TemplateBlockEditor({
           )}
         </div>
 
-        {/* RIGHT PANE: Sandboxed Live Preview */}
-        <div className="xl:col-span-6 xl:sticky xl:top-4 space-y-3">
+        {/* RIGHT PANE: Sandboxed Live Preview (toggled via Split Preview) */}
+        {isSplitPreview && (
+        <div className="lg:col-span-6 lg:sticky lg:top-4 space-y-3">
           <div className="rounded-xl bg-zinc-900/60 border border-zinc-800 overflow-hidden">
             <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2 flex-wrap">
@@ -1660,6 +1894,7 @@ export function TemplateBlockEditor({
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* Starter Layout Preset Picker Modal (Draft-only) */}

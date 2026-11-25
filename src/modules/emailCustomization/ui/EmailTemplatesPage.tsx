@@ -1,32 +1,43 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
+  Braces,
   Clock,
+  Columns2,
+  Eye,
   FileBarChart2,
   Image as ImageIcon,
   Loader2,
   Lock,
   Mail,
+  Monitor,
   Pencil,
   Search,
   Settings as SettingsIcon,
   ShieldAlert,
+  Smartphone,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../../../contexts/AuthContext";
 import { hasPermission, isPMSModuleAssigned } from "../../../utils/permissions";
-import type {
-  CustomizableEmailEventType,
-  EmailRenderContext,
-  EmailTemplateDocument,
-  HotelEmailSettings,
+import {
+  DEFAULT_HOTEL_EMAIL_SETTINGS,
+  SUPPORTED_EMAIL_LANGUAGES,
+  type AllowedTemplateVariable,
+  type CustomizableEmailEventType,
+  type EmailRenderContext,
+  type EmailTemplateDocument,
+  type HotelEmailSettings,
+  type SupportedEmailLanguage,
 } from "../shared/types";
-import { DEFAULT_HOTEL_EMAIL_SETTINGS } from "../shared/types";
+import { renderEmailTemplate } from "../shared/renderer";
 import {
   emailCustomizationApi,
   type EmailCustomizationConfigResponse,
   type EmailTemplateOverviewItem,
 } from "./apiClient";
+import { AvailableVariablesDrawer } from "./AvailableVariablesDrawer";
 import { EmailSettingsPanel } from "./EmailSettingsPanel";
 import { ImageLibraryPanel } from "./ImageLibraryModal";
 import { TemplateBlockEditor } from "./TemplateBlockEditor";
@@ -77,6 +88,24 @@ export function EmailTemplatesPage() {
   } | null>(null);
   const [openingEvent, setOpeningEvent] = useState<string | null>(null);
   const [togglingEvent, setTogglingEvent] = useState<string | null>(null);
+
+  // Available Variables side-drawer & Split-Screen Preview state
+  const [variablesDrawerOpen, setVariablesDrawerOpen] = useState(false);
+  const [editorSplitPreview, setEditorSplitPreview] = useState(true);
+  const [listSplitPreview, setListSplitPreview] = useState(false);
+  const [selectedPreviewEvent, setSelectedPreviewEvent] =
+    useState<CustomizableEmailEventType | null>(null);
+  const [listPreviewLang, setListPreviewLang] = useState<SupportedEmailLanguage>("en");
+  const [listPreviewMode, setListPreviewMode] = useState<"desktop" | "mobile">("desktop");
+  const [previewCache, setPreviewCache] = useState<
+    Record<string, { doc: EmailTemplateDocument; sampleContext: EmailRenderContext }>
+  >({});
+  const [loadingPreviewEvent, setLoadingPreviewEvent] = useState<string | null>(null);
+  const [activeFieldLabel, setActiveFieldLabel] = useState<string | null>(null);
+  const [activeResolvedVariables, setActiveResolvedVariables] = useState<
+    Record<string, string> | undefined
+  >(undefined);
+  const insertVariableHandlerRef = useRef<((varName: string) => void) | null>(null);
 
   const filteredTemplates = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -135,10 +164,105 @@ export function EmailTemplatesPage() {
     void loadWorkspace();
   }, [loadWorkspace]);
 
+  const loadPreviewForEvent = useCallback(
+    async (eventType: CustomizableEmailEventType) => {
+      if (!targetHotelId) return;
+      setSelectedPreviewEvent(eventType);
+      if (previewCache[eventType]) return;
+      try {
+        setLoadingPreviewEvent(eventType);
+        const res = await emailCustomizationApi.getTemplate(eventType, targetHotelId);
+        setPreviewCache((prev) => ({
+          ...prev,
+          [eventType]: {
+            doc: res.template,
+            sampleContext: res.sampleContext,
+          },
+        }));
+      } catch (err: any) {
+        toast.error(err?.message || "Failed to load template preview.");
+      } finally {
+        setLoadingPreviewEvent((curr) => (curr === eventType ? null : curr));
+      }
+    },
+    [targetHotelId, previewCache]
+  );
+
+  // Auto-select the first visible template when split-screen preview is turned on in the templates list
+  useEffect(() => {
+    if (!listSplitPreview || editingEvent || activeTab !== "templates") return;
+    if (filteredTemplates.length === 0) return;
+    const stillVisible =
+      selectedPreviewEvent &&
+      filteredTemplates.some((t) => t.eventType === selectedPreviewEvent);
+    if (!stillVisible) {
+      void loadPreviewForEvent(filteredTemplates[0].eventType);
+    } else if (selectedPreviewEvent && !previewCache[selectedPreviewEvent]) {
+      void loadPreviewForEvent(selectedPreviewEvent);
+    }
+  }, [
+    listSplitPreview,
+    editingEvent,
+    activeTab,
+    filteredTemplates,
+    selectedPreviewEvent,
+    previewCache,
+    loadPreviewForEvent,
+  ]);
+
+  const selectedListPreviewItem = useMemo(
+    () =>
+      selectedPreviewEvent
+        ? templates.find((t) => t.eventType === selectedPreviewEvent) || null
+        : null,
+    [templates, selectedPreviewEvent]
+  );
+
+  const selectedListPreviewRendered = useMemo(() => {
+    if (!selectedPreviewEvent) return null;
+    const cached = previewCache[selectedPreviewEvent];
+    if (!cached) return null;
+    const variant =
+      cached.doc.draft?.[listPreviewLang] ||
+      cached.doc.published?.[listPreviewLang] ||
+      cached.doc.draft?.en ||
+      cached.doc.published?.en;
+    if (!variant) return null;
+    return renderEmailTemplate({
+      variant,
+      context: cached.sampleContext,
+      settings,
+      language: listPreviewLang,
+      usedDefaultLayout: !cached.doc.isCustomized,
+    });
+  }, [selectedPreviewEvent, previewCache, listPreviewLang, settings]);
+
+  const handleInsertVariableFromDrawer = useCallback(
+    (varName: AllowedTemplateVariable) => {
+      if (editingEvent && insertVariableHandlerRef.current) {
+        insertVariableHandlerRef.current(varName);
+        return;
+      }
+      const tag = `{{${varName}}}`;
+      if (navigator?.clipboard?.writeText) {
+        void navigator.clipboard.writeText(tag);
+        toast.success(`Copied ${tag} — open any template with Customize to insert at cursor.`);
+      }
+    },
+    [editingEvent]
+  );
+
   const handleOpenEditor = async (item: EmailTemplateOverviewItem) => {
     try {
       setOpeningEvent(item.eventType);
       const res = await emailCustomizationApi.getTemplate(item.eventType, targetHotelId);
+      setPreviewCache((prev) => ({
+        ...prev,
+        [item.eventType]: {
+          doc: res.template,
+          sampleContext: res.sampleContext,
+        },
+      }));
       setEditingEvent({
         eventType: item.eventType,
         name: item.name,
@@ -212,12 +336,26 @@ export function EmailTemplatesPage() {
           settings={settings}
           sampleContext={editingEvent.sampleContext}
           callerEmail={config?.callerEmail || profile?.email || ""}
+          splitPreview={editorSplitPreview}
+          onToggleSplitPreview={() => setEditorSplitPreview((v) => !v)}
+          variablesDrawerOpen={variablesDrawerOpen}
+          onToggleVariablesDrawer={() => setVariablesDrawerOpen((v) => !v)}
+          onActiveFieldLabelChange={setActiveFieldLabel}
+          onResolvedVariablesChange={setActiveResolvedVariables}
+          insertVariableHandlerRef={insertVariableHandlerRef}
           onBack={() => {
             setEditingEvent(null);
+            setActiveFieldLabel(null);
+            setActiveResolvedVariables(undefined);
             void loadWorkspace();
           }}
           onDocumentUpdated={(updated) => {
             setEditingEvent((prev) => (prev ? { ...prev, doc: updated } : null));
+            setPreviewCache((prev) => {
+              const existing = prev[updated.eventType];
+              if (!existing) return prev;
+              return { ...prev, [updated.eventType]: { ...existing, doc: updated } };
+            });
           }}
           onSettingsUpdated={(nextSettings) => {
             setSettings(nextSettings);
@@ -326,8 +464,8 @@ export function EmailTemplatesPage() {
             </div>
           ) : activeTab === "templates" ? (
             <div className="space-y-4">
-              {/* Category Filter & Search Controls */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              {/* Category Filter, Search, Available Variables & Split Preview Controls */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {TEMPLATE_CATEGORY_TABS.map((cat) => {
                     const count =
@@ -352,118 +490,323 @@ export function EmailTemplatesPage() {
                   })}
                 </div>
 
-                <div className="relative w-full md:w-64">
-                  <Search
-                    size={13}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
-                  />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search templates..."
-                    className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-zinc-900/80 border border-zinc-800 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500/60"
-                  />
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative flex-1 sm:flex-none sm:w-56">
+                    <Search
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none"
+                    />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search templates..."
+                      className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-zinc-900/80 border border-zinc-800 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500/60"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setVariablesDrawerOpen((v) => !v)}
+                    aria-pressed={variablesDrawerOpen}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium whitespace-nowrap transition-colors ${
+                      variablesDrawerOpen
+                        ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+                        : "border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
+                    }`}
+                  >
+                    <Braces size={13} /> Available Variables
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setListSplitPreview((v) => !v)}
+                    aria-pressed={listSplitPreview}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium whitespace-nowrap transition-colors ${
+                      listSplitPreview
+                        ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+                        : "border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
+                    }`}
+                  >
+                    <Columns2 size={13} /> {listSplitPreview ? "Split Preview: On" : "Split Preview"}
+                  </button>
                 </div>
               </div>
 
-              <div className="rounded-xl bg-zinc-900/60 border border-zinc-800 divide-y divide-zinc-800">
-                {filteredTemplates.length === 0 ? (
-                  <div className="p-8 text-center text-xs text-zinc-500">
-                    No email templates match your current filter.
-                  </div>
-                ) : (
-                  filteredTemplates.map((item) => {
-                    const isRequired = item.canDisable === false;
-                    return (
-                      <div
-                        key={item.eventType}
-                        className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-zinc-900/90 transition-colors"
-                      >
-                        <div className="min-w-0 space-y-1">
-                          <div className="flex items-center gap-2.5 flex-wrap">
-                            <span className="text-sm font-semibold text-zinc-100">{item.name}</span>
-                            {item.audience && AUDIENCE_LABEL[item.audience] && (
-                              <span className="text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700/70">
-                                {AUDIENCE_LABEL[item.audience]}
+              <div
+                className={
+                  listSplitPreview
+                    ? "grid grid-cols-1 lg:grid-cols-12 gap-5 items-start"
+                    : ""
+                }
+              >
+                <div
+                  className={`rounded-xl bg-zinc-900/60 border border-zinc-800 divide-y divide-zinc-800 ${
+                    listSplitPreview ? "lg:col-span-6" : ""
+                  }`}
+                >
+                  {filteredTemplates.length === 0 ? (
+                    <div className="p-8 text-center text-xs text-zinc-500">
+                      No email templates match your current filter.
+                    </div>
+                  ) : (
+                    filteredTemplates.map((item) => {
+                      const isRequired = item.canDisable === false;
+                      const isSelectedForPreview =
+                        listSplitPreview && selectedPreviewEvent === item.eventType;
+                      return (
+                        <div
+                          key={item.eventType}
+                          onClick={() => {
+                            if (listSplitPreview) {
+                              void loadPreviewForEvent(item.eventType);
+                            }
+                          }}
+                          className={`p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors ${
+                            listSplitPreview ? "cursor-pointer" : ""
+                          } ${
+                            isSelectedForPreview
+                              ? "bg-emerald-500/10 border-l-2 border-l-emerald-500"
+                              : "hover:bg-zinc-900/90"
+                          }`}
+                        >
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                              <span className="text-sm font-semibold text-zinc-100">{item.name}</span>
+                              {item.audience && AUDIENCE_LABEL[item.audience] && (
+                                <span className="text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700/70">
+                                  {AUDIENCE_LABEL[item.audience]}
+                                </span>
+                              )}
+                              <span className="text-xs text-zinc-500 tabular-nums">
+                                {item.isCustomized
+                                  ? `Customized · v${item.publishedVersion}`
+                                  : "Default"}
+                                {item.hasDraftChanges ? " · Draft pending" : ""}
                               </span>
-                            )}
-                            <span className="text-xs text-zinc-500 tabular-nums">
-                              {item.isCustomized
-                                ? `Customized · v${item.publishedVersion}`
-                                : "Default"}
-                              {item.hasDraftChanges ? " · Draft pending" : ""}
-                            </span>
-                            {item.requiresScheduler && (
-                              <span className="inline-flex items-center gap-1 text-[11px] text-zinc-400">
-                                <Clock size={11} /> Scheduled
-                              </span>
-                            )}
+                              {item.requiresScheduler && (
+                                <span className="inline-flex items-center gap-1 text-[11px] text-zinc-400">
+                                  <Clock size={11} /> Scheduled
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-zinc-400">{item.description}</p>
+                            <div className="text-[11px] text-zinc-500 tabular-nums">
+                              Languages: EN / DE
+                              {item.updatedAt
+                                ? ` · Last updated ${new Date(item.updatedAt).toLocaleDateString()}`
+                                : ""}
+                            </div>
                           </div>
-                          <p className="text-xs text-zinc-400">{item.description}</p>
-                          <div className="text-[11px] text-zinc-500 tabular-nums">
-                            Languages: EN / DE
-                            {item.updatedAt
-                              ? ` · Last updated ${new Date(item.updatedAt).toLocaleDateString()}`
-                              : ""}
-                          </div>
-                        </div>
 
-                        <div className="flex items-center gap-4 shrink-0">
-                          {isRequired ? (
-                            <span
-                              title="Security-critical emails cannot be disabled, but their branding and copy can be customized."
-                              className="inline-flex items-center gap-1 text-[11px] text-zinc-400"
-                            >
-                              <Lock size={11} /> Required
-                            </span>
-                          ) : (
-                            <label
-                              className={`inline-flex items-center gap-2 text-xs text-zinc-400 ${
-                                canManageEmailModule
-                                  ? "cursor-pointer"
-                                  : "opacity-60 cursor-not-allowed"
-                              }`}
-                            >
-                              <span>{item.enabled ? "Enabled" : "Paused"}</span>
-                              <button
-                                type="button"
-                                role="switch"
-                                aria-checked={item.enabled}
-                                disabled={!canManageEmailModule || togglingEvent === item.eventType}
-                                onClick={() => canManageEmailModule && void handleToggleEvent(item)}
-                                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                                  item.enabled ? "bg-emerald-600" : "bg-zinc-700"
-                                } ${!canManageEmailModule ? "cursor-not-allowed" : ""}`}
+                          <div
+                            className="flex items-center gap-3 shrink-0"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {isRequired ? (
+                              <span
+                                title="Security-critical emails cannot be disabled, but their branding and copy can be customized."
+                                className="inline-flex items-center gap-1 text-[11px] text-zinc-400"
                               >
-                                <span
-                                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                                    item.enabled ? "translate-x-4.5" : "translate-x-1"
-                                  }`}
-                                />
-                              </button>
-                            </label>
-                          )}
+                                <Lock size={11} /> Required
+                              </span>
+                            ) : (
+                              <label
+                                className={`inline-flex items-center gap-2 text-xs text-zinc-400 ${
+                                  canManageEmailModule
+                                    ? "cursor-pointer"
+                                    : "opacity-60 cursor-not-allowed"
+                                }`}
+                              >
+                                <span>{item.enabled ? "Enabled" : "Paused"}</span>
+                                <button
+                                  type="button"
+                                  role="switch"
+                                  aria-checked={item.enabled}
+                                  disabled={!canManageEmailModule || togglingEvent === item.eventType}
+                                  onClick={() => canManageEmailModule && void handleToggleEvent(item)}
+                                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                                    item.enabled ? "bg-emerald-600" : "bg-zinc-700"
+                                  } ${!canManageEmailModule ? "cursor-not-allowed" : ""}`}
+                                >
+                                  <span
+                                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                                      item.enabled ? "translate-x-4.5" : "translate-x-1"
+                                    }`}
+                                  />
+                                </button>
+                              </label>
+                            )}
 
-                          {canManageEmailModule && (
                             <button
                               type="button"
-                              disabled={openingEvent === item.eventType}
-                              onClick={() => void handleOpenEditor(item)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-100 whitespace-nowrap transition-colors"
+                              onClick={() => {
+                                setListSplitPreview(true);
+                                void loadPreviewForEvent(item.eventType);
+                              }}
+                              title="Preview live rendering in split-screen"
+                              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-medium whitespace-nowrap transition-colors ${
+                                isSelectedForPreview
+                                  ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                                  : "border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
+                              }`}
                             >
-                              {openingEvent === item.eventType ? (
-                                <Loader2 size={13} className="animate-spin" />
-                              ) : (
-                                <Pencil size={13} />
-                              )}
-                              Customize
+                              <Eye size={13} /> Preview
                             </button>
-                          )}
+
+                            {canManageEmailModule && (
+                              <button
+                                type="button"
+                                disabled={openingEvent === item.eventType}
+                                onClick={() => void handleOpenEditor(item)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-100 whitespace-nowrap transition-colors"
+                              >
+                                {openingEvent === item.eventType ? (
+                                  <Loader2 size={13} className="animate-spin" />
+                                ) : (
+                                  <Pencil size={13} />
+                                )}
+                                Customize
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Split-Screen Live Template Preview Pane */}
+                {listSplitPreview && (
+                  <div className="lg:col-span-6 lg:sticky lg:top-4 rounded-xl bg-zinc-900/60 border border-zinc-800 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-zinc-100 truncate">
+                          {selectedListPreviewItem?.name || "Live Template Preview"}
+                        </div>
+                        <div className="text-[11px] text-zinc-500 truncate">
+                          {selectedListPreviewItem
+                            ? "Select any template on the left to preview its live rendering."
+                            : "Choose a template to preview."}
                         </div>
                       </div>
-                    );
-                  })
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="inline-flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5">
+                          {SUPPORTED_EMAIL_LANGUAGES.map((l) => (
+                            <button
+                              key={l.code}
+                              type="button"
+                              onClick={() => setListPreviewLang(l.code)}
+                              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                                listPreviewLang === l.code
+                                  ? "bg-zinc-800 text-zinc-100"
+                                  : "text-zinc-500 hover:text-zinc-300"
+                              }`}
+                            >
+                              {l.code.toUpperCase()}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="inline-flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setListPreviewMode("desktop")}
+                            className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium ${
+                              listPreviewMode === "desktop"
+                                ? "bg-zinc-800 text-zinc-100"
+                                : "text-zinc-500 hover:text-zinc-300"
+                            }`}
+                          >
+                            <Monitor size={12} /> Desktop
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setListPreviewMode("mobile")}
+                            className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium ${
+                              listPreviewMode === "mobile"
+                                ? "bg-zinc-800 text-zinc-100"
+                                : "text-zinc-500 hover:text-zinc-300"
+                            }`}
+                          >
+                            <Smartphone size={12} /> Mobile
+                          </button>
+                        </div>
+
+                        {canManageEmailModule && selectedListPreviewItem && (
+                          <button
+                            type="button"
+                            disabled={openingEvent === selectedListPreviewItem.eventType}
+                            onClick={() => {
+                              setEditorSplitPreview(true);
+                              void handleOpenEditor(selectedListPreviewItem);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white whitespace-nowrap transition-colors"
+                          >
+                            <Pencil size={12} /> Edit Template
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => setListSplitPreview(false)}
+                          title="Close split preview"
+                          className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {loadingPreviewEvent === selectedPreviewEvent || !selectedListPreviewRendered ? (
+                      <div className="py-24 flex items-center justify-center gap-2 text-xs text-zinc-500">
+                        <Loader2 size={16} className="animate-spin" />
+                        {selectedListPreviewItem
+                          ? `Rendering ${selectedListPreviewItem.name}...`
+                          : "Select a template to preview"}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="px-4 py-2.5 bg-zinc-950/70 border-b border-zinc-800 text-xs space-y-1">
+                          <div className="flex gap-2">
+                            <span className="text-zinc-500 w-16 shrink-0">From:</span>
+                            <span className="text-zinc-300 truncate">
+                              {selectedListPreviewRendered.fromName}
+                            </span>
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="text-zinc-500 w-16 shrink-0">Subject:</span>
+                            <span className="text-zinc-100 font-medium truncate">
+                              {selectedListPreviewRendered.subject}
+                            </span>
+                          </div>
+                          {selectedListPreviewRendered.preheader && (
+                            <div className="flex gap-2">
+                              <span className="text-zinc-500 w-16 shrink-0">Preview:</span>
+                              <span className="text-zinc-400 truncate">
+                                {selectedListPreviewRendered.preheader}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="bg-zinc-950 p-4 flex justify-center overflow-x-auto">
+                          <iframe
+                            title="Selected email template live preview"
+                            sandbox="allow-same-origin"
+                            srcDoc={selectedListPreviewRendered.html}
+                            className="bg-white rounded-lg border border-zinc-800 transition-all"
+                            style={{
+                              width: listPreviewMode === "mobile" ? "375px" : "100%",
+                              maxWidth: "660px",
+                              height: "620px",
+                            }}
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -489,6 +832,16 @@ export function EmailTemplatesPage() {
           )}
         </>
       )}
+
+      {/* Available Variables Side-Drawer (accessible across template list & editor with one-click cursor insertion) */}
+      <AvailableVariablesDrawer
+        open={variablesDrawerOpen}
+        onClose={() => setVariablesDrawerOpen(false)}
+        canInsertDirectly={Boolean(editingEvent)}
+        activeFieldLabel={activeFieldLabel}
+        resolvedVariables={activeResolvedVariables}
+        onInsertVariable={handleInsertVariableFromDrawer}
+      />
     </div>
   );
 }
