@@ -661,6 +661,111 @@ export const postToLedger = async (
     }
   }
 
+  // Additive: Notify guest for all other account/folio mutations (room charges, F&B room charges,
+  // discounts, reversals/voids, overpayment settlements) without changing any accounting logic.
+  if (
+    entry.amount > 0 &&
+    postedIds[0] &&
+    reservationId &&
+    reservationId !== 'CORPORATE_SETTLEMENT' &&
+    reservationId !== 'BULK_SETTLEMENT'
+  ) {
+    try {
+      const descLower = String(entry.description || '').trim().toLowerCase();
+      const catLower = String(entry.category || '').trim().toLowerCase();
+      const isReversal = descLower.startsWith('reversal:');
+
+      if (isReversal) {
+        void notifyPlatformEvent({
+          hotelId,
+          eventType: 'folio.charge_voided',
+          entityId: postedIds[0],
+          reservationId,
+          guestId: guestId || undefined,
+          metadata: {
+            amount: entry.amount,
+            description: entry.description,
+            category: entry.category,
+            reference: entry.referenceCode || postedIds[0],
+          },
+        });
+      } else if (entry.type === 'credit' && catLower === 'discount') {
+        void notifyPlatformEvent({
+          hotelId,
+          eventType: 'folio.discount_applied',
+          entityId: postedIds[0],
+          reservationId,
+          guestId: guestId || undefined,
+          metadata: {
+            amount: entry.amount,
+            description: entry.description,
+            category: entry.category,
+            reference: entry.referenceCode || postedIds[0],
+          },
+        });
+      } else if (entry.type === 'debit' && catLower === 'payment') {
+        // Overpayment settlement / credit refund back to guest
+        void notifyPlatformEvent({
+          hotelId,
+          eventType: 'refund.processed',
+          entityId: postedIds[0],
+          reservationId,
+          guestId: guestId || undefined,
+          metadata: {
+            amount: entry.amount,
+            paymentMethod: entry.paymentMethod || paymentMethod,
+            reason: entry.description,
+            reference: entry.referenceCode || postedIds[0],
+          },
+        });
+      } else if (
+        entry.type === 'debit' &&
+        (catLower === 'f & b' || catLower === 'f&b' || catLower === 'restaurant')
+      ) {
+        const fnbEntityId =
+          entry.referenceId && entry.referenceId !== reservationId
+            ? entry.referenceId
+            : postedIds[0];
+        void notifyPlatformEvent({
+          hotelId,
+          eventType: 'fnb.order_posted',
+          entityId: fnbEntityId,
+          reservationId,
+          guestId: guestId || undefined,
+          metadata: {
+            amount: entry.amount,
+            description: entry.description,
+            reference: entry.referenceCode || fnbEntityId,
+          },
+        });
+      } else if (
+        entry.type === 'debit' &&
+        catLower !== 'room' &&
+        catLower !== 'room_rate' &&
+        catLower !== 'tax' &&
+        catLower !== 'transfer' &&
+        catLower !== 'city_ledger' &&
+        catLower !== 'refund'
+      ) {
+        void notifyPlatformEvent({
+          hotelId,
+          eventType: 'folio.charge_posted',
+          entityId: postedIds[0],
+          reservationId,
+          guestId: guestId || undefined,
+          metadata: {
+            amount: entry.amount,
+            description: entry.description,
+            category: entry.category,
+            reference: entry.referenceCode || postedIds[0],
+          },
+        });
+      }
+    } catch {
+      // Non-blocking
+    }
+  }
+
   return { id: postedIds[0], ...mainEntry };
 };
 
@@ -1105,6 +1210,26 @@ export const transferLedgerBalance = async (
     referenceId: fromReservationId,
     postedBy
   }, postedBy, corporateId, 'cash', userContext);
+
+  // Additive: Notify guest of folio balance transfer
+  if (amount > 0) {
+    try {
+      void notifyPlatformEvent({
+        hotelId,
+        eventType: 'folio.balance_transferred',
+        reservationId: fromReservationId,
+        guestId: guestId || undefined,
+        idempotencyKey: `bal_xfer_${fromReservationId}_${toReservationId}_${Math.round(amount * 100)}`,
+        metadata: {
+          amount,
+          transferTarget: `Reservation #${(toReservationId || '').slice(-6).toUpperCase()}`,
+          description: `Balance transferred from Reservation #${(fromReservationId || '').slice(-6).toUpperCase()} to Reservation #${(toReservationId || '').slice(-6).toUpperCase()}`,
+        },
+      });
+    } catch {
+      // Non-blocking
+    }
+  }
 };
 
 export interface RefundValidationInput {
@@ -1338,6 +1463,28 @@ export const transferToCityLedger = async (
         metadata: {
           amount,
           reference: reservationId.slice(0, 8).toUpperCase(),
+        },
+      });
+    } catch {
+      // Non-blocking
+    }
+  }
+
+  // Additive: Notify guest that their folio balance was transferred to City Ledger / Corporate Account
+  if (amount > 0 && reservationId) {
+    try {
+      void notifyPlatformEvent({
+        hotelId,
+        eventType: 'folio.balance_transferred',
+        reservationId,
+        guestId: guestId || undefined,
+        corporateId: corporateId || undefined,
+        idempotencyKey: `guest_cl_xfer_${reservationId}_${corporateId || 'cl'}_${Math.round(amount * 100)}`,
+        metadata: {
+          amount,
+          transferTarget: 'Corporate / City Ledger Account',
+          description: `Folio balance transferred to City Ledger${noteSuffix}`,
+          reason: options?.notes?.trim() || undefined,
         },
       });
     } catch {

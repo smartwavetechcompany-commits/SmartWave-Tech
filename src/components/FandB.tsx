@@ -733,6 +733,39 @@ export function FandB() {
         }
       }
 
+      // Additive: Notify guest for direct restaurant payments (cash/card/transfer) not already
+      // covered by postToLedger (room-linked) or chargeGuestDepositForOrder (deposit wallet)
+      const directPaymentCoveredByRoomLedger = Boolean(isRoomOrder && res && !isTargetRoomRestaurantBlocked);
+      if (!directPaymentCoveredByRoomLedger && (res?.id || (effectiveGuestId && effectiveGuestId !== 'unknown'))) {
+        try {
+          const directNonDepositPayments = resolvedPayments.filter(
+            (p) => p.amount > 0 && p.method !== 'room' && p.method !== 'deposit'
+          );
+          if (directNonDepositPayments.length > 0) {
+            const totalDirectCashCardTransfer = directNonDepositPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+            const methodsSummary = Array.from(new Set(directNonDepositPayments.map((p) => String(p.method).toUpperCase()))).join(' / ');
+            void notifyPlatformEvent({
+              hotelId: hotel.id,
+              eventType: 'payment.received',
+              entityId: `fb_direct_${orderRef.id}`,
+              reservationId: res?.id || undefined,
+              guestId: effectiveGuestId !== 'unknown' ? effectiveGuestId : undefined,
+              metadata: {
+                amount: totalDirectCashCardTransfer,
+                paymentMethod: methodsSummary,
+                outletName: newOrder.outletName || 'Restaurant',
+                billNumber,
+                items: newOrder.items,
+                roomNumber: newOrder.roomNumber && newOrder.roomNumber !== 'Walk-in' ? newOrder.roomNumber : undefined,
+                reference: billNumber,
+              },
+            });
+          }
+        } catch {
+          // Non-blocking
+        }
+      }
+
       // Log activity in background
       database.safeAdd(collection(db, 'hotels', hotel.id, 'activityLogs'), {
         timestamp: new Date().toISOString(),
@@ -884,6 +917,7 @@ export function FandB() {
       const order = voidOrderModal;
 
       // 1. If charged to room, reverse the ledger debit using voidLedgerEntry
+      let wasReversedViaRoomLedger = false;
       if ((order.roomChargedAmount && order.roomChargedAmount > 0) || order.ledgerEntryId) {
         let ledgerEntry: any = null;
         if (order.ledgerEntryId) {
@@ -914,6 +948,7 @@ export function FandB() {
             role: profile.role || 'staff',
             displayName: profile.displayName || (profile as any)?.name || 'Staff'
           });
+          wasReversedViaRoomLedger = true;
         }
       }
 
@@ -1004,6 +1039,7 @@ export function FandB() {
             roomNumber: order.roomNumber || undefined,
             amount: order.totalAmount || order.price || 0,
             reason: voidReason.trim(),
+            notifyGuest: !wasReversedViaRoomLedger,
           },
         });
       } catch {
@@ -1364,6 +1400,28 @@ export function FandB() {
 
         // Re-synchronize authoritative reservation account balance
         await recalculateReservationAccountFromLedger(hotel.id, res.id).catch(() => {});
+      } else if (settleMethod !== 'deposit' && (res?.id || (guestId && guestId !== 'unknown'))) {
+        // Additive: Notify guest for direct outlet settlement not posted via room ledger or deposit wallet
+        try {
+          void notifyPlatformEvent({
+            hotelId: hotel.id,
+            eventType: 'payment.received',
+            entityId: `fb_settle_${settleOrderModal.id}_${Math.round(newDirectPaid * 100)}`,
+            reservationId: res?.id || undefined,
+            guestId: guestId !== 'unknown' ? guestId : undefined,
+            metadata: {
+              amount: settleAmount,
+              paymentMethod: String(settleMethod).toUpperCase(),
+              outletName: settleOrderModal.outletName || settleSource || 'Restaurant',
+              billNumber: settleOrderModal.billNumber || settleOrderModal.id.slice(-6),
+              items: settleOrderModal.items,
+              roomNumber: settleOrderModal.roomNumber && settleOrderModal.roomNumber !== 'Walk-in' ? settleOrderModal.roomNumber : undefined,
+              reference: settleOrderModal.billNumber || settleOrderModal.id.slice(-6),
+            },
+          });
+        } catch {
+          // Non-blocking
+        }
       }
 
       // 4. Log Activity

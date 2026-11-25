@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { hasPermission } from '../utils/permissions';
 import { Reservation, LedgerEntry, OperationType, Guest, Room, CorporateAccount, Promotion } from '../types';
 import { postToLedger, settleLedger, transferLedgerBalance, voidLedgerEntry, refundGuest, validateRefundRequest, transferToCityLedger, purgeCorruptedLedgerEntries, detectAndPurgeDuplicateOverstayCharges, processAutomatedBillingForReservation, reconcileAndRepairReservationFinancials, applyPolicyPenaltyForReservation } from '../services/ledgerService';
+import { notifyPlatformEvent } from '../services/transactionalEmailClient';
 import { transferUnpaidBalanceToCityLedger } from '../services/cityLedgerService';
 import {
   CITY_LEDGER_ACCOUNT_STATUS_LABELS,
@@ -863,6 +864,71 @@ export function GuestFolio({ reservation, onClose, onPostCharge }: GuestFolioPro
 
         const resData = await response.json();
         toast.success(resData.message || `${finalItems.length === 1 ? 'Entry' : 'All entries in the batch'} posted successfully`);
+
+        // Additive: Notify guest after server-validated folio charge/discount batch succeeds
+        if (!resData?.alreadyPosted) {
+          try {
+            const calcNet = (item: any) => {
+              const base = item.price > 0 ? item.price * item.quantity : item.amount || 0;
+              return item.discountType === 'fixed'
+                ? Math.max(0, base - (item.discount || 0))
+                : Math.max(0, base * (1 - (item.discount || 0) / 100));
+            };
+            const debitItems = finalItems.filter((it: any) => it.type === 'debit' && calcNet(it) > 0);
+            const creditItems = finalItems.filter((it: any) => it.type === 'credit' && calcNet(it) > 0);
+
+            if (debitItems.length > 0) {
+              const totalDebit = debitItems.reduce((sum: number, it: any) => sum + calcNet(it), 0);
+              const allFnb = debitItems.every((it: any) => {
+                const c = String(it.category || '').toLowerCase();
+                return c === 'restaurant' || c === 'f & b' || c === 'f&b';
+              });
+              const descSummary = debitItems
+                .map((it: any) => `${it.quantity && it.quantity > 1 ? `${it.quantity}x ` : ''}${it.description || it.category}`)
+                .join(', ')
+                .slice(0, 240);
+              void notifyPlatformEvent({
+                hotelId: hotel.id,
+                eventType: allFnb ? 'fnb.order_posted' : 'folio.charge_posted',
+                entityId: `${idempotencyKey}_debit`,
+                reservationId: currentReservation.id,
+                guestId: currentReservation.guestId || undefined,
+                metadata: {
+                  amount: Number(totalDebit.toFixed(2)),
+                  category: debitItems.length === 1 ? debitItems[0].category : (allFnb ? 'Restaurant' : 'Room Folio Charges'),
+                  description: descSummary,
+                  items: allFnb ? descSummary : undefined,
+                  roomNumber: currentReservation.roomNumber || undefined,
+                  reference: idempotencyKey.slice(-10).toUpperCase(),
+                },
+              });
+            }
+
+            if (creditItems.length > 0) {
+              const totalCredit = creditItems.reduce((sum: number, it: any) => sum + calcNet(it), 0);
+              const creditSummary = creditItems
+                .map((it: any) => it.description || it.category || 'Credit / Discount')
+                .join(', ')
+                .slice(0, 240);
+              void notifyPlatformEvent({
+                hotelId: hotel.id,
+                eventType: 'folio.discount_applied',
+                entityId: `${idempotencyKey}_credit`,
+                reservationId: currentReservation.id,
+                guestId: currentReservation.guestId || undefined,
+                metadata: {
+                  amount: Number(totalCredit.toFixed(2)),
+                  category: creditItems.length === 1 ? creditItems[0].category : 'Discount / Credit',
+                  description: creditSummary,
+                  roomNumber: currentReservation.roomNumber || undefined,
+                  reference: idempotencyKey.slice(-10).toUpperCase(),
+                },
+              });
+            }
+          } catch {
+            // Non-blocking
+          }
+        }
       } catch (apiErr: any) {
         console.warn("Server API posting failed or offline, falling back to local fallback transaction:", apiErr.message);
         

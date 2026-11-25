@@ -1745,6 +1745,63 @@ async function startServer() {
         console.warn("[AUDIT LOG NOTICE]:", logErr);
       }
 
+      // Additive: Send non-blocking late check-out / grace period extension email to the guest
+      void (async () => {
+        try {
+          if (!validateEmailConfig().ok) return;
+          let targetGuestEmail =
+            typeof resData.guestEmail === "string" ? resData.guestEmail.trim() : "";
+          if (!targetGuestEmail && typeof resData.guestId === "string" && isSafeIdentifier(resData.guestId)) {
+            const gSnap = await getDoc(doc(db, "hotels", hotelId, "guests", resData.guestId));
+            if (gSnap.exists() && typeof gSnap.data()?.email === "string") {
+              targetGuestEmail = String(gSnap.data().email).trim();
+            }
+          }
+          if (!isValidEmailAddress(targetGuestEmail)) return;
+          const pref = isHotelEmailEventEnabled(hotelData, "reservation.stay_extended", "guest");
+          if (!pref.enabled) return;
+
+          const hotelBrand = resolveHotelBrandContext(hotelId, hotelData, getAppUrl());
+          const guestName = String(resData.guestName || "Guest").trim() || "Guest";
+          const graceRows: EmailSummaryRow[] = [
+            { label: "Hotel", value: hotelBrand.hotelName },
+            { label: "Guest", value: guestName },
+            { label: "Booking Reference", value: reservationId.slice(0, 8).toUpperCase() },
+            ...(resData.roomNumber ? [{ label: "Room", value: `Room ${String(resData.roomNumber)}` }] : []),
+            { label: "Update Type", value: "Late Check-Out / Grace Period Approved" },
+            { label: "Extension Granted", value: `+${minutesToAdd} minutes` },
+            ...(resData.checkOut ? [{ label: "Check-Out Date", value: String(resData.checkOut) }] : []),
+            { label: "New Check-Out Time", value: newEffectiveTimeStr },
+            ...(String(reason || "").trim() ? [{ label: "Reason / Notes", value: String(reason).trim().slice(0, 200) }] : []),
+          ];
+          const renderedGrace = renderMultiTenantEmail("reservation.stay_extended", hotelBrand, {
+            recipientName: guestName,
+            title: "Late Check-Out Extension Approved",
+            intro: `Your check-out time at ${hotelBrand.hotelName} has been extended. Please see your updated check-out schedule below.`,
+            subjectOverride: `Late Check-Out Approved - ${hotelBrand.hotelName}`,
+            rows: graceRows,
+          });
+          const graceKey = `grace:${hotelId}:${reservationId}:${newTotalCustomMinutes}`;
+          await sendEmail({
+            to: [targetGuestEmail],
+            subject: renderedGrace.subject,
+            html: renderedGrace.html,
+            text: renderedGrace.text,
+            fromName: renderedGrace.fromName,
+            replyTo: renderedGrace.replyTo,
+            idempotencyKey: graceKey,
+            tags: [
+              { name: "hotelId", value: hotelId },
+              { name: "eventType", value: "reservation.stay_extended" },
+              { name: "audience", value: "guest" },
+              { name: "reservationId", value: reservationId },
+            ],
+          });
+        } catch (emailErr) {
+          console.warn("[GRACE PERIOD EMAIL NOTICE]:", emailErr);
+        }
+      })();
+
       return res.json({
         success: true,
         reservationId,
@@ -4771,11 +4828,17 @@ async function startServer() {
     }
 
     const allowedModuleEvents = new Set<MultiTenantEmailEventType>([
+      "reservation.room_transferred",
+      "reservation.stay_extended",
       "payment.received",
       "deposit.received",
       "invoice.issued",
       "receipt.sent",
       "refund.processed",
+      "folio.charge_posted",
+      "folio.charge_voided",
+      "folio.discount_applied",
+      "folio.balance_transferred",
       "fnb.order_posted",
       "fnb.order_voided",
       "housekeeping.room_ready",
@@ -5062,11 +5125,22 @@ async function startServer() {
                     },
                   ]
                 : []),
+            ...(cleanMetaStr("outletName") ? [{ label: "Outlet / Source", value: cleanMetaStr("outletName")! }] : []),
+            ...(cleanMetaStr("billNumber") ? [{ label: "Order / Bill #", value: cleanMetaStr("billNumber")! }] : []),
+            ...(cleanMetaStr("items", 240) ? [{ label: "Items", value: cleanMetaStr("items", 240)! }] : []),
             ...(cleanMetaStr("paymentMethod")
               ? [{ label: "Method", value: cleanMetaStr("paymentMethod")!.toUpperCase() }]
               : []),
             ...(cleanMetaStr("reference") ? [{ label: "Reference", value: cleanMetaStr("reference")! }] : []),
             ...(cleanMetaStr("reason") ? [{ label: "Reason", value: cleanMetaStr("reason")! }] : []),
+            ...(meta.depositBalanceAfter !== undefined && Number.isFinite(Number(meta.depositBalanceAfter))
+              ? [
+                  {
+                    label: "Remaining Deposit Balance",
+                    value: formatMoneyForEmail(meta.depositBalanceAfter, hotelBrand.currency),
+                  },
+                ]
+              : []),
             ...(!isRefund && (reservationDoc || meta.outstandingBalance !== undefined)
               ? [
                   {
@@ -5121,6 +5195,290 @@ async function startServer() {
           break;
         }
 
+        case "folio.charge_posted": {
+          if (resolvedGuestEmail) {
+            const chargeDateLabel = new Date().toLocaleString("en-US", {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+            const categoryLabel = cleanMetaStr("category")
+              ? cleanMetaStr("category")!
+                  .replace(/_/g, " ")
+                  .replace(/\b\w/g, (c) => c.toUpperCase())
+              : undefined;
+            const rows: EmailSummaryRow[] = [
+              { label: "Hotel", value: hotelBrand.hotelName },
+              { label: "Guest", value: resolvedGuestName },
+              ...(safeResId ? [{ label: "Booking Reference", value: safeResId.slice(0, 8).toUpperCase() }] : []),
+              ...(roomStr ? [{ label: "Room", value: roomStr }] : []),
+              ...(categoryLabel ? [{ label: "Category", value: categoryLabel }] : []),
+              ...(cleanMetaStr("description", 240)
+                ? [{ label: "Item / Description", value: cleanMetaStr("description", 240)! }]
+                : []),
+              ...(amtStr ? [{ label: "Amount Charged", value: amtStr }] : []),
+              { label: "Posted On", value: chargeDateLabel },
+              ...(cleanMetaStr("reference") ? [{ label: "Reference", value: cleanMetaStr("reference")! }] : []),
+              ...(reservationDoc
+                ? [
+                    {
+                      label: "Updated Remaining Balance",
+                      value: formatMoneyForEmail(financialBreakdown.remainingBalance, hotelBrand.currency),
+                    },
+                    {
+                      label: "Account Status",
+                      value: financialBreakdown.paymentStatus,
+                    },
+                  ]
+                : []),
+            ];
+            plans.push({
+              audience: "guest",
+              recipients: [resolvedGuestEmail],
+              brand: hotelBrand,
+              recipientName: resolvedGuestName,
+              rows,
+              keySuffix: "guest",
+            });
+          }
+          break;
+        }
+
+        case "folio.charge_voided": {
+          if (resolvedGuestEmail) {
+            const rows: EmailSummaryRow[] = [
+              { label: "Hotel", value: hotelBrand.hotelName },
+              { label: "Guest", value: resolvedGuestName },
+              ...(safeResId ? [{ label: "Booking Reference", value: safeResId.slice(0, 8).toUpperCase() }] : []),
+              ...(roomStr ? [{ label: "Room", value: roomStr }] : []),
+              ...(cleanMetaStr("description", 240)
+                ? [{ label: "Reversed Entry", value: cleanMetaStr("description", 240)! }]
+                : []),
+              ...(amtStr ? [{ label: "Reversed Amount", value: amtStr }] : []),
+              ...(cleanMetaStr("reason", 200) ? [{ label: "Reason", value: cleanMetaStr("reason", 200)! }] : []),
+              ...(reservationDoc
+                ? [
+                    {
+                      label: "Updated Remaining Balance",
+                      value: formatMoneyForEmail(financialBreakdown.remainingBalance, hotelBrand.currency),
+                    },
+                  ]
+                : []),
+            ];
+            plans.push({
+              audience: "guest",
+              recipients: [resolvedGuestEmail],
+              brand: hotelBrand,
+              recipientName: resolvedGuestName,
+              rows,
+              keySuffix: "guest",
+            });
+          }
+          break;
+        }
+
+        case "folio.discount_applied": {
+          if (resolvedGuestEmail) {
+            const rows: EmailSummaryRow[] = [
+              { label: "Hotel", value: hotelBrand.hotelName },
+              { label: "Guest", value: resolvedGuestName },
+              ...(safeResId ? [{ label: "Booking Reference", value: safeResId.slice(0, 8).toUpperCase() }] : []),
+              ...(roomStr ? [{ label: "Room", value: roomStr }] : []),
+              ...(cleanMetaStr("description", 240)
+                ? [{ label: "Discount / Credit", value: cleanMetaStr("description", 240)! }]
+                : []),
+              ...(amtStr ? [{ label: "Discount Amount", value: `-${amtStr}` }] : []),
+              ...(reservationDoc
+                ? [
+                    {
+                      label: "Updated Remaining Balance",
+                      value: formatMoneyForEmail(financialBreakdown.remainingBalance, hotelBrand.currency),
+                    },
+                    {
+                      label: "Account Status",
+                      value: financialBreakdown.paymentStatus,
+                    },
+                  ]
+                : []),
+            ];
+            plans.push({
+              audience: "guest",
+              recipients: [resolvedGuestEmail],
+              brand: hotelBrand,
+              recipientName: resolvedGuestName,
+              rows,
+              keySuffix: "guest",
+            });
+          }
+          break;
+        }
+
+        case "folio.balance_transferred": {
+          if (resolvedGuestEmail) {
+            const rows: EmailSummaryRow[] = [
+              { label: "Hotel", value: hotelBrand.hotelName },
+              { label: "Guest", value: resolvedGuestName },
+              ...(safeResId ? [{ label: "Booking Reference", value: safeResId.slice(0, 8).toUpperCase() }] : []),
+              ...(roomStr ? [{ label: "Room", value: roomStr }] : []),
+              ...(amtStr ? [{ label: "Amount Transferred", value: amtStr }] : []),
+              ...(cleanMetaStr("transferTarget", 180)
+                ? [{ label: "Transferred To", value: cleanMetaStr("transferTarget", 180)! }]
+                : []),
+              ...(cleanMetaStr("description", 240)
+                ? [{ label: "Details", value: cleanMetaStr("description", 240)! }]
+                : []),
+              ...(cleanMetaStr("reason", 200) ? [{ label: "Notes", value: cleanMetaStr("reason", 200)! }] : []),
+              ...(reservationDoc
+                ? [
+                    {
+                      label: "Updated Remaining Balance",
+                      value: formatMoneyForEmail(financialBreakdown.remainingBalance, hotelBrand.currency),
+                    },
+                  ]
+                : []),
+            ];
+            plans.push({
+              audience: "guest",
+              recipients: [resolvedGuestEmail],
+              brand: hotelBrand,
+              recipientName: resolvedGuestName,
+              rows,
+              keySuffix: "guest",
+            });
+          }
+          break;
+        }
+
+        case "reservation.room_transferred": {
+          if (resolvedGuestEmail) {
+            const prevRoom = cleanMetaStr("previousRoomNumber");
+            const prevType = cleanMetaStr("previousRoomType");
+            const newRoomNum = cleanMetaStr("roomNumber") || (reservationDoc?.roomNumber ? String(reservationDoc.roomNumber) : undefined);
+            const newType = cleanMetaStr("newRoomType") || (reservationDoc?.roomType ? String(reservationDoc.roomType) : undefined);
+            const priceDiffNum =
+              meta.priceDifference !== undefined && Number.isFinite(Number(meta.priceDifference))
+                ? Number(meta.priceDifference)
+                : 0;
+            const newTotalNum =
+              meta.newTotalAmount !== undefined && Number.isFinite(Number(meta.newTotalAmount))
+                ? Number(meta.newTotalAmount)
+                : undefined;
+
+            const rows: EmailSummaryRow[] = [
+              { label: "Hotel", value: hotelBrand.hotelName },
+              { label: "Guest", value: resolvedGuestName },
+              ...(safeResId ? [{ label: "Booking Reference", value: safeResId.slice(0, 8).toUpperCase() }] : []),
+              ...(prevRoom
+                ? [{ label: "Previous Room", value: `Room ${prevRoom}${prevType ? ` (${prevType})` : ""}` }]
+                : []),
+              ...(newRoomNum
+                ? [{ label: "New Room", value: `Room ${newRoomNum}${newType ? ` (${newType})` : ""}` }]
+                : []),
+              ...(reservationDoc?.checkIn ? [{ label: "Check-In Date", value: String(reservationDoc.checkIn) }] : []),
+              ...(reservationDoc?.checkOut ? [{ label: "Check-Out Date", value: String(reservationDoc.checkOut) }] : []),
+              ...(priceDiffNum !== 0
+                ? [
+                    {
+                      label: "Rate Adjustment",
+                      value: `${priceDiffNum > 0 ? "+" : "-"}${formatMoneyForEmail(Math.abs(priceDiffNum), hotelBrand.currency)}`,
+                    },
+                  ]
+                : [{ label: "Rate Adjustment", value: "No change" }]),
+              ...(newTotalNum !== undefined
+                ? [{ label: "Updated Stay Total", value: formatMoneyForEmail(newTotalNum, hotelBrand.currency) }]
+                : []),
+              ...(reservationDoc
+                ? [
+                    {
+                      label: "Remaining Balance",
+                      value: formatMoneyForEmail(financialBreakdown.remainingBalance, hotelBrand.currency),
+                    },
+                  ]
+                : []),
+            ];
+            plans.push({
+              audience: "guest",
+              recipients: [resolvedGuestEmail],
+              brand: hotelBrand,
+              recipientName: resolvedGuestName,
+              rows,
+              keySuffix: "guest",
+            });
+          }
+          break;
+        }
+
+        case "reservation.stay_extended": {
+          if (resolvedGuestEmail) {
+            const prevCheckOut = cleanMetaStr("previousCheckOut");
+            const nextCheckOut = cleanMetaStr("newCheckOut") || (reservationDoc?.checkOut ? String(reservationDoc.checkOut) : undefined);
+            const extraNightsNum =
+              meta.extraNights !== undefined && Number.isFinite(Number(meta.extraNights))
+                ? Number(meta.extraNights)
+                : undefined;
+            const totalNightsNum =
+              meta.totalNights !== undefined && Number.isFinite(Number(meta.totalNights))
+                ? Number(meta.totalNights)
+                : undefined;
+            const extRateNum =
+              meta.extensionNightlyRate !== undefined && Number.isFinite(Number(meta.extensionNightlyRate))
+                ? Number(meta.extensionNightlyRate)
+                : undefined;
+            const addChargeNum =
+              meta.additionalCharge !== undefined && Number.isFinite(Number(meta.additionalCharge))
+                ? Number(meta.additionalCharge)
+                : undefined;
+            const updatedTotalNum =
+              meta.newTotalAmount !== undefined && Number.isFinite(Number(meta.newTotalAmount))
+                ? Number(meta.newTotalAmount)
+                : undefined;
+
+            const rows: EmailSummaryRow[] = [
+              { label: "Hotel", value: hotelBrand.hotelName },
+              { label: "Guest", value: resolvedGuestName },
+              ...(safeResId ? [{ label: "Booking Reference", value: safeResId.slice(0, 8).toUpperCase() }] : []),
+              ...(roomStr ? [{ label: "Room", value: roomStr }] : []),
+              ...(reservationDoc?.checkIn ? [{ label: "Check-In Date", value: String(reservationDoc.checkIn) }] : []),
+              ...(prevCheckOut ? [{ label: "Previous Check-Out", value: prevCheckOut }] : []),
+              ...(nextCheckOut ? [{ label: "New Check-Out Date", value: nextCheckOut }] : []),
+              ...(extraNightsNum !== undefined && extraNightsNum > 0
+                ? [{ label: "Additional Nights", value: `+${extraNightsNum} night${extraNightsNum === 1 ? "" : "s"}` }]
+                : []),
+              ...(totalNightsNum !== undefined && totalNightsNum > 0
+                ? [{ label: "Updated Total Nights", value: `${totalNightsNum} night${totalNightsNum === 1 ? "" : "s"}` }]
+                : []),
+              ...(extRateNum !== undefined && extRateNum > 0
+                ? [{ label: "Extension Rate", value: `${formatMoneyForEmail(extRateNum, hotelBrand.currency)} / night` }]
+                : []),
+              ...(addChargeNum !== undefined && addChargeNum > 0
+                ? [{ label: "Additional Charge", value: formatMoneyForEmail(addChargeNum, hotelBrand.currency) }]
+                : []),
+              ...(updatedTotalNum !== undefined
+                ? [{ label: "Updated Stay Total", value: formatMoneyForEmail(updatedTotalNum, hotelBrand.currency) }]
+                : []),
+              ...(reservationDoc
+                ? [
+                    {
+                      label: "Remaining Balance",
+                      value: formatMoneyForEmail(financialBreakdown.remainingBalance, hotelBrand.currency),
+                    },
+                  ]
+                : []),
+            ];
+            plans.push({
+              audience: "guest",
+              recipients: [resolvedGuestEmail],
+              brand: hotelBrand,
+              recipientName: resolvedGuestName,
+              rows,
+              keySuffix: "guest",
+            });
+          }
+          break;
+        }
+
         case "fnb.order_posted": {
           if (resolvedGuestEmail) {
             plans.push({
@@ -5129,11 +5487,26 @@ async function startServer() {
               brand: hotelBrand,
               recipientName: resolvedGuestName,
               rows: [
+                { label: "Hotel", value: hotelBrand.hotelName },
                 { label: "Guest", value: resolvedGuestName },
+                ...(safeResId ? [{ label: "Booking Reference", value: safeResId.slice(0, 8).toUpperCase() }] : []),
                 ...(roomStr ? [{ label: "Room", value: roomStr }] : []),
                 ...(cleanMetaStr("billNumber") ? [{ label: "Order / Bill #", value: cleanMetaStr("billNumber")! }] : []),
+                ...(cleanMetaStr("items", 240)
+                  ? [{ label: "Items", value: cleanMetaStr("items", 240)! }]
+                  : cleanMetaStr("description", 240)
+                    ? [{ label: "Description", value: cleanMetaStr("description", 240)! }]
+                    : []),
                 ...(amtStr ? [{ label: "Amount Posted", value: amtStr }] : []),
                 ...(cleanMetaStr("outletName") ? [{ label: "Outlet", value: cleanMetaStr("outletName")! }] : []),
+                ...(reservationDoc
+                  ? [
+                      {
+                        label: "Updated Remaining Balance",
+                        value: formatMoneyForEmail(financialBreakdown.remainingBalance, hotelBrand.currency),
+                      },
+                    ]
+                  : []),
               ],
               keySuffix: "guest",
             });
@@ -5142,6 +5515,12 @@ async function startServer() {
         }
 
         case "fnb.order_voided": {
+          const voidRows: EmailSummaryRow[] = [
+            ...(cleanMetaStr("billNumber") ? [{ label: "Order / Bill #", value: cleanMetaStr("billNumber")! }] : []),
+            ...(roomStr ? [{ label: "Room", value: roomStr }] : []),
+            ...(amtStr ? [{ label: "Voided Amount", value: amtStr }] : []),
+            ...(cleanMetaStr("reason") ? [{ label: "Void Reason", value: cleanMetaStr("reason")! }] : []),
+          ];
           const staffRecips = resolveHotelOperationalRecipients(
             hotelDoc,
             typedEvent,
@@ -5152,14 +5531,23 @@ async function startServer() {
               audience: "hotel_staff",
               recipients: staffRecips,
               brand: hotelBrand,
-              rows: [
-                ...(cleanMetaStr("billNumber") ? [{ label: "Order / Bill #", value: cleanMetaStr("billNumber")! }] : []),
-                ...(roomStr ? [{ label: "Room", value: roomStr }] : []),
-                ...(amtStr ? [{ label: "Voided Amount", value: amtStr }] : []),
-                ...(cleanMetaStr("reason") ? [{ label: "Void Reason", value: cleanMetaStr("reason")! }] : []),
-                { label: "Actioned By", value: caller.email || caller.uid },
-              ],
+              rows: [...voidRows, { label: "Actioned By", value: caller.email || caller.uid }],
               keySuffix: "staff",
+            });
+          }
+          if (meta.notifyGuest === true && resolvedGuestEmail) {
+            plans.push({
+              audience: "guest",
+              recipients: [resolvedGuestEmail],
+              brand: hotelBrand,
+              recipientName: resolvedGuestName,
+              subjectOverride: `Restaurant Order Voided - ${hotelBrand.hotelName}`,
+              rows: [
+                { label: "Hotel", value: hotelBrand.hotelName },
+                { label: "Guest", value: resolvedGuestName },
+                ...voidRows,
+              ],
+              keySuffix: "guest",
             });
           }
           break;
@@ -5567,7 +5955,10 @@ async function startServer() {
         } | null = null;
 
         const rawMappedEvent =
-          plan.audience !== "platform_superadmin" ? normalizeHotelEmailEvent(typedEvent) : null;
+          plan.audience !== "platform_superadmin" &&
+          !(typedEvent === "fnb.order_voided" && plan.audience === "guest")
+            ? normalizeHotelEmailEvent(typedEvent)
+            : null;
         let mappedEvent =
           rawMappedEvent && isCustomizableEvent(rawMappedEvent) ? rawMappedEvent : null;
 

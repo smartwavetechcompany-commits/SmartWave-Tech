@@ -1984,13 +1984,14 @@ export function FrontDesk() {
 
       toast.success('Reservation updated successfully');
 
-      // Additive: Trigger booking_modified email ONLY when stay dates actually changed
+      // Additive: Trigger booking_modified email when stay dates or total amount changed
       if (
         editForm.checkIn !== editingReservation.checkIn ||
-        editForm.checkOut !== editingReservation.checkOut
+        editForm.checkOut !== editingReservation.checkOut ||
+        Number(editForm.totalAmount) !== Number(editingReservation.totalAmount)
       ) {
         try {
-          const modSuffix = `${editForm.checkIn}_${editForm.checkOut}`.replace(/[^a-zA-Z0-9_-]/g, '');
+          const modSuffix = `${editForm.checkIn}_${editForm.checkOut}_${Math.round(Number(editForm.totalAmount || 0))}`.replace(/[^a-zA-Z0-9_-]/g, '');
           void notifyReservationEmailEvent(hotel.id, editingReservation.id, 'booking_modified', {
             idempotencySuffix: modSuffix,
           });
@@ -2310,6 +2311,30 @@ export function FrontDesk() {
       );
 
       toast.success('Stay postponed successfully');
+
+      // Additive: Notify guest that their stay has been extended / postponed
+      try {
+        void notifyPlatformEvent({
+          hotelId: hotel.id,
+          eventType: 'reservation.stay_extended',
+          reservationId: res.id,
+          guestId: res.guestId || undefined,
+          idempotencyKey: `stay_ext_${res.id}_${newCheckOutDate}_${Math.round(newTotalAmount * 100)}`,
+          metadata: {
+            previousCheckOut: res.checkOut,
+            newCheckOut: newCheckOutDate,
+            extraNights,
+            totalNights: newBookedNights,
+            extensionNightlyRate,
+            additionalCharge: Number((baseExtraAmount + extraExclusiveTaxTotal).toFixed(2)),
+            newTotalAmount,
+            roomNumber: res.roomNumber || undefined,
+          },
+        });
+      } catch {
+        // Non-blocking
+      }
+
       setShowPostponeModal(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `hotels/${hotel.id}/reservations`);
@@ -3505,6 +3530,28 @@ export function FrontDesk() {
 
       // 5. Log action is handled by safeUpdate/postToLedger internals
       toast.success(`Transferred to Room ${newRoom.roomNumber}`);
+
+      // Additive: Notify guest of room transfer confirmation
+      try {
+        void notifyPlatformEvent({
+          hotelId: hotel.id,
+          eventType: 'reservation.room_transferred',
+          reservationId: res.id,
+          guestId: res.guestId || undefined,
+          idempotencyKey: `room_xfer_${res.id}_${res.roomNumber || 'old'}_${newRoom.roomNumber}_${Math.round(Number(newTotalAmount || 0) * 100)}`,
+          metadata: {
+            previousRoomNumber: res.roomNumber,
+            previousRoomType: oldRoomType?.name || undefined,
+            roomNumber: newRoom.roomNumber,
+            newRoomType: newRoomType?.name || undefined,
+            priceDifference,
+            newTotalAmount,
+          },
+        });
+      } catch {
+        // Non-blocking
+      }
+
       setShowTransferModal(null);
     } catch (err: any) {
       handleFirestoreError(err, OperationType.UPDATE, `hotels/${hotel.id}/reservations/${res.id}`);

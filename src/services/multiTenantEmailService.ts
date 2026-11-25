@@ -15,12 +15,19 @@ export type MultiTenantEmailEventType =
   | "reservation.checked_out"
   | "reservation.cancelled"
   | "reservation.no_show"
+  | "reservation.room_transferred"
+  | "reservation.stay_extended"
   // Payments, Deposits, Invoices, Receipts & Refunds
   | "payment.received"
   | "deposit.received"
   | "invoice.issued"
   | "receipt.sent"
   | "refund.processed"
+  // Guest Folio & Room Account Activity
+  | "folio.charge_posted"
+  | "folio.charge_voided"
+  | "folio.discount_applied"
+  | "folio.balance_transferred"
   // Restaurant / F&B
   | "fnb.order_posted"
   | "fnb.order_voided"
@@ -451,6 +458,8 @@ export function getOperationalRoutingTarget(eventType: MultiTenantEmailEventType
     case "reservation.checked_out":
     case "reservation.cancelled":
     case "reservation.no_show":
+    case "reservation.room_transferred":
+    case "reservation.stay_extended":
     case "guest.blacklisted":
       return { department: "frontDesk", roles: ["hotelAdmin", "admin", "manager", "frontDesk", "receptionist"] };
     case "payment.received":
@@ -458,6 +467,10 @@ export function getOperationalRoutingTarget(eventType: MultiTenantEmailEventType
     case "invoice.issued":
     case "receipt.sent":
     case "refund.processed":
+    case "folio.charge_posted":
+    case "folio.charge_voided":
+    case "folio.discount_applied":
+    case "folio.balance_transferred":
     case "system.daily_revenue_deficit":
       return { department: "finance", roles: ["hotelAdmin", "admin", "manager", "accountant"] };
     case "fnb.order_posted":
@@ -610,6 +623,18 @@ function getDefaultMetaForEvent(
         heading: "Reservation Marked as No-Show",
         defaultIntro: `A reservation at ${name} has been marked as a no-show and room inventory has been updated.`,
       };
+    case "reservation.room_transferred":
+      return {
+        subjectPrefix: `Room Transfer Confirmation - ${name}`,
+        heading: "Room Transfer Confirmation",
+        defaultIntro: `Your room assignment at ${name} has been updated. Please review your new room and stay summary below.`,
+      };
+    case "reservation.stay_extended":
+      return {
+        subjectPrefix: `Stay Extension & Schedule Update - ${name}`,
+        heading: "Your Stay Has Been Updated",
+        defaultIntro: `Your stay schedule at ${name} has been extended/updated. Please review your updated check-out and account details below.`,
+      };
     case "payment.received":
       return {
         subjectPrefix: `Payment Confirmation - ${name}`,
@@ -639,6 +664,30 @@ function getDefaultMetaForEvent(
         subjectPrefix: `Refund Confirmation - ${name}`,
         heading: "Refund Processed",
         defaultIntro: `A refund has been processed at ${name}. Reference details are included below.`,
+      };
+    case "folio.charge_posted":
+      return {
+        subjectPrefix: `Room Account Charge Notice - ${name}`,
+        heading: "New Charge Posted to Your Room Account",
+        defaultIntro: `A charge has been posted to your guest account at ${name}. Please review the item and updated balance below.`,
+      };
+    case "folio.charge_voided":
+      return {
+        subjectPrefix: `Account Charge Reversal Notice - ${name}`,
+        heading: "Folio Entry Reversed / Voided",
+        defaultIntro: `A charge or transaction on your guest account at ${name} has been reversed/voided. Updated details are listed below.`,
+      };
+    case "folio.discount_applied":
+      return {
+        subjectPrefix: `Discount & Credit Adjustment Notice - ${name}`,
+        heading: "Discount Applied to Your Account",
+        defaultIntro: `A discount or credit adjustment has been applied to your guest account at ${name}. Please review your updated summary below.`,
+      };
+    case "folio.balance_transferred":
+      return {
+        subjectPrefix: `Account Balance Transfer Notice - ${name}`,
+        heading: "Guest Account Balance Transferred",
+        defaultIntro: `A balance transfer has been recorded on your guest account at ${name}. Please review the transfer details below.`,
       };
     case "fnb.order_posted":
       return {

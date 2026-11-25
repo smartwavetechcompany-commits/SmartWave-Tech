@@ -25,6 +25,7 @@ import {
   isDuplicateCityLedgerTransfer,
   validateAccountReceivableEligibility,
 } from './cityLedgerCore';
+import { notifyPlatformEvent } from './transactionalEmailClient';
 
 /**
  * Single source of truth for Debt / Accounts Receivable management.
@@ -398,6 +399,28 @@ export const transferDebt = async (
     details: `Transferred ₦${amount.toLocaleString()} from folio ${debt.folioNumber} to ${targetName}`
   });
 
+  // Additive: Notify guest that their outstanding balance was transferred
+  if (amount > 0 && debt.reservationId) {
+    try {
+      void notifyPlatformEvent({
+        hotelId,
+        eventType: 'folio.balance_transferred',
+        reservationId: debt.reservationId,
+        guestId: debt.guestId || undefined,
+        corporateId: targetType === 'corporate' ? targetId : undefined,
+        idempotencyKey: `debt_xfer_${debtId}_${targetId || targetName}_${Math.round(amount * 100)}`,
+        metadata: {
+          amount,
+          transferTarget: targetName,
+          description: `Balance transferred from Folio ${debt.folioNumber} to ${targetName}`,
+          reason: notes || undefined,
+        },
+      });
+    } catch {
+      // Non-blocking
+    }
+  }
+
   return { success: true };
 };
 
@@ -759,6 +782,26 @@ export const transferDebtToNewFolio = async (
     action: 'TRANSFER_TO_NEW_FOLIO',
     details: `Transferred ₦${amount.toLocaleString()} from ${previousDebt.folioNumber} to new stay ${newFolioNum}`
   });
+
+  // Additive: Notify guest that their previous balance was carried forward to their new stay folio
+  if (amount > 0 && newReservation.id) {
+    try {
+      void notifyPlatformEvent({
+        hotelId,
+        eventType: 'folio.balance_transferred',
+        reservationId: newReservation.id,
+        guestId: newReservation.guestId || previousDebt.guestId || undefined,
+        idempotencyKey: `carry_fwd_${previousDebt.id}_${newReservation.id}_${Math.round(amount * 100)}`,
+        metadata: {
+          amount,
+          transferTarget: `New Stay Folio ${newFolioNum} (Room ${newReservation.roomNumber})`,
+          description: `Previous balance from Folio ${previousDebt.folioNumber} carried forward to your current stay`,
+        },
+      });
+    } catch {
+      // Non-blocking
+    }
+  }
 
   return { success: true };
 };

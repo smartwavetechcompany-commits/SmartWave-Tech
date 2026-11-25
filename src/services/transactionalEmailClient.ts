@@ -16,11 +16,17 @@ export type ReservationEmailEventType =
   | 'booking_cancellation';
 
 export type PlatformNotificationEventType =
+  | 'reservation.room_transferred'
+  | 'reservation.stay_extended'
   | 'payment.received'
   | 'deposit.received'
   | 'invoice.issued'
   | 'receipt.sent'
   | 'refund.processed'
+  | 'folio.charge_posted'
+  | 'folio.charge_voided'
+  | 'folio.discount_applied'
+  | 'folio.balance_transferred'
   | 'fnb.order_posted'
   | 'fnb.order_voided'
   | 'housekeeping.room_ready'

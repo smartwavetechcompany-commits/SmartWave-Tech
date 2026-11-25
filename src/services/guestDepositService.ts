@@ -684,5 +684,26 @@ export async function chargeGuestDepositForOrder(
     },
   });
 
+  // Additive: Notify guest when their account deposit is used to pay an F&B / restaurant bill
+  try {
+    void notifyPlatformEvent({
+      hotelId,
+      eventType: 'payment.received',
+      entityId: txRef.id,
+      guestId,
+      metadata: {
+        amount: finalAmount,
+        paymentMethod: 'Guest Account Deposit',
+        outletName: 'Restaurant / F&B',
+        billNumber: options?.billNumber || orderId,
+        roomNumber: options?.roomNumber && options.roomNumber !== 'Walk-in' ? options.roomNumber : undefined,
+        reference: options?.billNumber || txRef.id,
+        depositBalanceAfter: balanceAfter,
+      },
+    });
+  } catch {
+    // Non-blocking
+  }
+
   return { transaction: txRecord, balanceBefore, balanceAfter };
 }

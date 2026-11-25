@@ -6,6 +6,7 @@ import { ConfirmModal } from './ConfirmModal';
 import { GuestFolio } from './GuestFolio';
 import { SafeModalBoundary } from './SafeModalBoundary';
 import { recordOutstandingDebt, checkReturningGuestDebt, syncOutstandingDebtWithReservation } from '../services/debtService';
+import { notifyReservationEmailEvent } from '../services/transactionalEmailClient';
 import { ReturningGuestDebtModal } from './ReturningGuestDebtModal';
 import { useAuth } from '../contexts/AuthContext';
 import { Room, OperationType, RoomType, Reservation, UserProfile, RoomBlocking, RateConfiguration, InventoryConsumptionRule, InventoryItem, LedgerEntry } from '../types';
@@ -984,6 +985,13 @@ export function Rooms() {
 
         if (res.corporateId) {
           reconcileCorporateAccountBalance(hotel.id, res.corporateId).catch(() => {});
+        }
+
+        // Additive: Trigger guest check-out summary email (non-blocking, matching FrontDesk.tsx)
+        try {
+          void notifyReservationEmailEvent(hotel.id, res.id, 'checked_out');
+        } catch {
+          // Non-blocking
         }
 
         // Log action
