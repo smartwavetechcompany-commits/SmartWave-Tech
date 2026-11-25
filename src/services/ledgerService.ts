@@ -735,7 +735,12 @@ export const postToLedger = async (
           metadata: {
             amount: entry.amount,
             description: entry.description,
-            reference: entry.referenceCode || fnbEntityId,
+            billNumber: (entry as any).billNumber || undefined,
+            outletName: (entry as any).outletName || 'Restaurant',
+            roomNumber: (entry as any).roomNumber || undefined,
+            items: (entry as any).items || undefined,
+            category: entry.category,
+            reference: (entry as any).billNumber || entry.referenceCode || fnbEntityId,
           },
         });
       } else if (

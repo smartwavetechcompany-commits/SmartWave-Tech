@@ -53,8 +53,8 @@ console.log("\n=== Phase 2, 3, 4, 5 Production Recovery & Email/Policy Verificat
 // PHASE 2: COMPLETE EMAIL TEMPLATE CATALOG & ZERO UNWANTED PMS URL EXPOSURE
 // ---------------------------------------------------------------------------
 
-runTest("Phase 2.1: All 38 automated email events are registered and render cleanly in EN & DE with zero unresolved {{...}} tags", () => {
-  assert.equal(CUSTOMIZABLE_EMAIL_EVENTS.length, 38, "Expected 38 customizable email events");
+runTest("Phase 2.1: All 45 automated email events are registered and render cleanly in EN & DE with zero unresolved {{...}} tags", () => {
+  assert.equal(CUSTOMIZABLE_EMAIL_EVENTS.length, 45, "Expected 45 customizable email events");
 
   const sampleHotel = {
     name: "Grand Oasis Hotel",
@@ -218,6 +218,13 @@ runTest("Phase 2.4: Event alias mapping covers deposit, billing, loyalty, corpor
     ["maintenance.issue_reported", "maintenance_issue_reported"],
     ["fnb.order_posted", "fnb_order_posted"],
     ["staff.account_status_changed", "staff_account_status_changed"],
+    ["reservation.room_transferred", "room_transferred"],
+    ["reservation.stay_extended", "stay_extended"],
+    ["folio.charge_posted", "folio_charge_posted"],
+    ["folio.charge_voided", "folio_charge_voided"],
+    ["folio.discount_applied", "folio_discount_applied"],
+    ["folio.balance_transferred", "folio_balance_transferred"],
+    ["loyalty.points_expired", "loyalty_points_expired"],
   ];
   for (const [alias, expected] of pairs) {
     assert.equal(normalizeHotelEmailEvent(alias), expected, `Failed alias mapping for ${alias}`);
