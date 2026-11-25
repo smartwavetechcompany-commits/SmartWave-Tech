@@ -1,6 +1,6 @@
 import express from "express";
 import http from "http";
-import { createServer as createViteServer } from "vite";
+import { spawn } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
@@ -6587,23 +6587,20 @@ async function startServer() {
     candidateDistPaths.find((p) => fs.existsSync(path.join(p, "index.html"))) ||
     candidateDistPaths[0];
   const distIndexPath = path.join(distPath, "index.html");
-  const hasDistBuild = fs.existsSync(distIndexPath);
+  let hasDistBuild = fs.existsSync(distIndexPath);
 
   const isExplicitDevMode =
     process.env.NODE_ENV === "development" ||
     process.env.npm_lifecycle_event === "dev";
 
-  // Use Vite middleware strictly in explicit development mode (or as a fallback only if dist/index.html is missing).
-  // In hosted production environments (even if NODE_ENV is unset), always prefer the pre-built static dist/ bundle
-  // so the server never attempts heavy on-the-fly Vite compilation under production traffic.
-  if (isExplicitDevMode || !hasDistBuild) {
-    const isHmrDisabled =
-      process.env.DISABLE_HMR === "true" || !isExplicitDevMode;
-    if (!isExplicitDevMode && !hasDistBuild) {
-      console.warn(
-        `[FRONTEND] Production build not found at ${distIndexPath}. Serving via Vite SPA middleware fallback.`
-      );
-    }
+  // Use Vite middleware strictly in explicit development mode.
+  // In hosted production environments (e.g., Hostinger), NEVER serve unbundled Vite dev middleware
+  // (which triggers 180+ parallel module requests and hits host 503 concurrency limits).
+  // Instead, serve static dist/ directly; if dist/index.html is missing on first deploy, trigger
+  // a single one-time production build in a child process and switch seamlessly to static dist/ when ready.
+  if (isExplicitDevMode) {
+    const { createServer: createViteServer } = await import("vite");
+    const isHmrDisabled = process.env.DISABLE_HMR === "true";
     const viteAllowedHosts = Array.from(
       new Set<string>([
         "tidehotels.de",
@@ -6640,34 +6637,90 @@ async function startServer() {
 
     app.use(vite.middlewares);
   } else {
-    console.log(`[FRONTEND] Serving production static build from ${distPath}`);
+    let buildInProgress = false;
+    let lastBuildError: string | null = null;
 
-    // Serve content-hashed assets with long immutable caching
-    const distAssetsPath = path.join(distPath, "assets");
-    if (fs.existsSync(distAssetsPath)) {
-      app.use(
-        "/assets",
-        express.static(distAssetsPath, {
-          maxAge: "1y",
-          immutable: true,
-          fallthrough: false,
-        })
-      );
-      app.use("/assets", (_err: any, _req: any, res: any, _next: any) => {
-        res.status(404).type("text/plain").send("Asset not found");
+    const triggerOneTimeProductionBuild = () => {
+      if (buildInProgress || fs.existsSync(distIndexPath)) {
+        hasDistBuild = fs.existsSync(distIndexPath);
+        return;
+      }
+      const viteCliPath = path.join(__dirname, "node_modules", "vite", "bin", "vite.js");
+      if (!fs.existsSync(viteCliPath)) {
+        lastBuildError = "Production dist/ bundle is missing and Vite CLI was not found. Please run `npm run build`.";
+        console.error("[FRONTEND]", lastBuildError);
+        return;
+      }
+      buildInProgress = true;
+      lastBuildError = null;
+      console.log("[FRONTEND] Production dist/ bundle not found. Running one-time `vite build` in background child process...");
+      const child = spawn(process.execPath, [viteCliPath, "build", "--logLevel", "warn"], {
+        cwd: __dirname,
+        env: { ...process.env, NODE_ENV: "production" },
+        stdio: ["ignore", "pipe", "pipe"],
       });
+      let stderrBuf = "";
+      child.stderr?.on("data", (chunk) => {
+        stderrBuf = (stderrBuf + chunk.toString()).slice(-1500);
+      });
+      child.on("close", (code) => {
+        buildInProgress = false;
+        hasDistBuild = fs.existsSync(distIndexPath);
+        if (code === 0 && hasDistBuild) {
+          console.log(`[FRONTEND] One-time production build completed successfully at ${distPath}`);
+          lastBuildError = null;
+        } else {
+          lastBuildError = `Production build exited with code ${code}. ${stderrBuf.trim().slice(0, 300)}`;
+          console.error("[FRONTEND] One-time production build failed:", lastBuildError);
+        }
+      });
+      child.on("error", (err) => {
+        buildInProgress = false;
+        lastBuildError = `Failed to spawn production build: ${err.message}`;
+        console.error("[FRONTEND]", lastBuildError);
+      });
+    };
+
+    if (hasDistBuild) {
+      console.log(`[FRONTEND] Serving production static build from ${distPath}`);
+    } else {
+      triggerOneTimeProductionBuild();
     }
 
-    // Serve remaining static files from dist without caching index.html
-    app.use(
-      express.static(distPath, {
-        index: false,
-        maxAge: "1h",
-      })
-    );
+    const distAssetsPath = path.join(distPath, "assets");
+    const assetsStaticMiddleware = express.static(distAssetsPath, {
+      maxAge: "1y",
+      immutable: true,
+      fallthrough: false,
+    });
+    const rootStaticMiddleware = express.static(distPath, {
+      index: false,
+      maxAge: "1h",
+    });
 
     const STATIC_ASSET_EXT_RE =
       /\.(?:js|mjs|cjs|css|map|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|eot|otf|json|webmanifest|txt|xml)$/i;
+
+    // Serve content-hashed assets dynamically once dist/assets exists (immutable 1y cache, strict 404 if missing)
+    app.use("/assets", (req, res, next) => {
+      if (!fs.existsSync(distAssetsPath)) {
+        return res.status(404).type("text/plain").send("Asset not found");
+      }
+      assetsStaticMiddleware(req, res, (err: any) => {
+        if (err) {
+          return res.status(404).type("text/plain").send("Asset not found");
+        }
+        next();
+      });
+    });
+
+    // Serve remaining static files from dist without caching index.html
+    app.use((req, res, next) => {
+      if (req.path.startsWith("/api/") || !fs.existsSync(distPath)) {
+        return next();
+      }
+      return rootStaticMiddleware(req, res, next);
+    });
 
     // Root route & SPA fallback: serve index.html with no-store so CDNs/browsers never reference stale bundle hashes
     app.get(["/", "*"], (req, res, next) => {
@@ -6677,10 +6730,53 @@ async function startServer() {
       if (req.path.startsWith("/assets/") || STATIC_ASSET_EXT_RE.test(req.path)) {
         return res.status(404).type("text/plain").send("Not found");
       }
+
+      if (!hasDistBuild && fs.existsSync(distIndexPath)) {
+        hasDistBuild = true;
+      }
+
       res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       res.setHeader("Pragma", "no-cache");
       res.setHeader("Expires", "0");
-      res.sendFile(distIndexPath);
+
+      if (hasDistBuild && fs.existsSync(distIndexPath)) {
+        return res.sendFile(distIndexPath);
+      }
+
+      if (!buildInProgress && !lastBuildError) {
+        triggerOneTimeProductionBuild();
+      }
+
+      const safeErr = lastBuildError ? escapeHtml(lastBuildError) : "";
+      const isBuilding = buildInProgress || !lastBuildError;
+      return res.status(200).type("text/html").send(`<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    ${isBuilding ? '<meta http-equiv="refresh" content="4" />' : ""}
+    <title>Tyyl Tech PMS</title>
+    <style>
+      html, body { margin: 0; min-height: 100vh; background: #09090b; color: #f4f4f5; font-family: Inter, system-ui, sans-serif; display: flex; align-items: center; justify-content: center; }
+      .card { max-width: 420px; width: calc(100% - 32px); background: #18181b; border: 1px solid #27272a; border-radius: 16px; padding: 28px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+      .spinner { width: 32px; height: 32px; border: 3px solid #27272a; border-top-color: #10b981; border-radius: 50%; margin: 0 auto 16px; animation: spin 0.9s linear infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      h2 { margin: 0 0 8px; font-size: 18px; color: #fafafa; }
+      p { margin: 0 0 18px; font-size: 13px; line-height: 1.5; color: #a1a1aa; }
+      button { width: 100%; padding: 11px 16px; border: 0; border-radius: 10px; background: #10b981; color: #052e16; font-weight: 700; font-size: 14px; cursor: pointer; }
+      .err { margin-top: 12px; padding: 10px; border-radius: 8px; background: #09090b; border: 1px solid #3f3f46; color: #f87171; font-size: 11px; text-align: left; word-break: break-word; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      ${isBuilding ? '<div class="spinner"></div>' : ""}
+      <h2>${isBuilding ? "Starting Application..." : "Production Build Required"}</h2>
+      <p>${isBuilding ? "Finalizing the production bundle on first startup. This page will open automatically in a few seconds." : "The production frontend bundle could not be built automatically on this server. Please run npm run build in your hosting panel and restart."}</p>
+      <button type="button" onclick="window.location.reload()">Refresh Now</button>
+      ${safeErr ? `<div class="err">${safeErr}</div>` : ""}
+    </div>
+  </body>
+</html>`);
     });
   }
 
