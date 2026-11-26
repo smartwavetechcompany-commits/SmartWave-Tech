@@ -56,7 +56,10 @@ export default defineConfig(({mode}) => {
       include: ['date-fns-raw'],
     },
     build: {
+      sourcemap: false,
+      reportCompressedSize: false,
       rollupOptions: {
+        maxParallelFileOps: 2,
         output: {
           manualChunks(id) {
             if (!id.includes('node_modules')) return undefined;

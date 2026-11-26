@@ -14,6 +14,15 @@ dotenv.config();
 if (!process.env.NODE_ENV) {
   process.env.NODE_ENV = "production";
 }
+// Cap native thread pools (esbuild/Go, Tailwind/Rust, sharp/libvips, libuv) for shared Node.js hosts
+// with strict LVE/cgroup NPROC limits so runtime operations and first-boot builds never hit EAGAIN.
+if (!process.env.GOMAXPROCS) process.env.GOMAXPROCS = "1";
+if (!process.env.GOMEMLIMIT) process.env.GOMEMLIMIT = "256MiB";
+if (!process.env.GOGC) process.env.GOGC = "50";
+if (!process.env.RAYON_NUM_THREADS) process.env.RAYON_NUM_THREADS = "1";
+if (!process.env.TOKIO_WORKER_THREADS) process.env.TOKIO_WORKER_THREADS = "1";
+if (!process.env.UV_THREADPOOL_SIZE) process.env.UV_THREADPOOL_SIZE = "2";
+if (!process.env.VIPS_CONCURRENCY) process.env.VIPS_CONCURRENCY = "1";
 
 // Root deployment entry point for Node.js 22 Express hosting.
 // Reuses the existing Express + Vite application in ./server.ts without duplicating server logic.

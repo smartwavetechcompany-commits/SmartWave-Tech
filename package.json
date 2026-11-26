@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build",
+    "build": "node --v8-pool-size=1 scripts/build-safe.mjs",
     "start": "node server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",

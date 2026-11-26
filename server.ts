@@ -6614,15 +6614,23 @@ async function startServer() {
   const httpServer = http.createServer(app);
 
   // Resolve frontend production build directory reliably regardless of process.cwd()
-  const candidateDistPaths = [
-    path.join(__dirname, "dist"),
-    path.join(process.cwd(), "dist"),
-  ];
-  const distPath =
+  const candidateDistPaths = Array.from(
+    new Set([path.join(__dirname, "dist"), path.join(process.cwd(), "dist")])
+  );
+  let distPath =
     candidateDistPaths.find((p) => fs.existsSync(path.join(p, "index.html"))) ||
     candidateDistPaths[0];
-  const distIndexPath = path.join(distPath, "index.html");
-  let hasDistBuild = fs.existsSync(distIndexPath);
+  let distIndexPath = path.join(distPath, "index.html");
+  const refreshDistLocation = () => {
+    const found = candidateDistPaths.find((p) => fs.existsSync(path.join(p, "index.html")));
+    if (found) {
+      distPath = found;
+      distIndexPath = path.join(found, "index.html");
+      return true;
+    }
+    return fs.existsSync(distIndexPath);
+  };
+  let hasDistBuild = refreshDistLocation();
 
   const isExplicitDevMode =
     process.env.NODE_ENV === "development" ||
@@ -6632,7 +6640,8 @@ async function startServer() {
   // In hosted production environments (e.g., Hostinger), NEVER serve unbundled Vite dev middleware
   // (which triggers 180+ parallel module requests and hits host 503 concurrency limits).
   // Instead, serve static dist/ directly; if dist/index.html is missing on first deploy, trigger
-  // a single one-time production build in a child process and switch seamlessly to static dist/ when ready.
+  // a low-thread/low-memory production build (child process with automatic in-process fallback)
+  // and switch seamlessly to static dist/ when ready.
   if (isExplicitDevMode) {
     const { createServer: createViteServer } = await import("vite");
     const isHmrDisabled = process.env.DISABLE_HMR === "true";
@@ -6675,23 +6684,88 @@ async function startServer() {
     let buildInProgress = false;
     let lastBuildError: string | null = null;
 
+    const getConstrainedBuildEnv = (): NodeJS.ProcessEnv => ({
+      ...process.env,
+      NODE_ENV: "production",
+      GOMAXPROCS: process.env.GOMAXPROCS || "1",
+      GOMEMLIMIT: process.env.GOMEMLIMIT || "256MiB",
+      GOGC: process.env.GOGC || "50",
+      RAYON_NUM_THREADS: process.env.RAYON_NUM_THREADS || "1",
+      TOKIO_WORKER_THREADS: process.env.TOKIO_WORKER_THREADS || "1",
+      UV_THREADPOOL_SIZE: process.env.UV_THREADPOOL_SIZE || "2",
+      VIPS_CONCURRENCY: process.env.VIPS_CONCURRENCY || "1",
+    });
+
+    const runInProcessViteBuild = async (childErrSummary: string) => {
+      try {
+        console.warn(
+          "[FRONTEND] Child build failed; attempting single-process low-thread Vite build fallback..."
+        );
+        const envCaps = getConstrainedBuildEnv();
+        process.env.GOMAXPROCS = envCaps.GOMAXPROCS;
+        process.env.GOMEMLIMIT = envCaps.GOMEMLIMIT;
+        process.env.GOGC = envCaps.GOGC;
+        process.env.RAYON_NUM_THREADS = envCaps.RAYON_NUM_THREADS;
+        process.env.TOKIO_WORKER_THREADS = envCaps.TOKIO_WORKER_THREADS;
+        process.env.UV_THREADPOOL_SIZE = envCaps.UV_THREADPOOL_SIZE;
+        process.env.VIPS_CONCURRENCY = envCaps.VIPS_CONCURRENCY;
+
+        const { build: viteBuild } = await import("vite");
+        await viteBuild({
+          root: __dirname,
+          mode: "production",
+          logLevel: "warn",
+          build: {
+            outDir: distPath,
+            emptyOutDir: true,
+            sourcemap: false,
+            reportCompressedSize: false,
+            rollupOptions: {
+              maxParallelFileOps: 2,
+            },
+          },
+        });
+        hasDistBuild = refreshDistLocation();
+        if (hasDistBuild) {
+          console.log(`[FRONTEND] In-process production build completed successfully at ${distPath}`);
+          lastBuildError = null;
+        } else {
+          lastBuildError = `Production build finished without generating dist/index.html. ${childErrSummary}`;
+          console.error("[FRONTEND]", lastBuildError);
+        }
+      } catch (inProcErr: any) {
+        const msg = String(inProcErr?.message || inProcErr || "Unknown error").slice(0, 260);
+        lastBuildError = `${childErrSummary} | In-process fallback failed: ${msg}`.slice(0, 360);
+        console.error("[FRONTEND] In-process production build fallback failed:", lastBuildError);
+      } finally {
+        buildInProgress = false;
+      }
+    };
+
     const triggerOneTimeProductionBuild = () => {
-      if (buildInProgress || fs.existsSync(distIndexPath)) {
-        hasDistBuild = fs.existsSync(distIndexPath);
+      if (buildInProgress || refreshDistLocation()) {
+        hasDistBuild = refreshDistLocation();
         return;
       }
+      const safeBuildScript = path.join(__dirname, "scripts", "build-safe.mjs");
       const viteCliPath = path.join(__dirname, "node_modules", "vite", "bin", "vite.js");
-      if (!fs.existsSync(viteCliPath)) {
-        lastBuildError = "Production dist/ bundle is missing and Vite CLI was not found. Please run `npm run build`.";
+      if (!fs.existsSync(safeBuildScript) && !fs.existsSync(viteCliPath)) {
+        lastBuildError =
+          "Production dist/ bundle is missing and Vite CLI was not found. Please run `npm run build`.";
         console.error("[FRONTEND]", lastBuildError);
         return;
       }
       buildInProgress = true;
       lastBuildError = null;
-      console.log("[FRONTEND] Production dist/ bundle not found. Running one-time `vite build` in background child process...");
-      const child = spawn(process.execPath, [viteCliPath, "build", "--logLevel", "warn"], {
+      const buildArgs = fs.existsSync(safeBuildScript)
+        ? ["--v8-pool-size=1", safeBuildScript]
+        : ["--v8-pool-size=1", viteCliPath, "build", "--logLevel", "warn"];
+      console.log(
+        "[FRONTEND] Production dist/ bundle not found. Running low-thread `vite build` in background child process..."
+      );
+      const child = spawn(process.execPath, buildArgs, {
         cwd: __dirname,
-        env: { ...process.env, NODE_ENV: "production" },
+        env: getConstrainedBuildEnv(),
         stdio: ["ignore", "pipe", "pipe"],
       });
       let stderrBuf = "";
@@ -6699,20 +6773,22 @@ async function startServer() {
         stderrBuf = (stderrBuf + chunk.toString()).slice(-1500);
       });
       child.on("close", (code) => {
-        buildInProgress = false;
-        hasDistBuild = fs.existsSync(distIndexPath);
+        hasDistBuild = refreshDistLocation();
         if (code === 0 && hasDistBuild) {
+          buildInProgress = false;
           console.log(`[FRONTEND] One-time production build completed successfully at ${distPath}`);
           lastBuildError = null;
         } else {
-          lastBuildError = `Production build exited with code ${code}. ${stderrBuf.trim().slice(0, 300)}`;
-          console.error("[FRONTEND] One-time production build failed:", lastBuildError);
+          const summary = `Production build exited with code ${code}. ${stderrBuf.trim().slice(0, 240)}`;
+          console.error("[FRONTEND] Child production build failed:", summary);
+          // Automatically attempt a zero-subprocess in-process build (handles strict LVE pids.max hosts)
+          void runInProcessViteBuild(summary);
         }
       });
       child.on("error", (err) => {
-        buildInProgress = false;
-        lastBuildError = `Failed to spawn production build: ${err.message}`;
-        console.error("[FRONTEND]", lastBuildError);
+        const summary = `Failed to spawn production build: ${err.message}`;
+        console.error("[FRONTEND]", summary);
+        void runInProcessViteBuild(summary);
       });
     };
 
@@ -6722,26 +6798,38 @@ async function startServer() {
       triggerOneTimeProductionBuild();
     }
 
-    const distAssetsPath = path.join(distPath, "assets");
-    const assetsStaticMiddleware = express.static(distAssetsPath, {
-      maxAge: "1y",
-      immutable: true,
-      fallthrough: false,
-    });
-    const rootStaticMiddleware = express.static(distPath, {
-      index: false,
-      maxAge: "1h",
-    });
-
     const STATIC_ASSET_EXT_RE =
       /\.(?:js|mjs|cjs|css|map|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|eot|otf|json|webmanifest|txt|xml)$/i;
 
     // Serve content-hashed assets dynamically once dist/assets exists (immutable 1y cache, strict 404 if missing)
+    const assetsMiddlewareCache = new Map<string, express.RequestHandler>();
+    const rootMiddlewareCache = new Map<string, express.RequestHandler>();
+    const getAssetsStaticMiddleware = (dir: string) => {
+      let mw = assetsMiddlewareCache.get(dir);
+      if (!mw) {
+        mw = express.static(dir, { maxAge: "1y", immutable: true, fallthrough: false });
+        assetsMiddlewareCache.set(dir, mw);
+      }
+      return mw;
+    };
+    const getRootStaticMiddleware = (dir: string) => {
+      let mw = rootMiddlewareCache.get(dir);
+      if (!mw) {
+        mw = express.static(dir, { index: false, maxAge: "1h" });
+        rootMiddlewareCache.set(dir, mw);
+      }
+      return mw;
+    };
+
     app.use("/assets", (req, res, next) => {
+      if (!hasDistBuild) {
+        hasDistBuild = refreshDistLocation();
+      }
+      const distAssetsPath = path.join(distPath, "assets");
       if (!fs.existsSync(distAssetsPath)) {
         return res.status(404).type("text/plain").send("Asset not found");
       }
-      assetsStaticMiddleware(req, res, (err: any) => {
+      getAssetsStaticMiddleware(distAssetsPath)(req, res, (err: any) => {
         if (err) {
           return res.status(404).type("text/plain").send("Asset not found");
         }
@@ -6751,10 +6839,16 @@ async function startServer() {
 
     // Serve remaining static files from dist without caching index.html
     app.use((req, res, next) => {
-      if (req.path.startsWith("/api/") || !fs.existsSync(distPath)) {
+      if (req.path.startsWith("/api/")) {
         return next();
       }
-      return rootStaticMiddleware(req, res, next);
+      if (!hasDistBuild) {
+        hasDistBuild = refreshDistLocation();
+      }
+      if (!fs.existsSync(distPath)) {
+        return next();
+      }
+      return getRootStaticMiddleware(distPath)(req, res, next);
     });
 
     // Root route & SPA fallback: serve index.html with no-store so CDNs/browsers never reference stale bundle hashes
@@ -6766,8 +6860,8 @@ async function startServer() {
         return res.status(404).type("text/plain").send("Not found");
       }
 
-      if (!hasDistBuild && fs.existsSync(distIndexPath)) {
-        hasDistBuild = true;
+      if (!hasDistBuild) {
+        hasDistBuild = refreshDistLocation();
       }
 
       res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -6778,7 +6872,9 @@ async function startServer() {
         return res.sendFile(distIndexPath);
       }
 
-      if (!buildInProgress && !lastBuildError) {
+      const retryRequested = String(req.query?.retry_build || "") === "1";
+      if (!buildInProgress && (!lastBuildError || retryRequested)) {
+        lastBuildError = null;
         triggerOneTimeProductionBuild();
       }
 
@@ -6806,8 +6902,8 @@ async function startServer() {
     <div class="card">
       ${isBuilding ? '<div class="spinner"></div>' : ""}
       <h2>${isBuilding ? "Starting Application..." : "Production Build Required"}</h2>
-      <p>${isBuilding ? "Finalizing the production bundle on first startup. This page will open automatically in a few seconds." : "The production frontend bundle could not be built automatically on this server. Please run npm run build in your hosting panel and restart."}</p>
-      <button type="button" onclick="window.location.reload()">Refresh Now</button>
+      <p>${isBuilding ? "Finalizing the production bundle on first startup. This page will open automatically in a few seconds." : "The production frontend bundle could not be built automatically on this server. Click Retry Build below, or run npm run build in your hosting panel."}</p>
+      <button type="button" onclick="${isBuilding ? "window.location.reload()" : "window.location.href = window.location.pathname + '?retry_build=1'"}">${isBuilding ? "Refresh Now" : "Retry Build"}</button>
       ${safeErr ? `<div class="err">${safeErr}</div>` : ""}
     </div>
   </body>
