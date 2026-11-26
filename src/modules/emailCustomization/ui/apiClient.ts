@@ -309,6 +309,10 @@ export const emailCustomizationApi = {
   },
 
   saveDailyOpsConfig(config: Partial<DailyOpsReportConfig>, hotelId?: string) {
+    const rawRefresh =
+      config?.enabled !== false && typeof (auth.currentUser as any)?.refreshToken === "string"
+        ? String((auth.currentUser as any).refreshToken).trim()
+        : undefined;
     return apiFetch<{
       ok: boolean;
       config: DailyOpsReportConfig;
@@ -319,7 +323,10 @@ export const emailCustomizationApi = {
       };
     }>("/api/email-customization/daily-ops-report/config", {
       method: "PUT",
-      body: { config },
+      body: {
+        config,
+        ...(rawRefresh ? { sessionRefreshToken: rawRefresh } : {}),
+      },
       hotelId,
     });
   },
@@ -386,6 +393,10 @@ export const emailCustomizationApi = {
   },
 
   checkDailyOpsDue(hotelId?: string) {
+    const rawRefresh =
+      typeof (auth.currentUser as any)?.refreshToken === "string"
+        ? String((auth.currentUser as any).refreshToken).trim()
+        : undefined;
     return apiFetch<{
       ok: boolean;
       skipped?: boolean;
@@ -404,7 +415,7 @@ export const emailCustomizationApi = {
       };
     }>("/api/email-customization/daily-ops-report/check-due", {
       method: "POST",
-      body: {},
+      body: rawRefresh ? { sessionRefreshToken: rawRefresh } : {},
       hotelId,
     });
   },

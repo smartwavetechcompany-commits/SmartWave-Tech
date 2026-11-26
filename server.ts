@@ -54,7 +54,10 @@ import {
 } from "./src/services/multiTenantEmailService.ts";
 import { mountEmailCustomizationRoutes } from "./src/modules/emailCustomization/server/routes.ts";
 import { sendHotelEmail } from "./src/modules/emailCustomization/server/dispatcher.ts";
-import { startDailyOpsBackgroundScheduler } from "./src/modules/emailCustomization/server/dailyOpsService.ts";
+import {
+  registerHotelDailyOpsSessionToken,
+  startDailyOpsBackgroundScheduler,
+} from "./src/modules/emailCustomization/server/dailyOpsService.ts";
 import { mountLoyaltyRoutes } from "./src/modules/loyalty/server/loyaltyRoutes.ts";
 import { startLoyaltyExpiryBackgroundJob } from "./src/modules/loyalty/server/loyaltyServerService.ts";
 import {
@@ -209,10 +212,24 @@ async function startServer() {
         let adminCredential;
         if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
           try {
-            const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+            const rawKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY.trim();
+            const parsedJson = rawKey.startsWith("{")
+              ? rawKey
+              : Buffer.from(rawKey, "base64").toString("utf8");
+            const serviceAccount = JSON.parse(parsedJson);
             adminCredential = cert(serviceAccount);
           } catch (e) {
-            console.warn("Could not parse FIREBASE_SERVICE_ACCOUNT_KEY JSON:", e);
+            console.warn("Could not parse FIREBASE_SERVICE_ACCOUNT_KEY JSON/base64:", e);
+          }
+        } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+          try {
+            const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS.trim();
+            if (credPath && fs.existsSync(credPath)) {
+              const serviceAccount = JSON.parse(fs.readFileSync(credPath, "utf8"));
+              adminCredential = cert(serviceAccount);
+            }
+          } catch (e) {
+            console.warn("Could not load GOOGLE_APPLICATION_CREDENTIALS file:", e);
           }
         }
 
@@ -368,6 +385,22 @@ async function startServer() {
     if (caller.profile && isAccountSuspendedOrPending(caller.profile)) {
       res.status(403).json({ error: "Your account is suspended, locked, or pending activation." });
       return null;
+    }
+    // Keep the hotel's volatile Daily Operations Report scheduler session warm whenever a verified hotel admin interacts with the server
+    try {
+      const role = String(caller.profile?.role || "").trim();
+      const staffRole = String(caller.profile?.staffRole || "").trim();
+      const callerHotelId = String(caller.profile?.hotelId || caller.profile?.hotel_id || "").trim();
+      if (
+        callerHotelId &&
+        callerHotelId !== "system" &&
+        isSafeIdentifier(callerHotelId) &&
+        (role === "hotelAdmin" || role === "superAdmin" || staffRole === "admin")
+      ) {
+        registerHotelDailyOpsSessionToken(callerHotelId, caller.idToken);
+      }
+    } catch {
+      // Non-blocking
     }
     return caller;
   }
@@ -5403,7 +5436,10 @@ async function startServer() {
                 ? [
                     {
                       label: "Remaining Balance",
-                      value: formatMoneyForEmail(financialBreakdown.remainingBalance, hotelBrand.currency),
+                      value: formatMoneyForEmail(
+                        resolvedFin.balanceDue ?? financialBreakdown.remainingBalance,
+                        hotelBrand.currency
+                      ),
                     },
                   ]
                 : []),
@@ -5472,7 +5508,10 @@ async function startServer() {
                 ? [
                     {
                       label: "Remaining Balance",
-                      value: formatMoneyForEmail(financialBreakdown.remainingBalance, hotelBrand.currency),
+                      value: formatMoneyForEmail(
+                        resolvedFin.balanceDue ?? financialBreakdown.remainingBalance,
+                        hotelBrand.currency
+                      ),
                     },
                   ]
                 : []),

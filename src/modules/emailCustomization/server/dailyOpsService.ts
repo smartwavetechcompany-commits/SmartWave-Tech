@@ -63,7 +63,14 @@ async function getOptionalAdminFirestore(): Promise<any | null> {
     const apps = getAdminApps();
     if (apps.length > 0) {
       const { getFirestore: getAdminFirestore } = await import("firebase-admin/firestore");
-      cachedAdminDb = getAdminFirestore(apps[0]);
+      const cfg = getFirebaseAppletConfig();
+      const databaseId =
+        typeof cfg.firestoreDatabaseId === "string" &&
+        cfg.firestoreDatabaseId.trim() &&
+        cfg.firestoreDatabaseId.trim() !== "(default)"
+          ? cfg.firestoreDatabaseId.trim()
+          : undefined;
+      cachedAdminDb = databaseId ? getAdminFirestore(apps[0], databaseId) : getAdminFirestore(apps[0]);
       return cachedAdminDb;
     }
     return null;
@@ -1495,30 +1502,93 @@ export async function runScheduledDailyOpsTick(options: {
 
 // ---------------------------------------------------------------------------
 // In-Memory Authorized Session Registry (Fallback when Admin SDK is absent)
-// Strictly volatile in server RAM — never logged or persisted to disk.
+// Strictly volatile in server RAM — never logged, never returned, never persisted to disk or DB.
 // ---------------------------------------------------------------------------
 interface RegisteredDailyOpsSession {
   bearerToken: string;
+  /** Optional Firebase refresh token held strictly in volatile RAM to mint fresh ID tokens at midnight/scheduled time */
+  refreshToken?: string;
   registeredAt: number;
   expiresAt: number;
 }
 
 const SESSION_TOKEN_TTL_MS = 50 * 60 * 1000; // 50 min (Firebase ID tokens last 60 min)
+const SESSION_REFRESH_LEAD_MS = 5 * 60 * 1000; // Proactively refresh 5 min before expiry
+const GOOGLE_SECURE_TOKEN_ENDPOINT = "https://securetoken.googleapis.com/v1/token";
 const registeredHotelSessions = new Map<string, RegisteredDailyOpsSession>();
+
+export type DailyOpsTokenRefreshFn = (
+  refreshToken: string
+) => Promise<{ idToken: string; refreshToken?: string; expiresInSec?: number } | null>;
+
+async function defaultRefreshFirebaseIdToken(
+  refreshToken: string
+): Promise<{ idToken: string; refreshToken?: string; expiresInSec?: number } | null> {
+  const cfg = getFirebaseAppletConfig();
+  const apiKey = typeof cfg.apiKey === "string" ? cfg.apiKey.trim() : "";
+  if (!apiKey || !refreshToken) return null;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    });
+    const resp = await fetch(`${GOOGLE_SECURE_TOKEN_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      return null;
+    }
+    const json: any = await resp.json().catch(() => null);
+    const idToken = typeof json?.id_token === "string" ? json.id_token.trim() : "";
+    if (!idToken) return null;
+    const nextRefresh =
+      typeof json?.refresh_token === "string" && json.refresh_token.trim()
+        ? json.refresh_token.trim()
+        : refreshToken;
+    const expiresInSec = Number(json?.expires_in);
+    return {
+      idToken,
+      refreshToken: nextRefresh,
+      expiresInSec: Number.isFinite(expiresInSec) && expiresInSec > 60 ? expiresInSec : 3600,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export function registerHotelDailyOpsSessionToken(
   hotelId: string,
-  bearerToken?: string | null
+  bearerToken?: string | null,
+  refreshToken?: string | null
 ): void {
   if (!hotelId || !isSafeIdentifier(hotelId)) return;
   const token = typeof bearerToken === "string" ? bearerToken.trim() : "";
   if (!token) return;
+  const cleanRefresh =
+    typeof refreshToken === "string" && refreshToken.trim().length >= 20 && refreshToken.trim().length <= 4096
+      ? refreshToken.trim()
+      : undefined;
+  const existing = registeredHotelSessions.get(hotelId);
   const now = Date.now();
   registeredHotelSessions.set(hotelId, {
     bearerToken: token,
+    refreshToken: cleanRefresh || existing?.refreshToken,
     registeredAt: now,
     expiresAt: now + SESSION_TOKEN_TTL_MS,
   });
+}
+
+export function revokeHotelDailyOpsSession(hotelId: string): void {
+  if (!hotelId) return;
+  registeredHotelSessions.delete(hotelId);
 }
 
 export function clearRegisteredDailyOpsSessions(): void {
@@ -1528,7 +1598,7 @@ export function clearRegisteredDailyOpsSessions(): void {
 export function getRegisteredDailyOpsHotelIds(nowMs = Date.now()): string[] {
   const active: string[] = [];
   for (const [hid, entry] of registeredHotelSessions.entries()) {
-    if (entry.expiresAt <= nowMs) {
+    if (entry.expiresAt <= nowMs && !entry.refreshToken) {
       registeredHotelSessions.delete(hid);
     } else {
       active.push(hid);
@@ -1540,15 +1610,18 @@ export function getRegisteredDailyOpsHotelIds(nowMs = Date.now()): string[] {
 /**
  * Runs a single background scheduler pass:
  * - Uses Firebase Admin SDK across all hotels when configured.
- * - Falls back seamlessly to active authorized hotel session tokens held in server memory
- *   when FIREBASE_SERVICE_ACCOUNT_KEY is not configured, ensuring scheduled reports fire
- *   reliably on time even without a service account key.
+ * - Falls back seamlessly to active authorized hotel sessions held strictly in volatile server RAM
+ *   when FIREBASE_SERVICE_ACCOUNT_KEY is not configured, automatically refreshing expiring ID tokens
+ *   via Google's Secure Token API so scheduled reports fire reliably on the exact stipulated time
+ *   (including overnight / midnight) even after admin browsers close.
  */
 export async function runDailyOpsBackgroundSchedulerPass(options: {
   now?: Date;
   dryRun?: boolean;
+  hotelIds?: string[];
   sendEmailFn?: DailyOpsEmailSender;
   forceSessionMode?: boolean;
+  tokenRefreshFn?: DailyOpsTokenRefreshFn;
 } = {}): Promise<{
   mode: "admin_sdk" | "session_tokens" | "idle";
   checkedHotels: number;
@@ -1564,15 +1637,23 @@ export async function runDailyOpsBackgroundSchedulerPass(options: {
     const summary = await runScheduledDailyOpsTick({
       now: options.now,
       dryRun: options.dryRun,
+      hotelIds: options.hotelIds,
       sendEmailFn: options.sendEmailFn,
     });
     return { mode: "admin_sdk", ...summary };
   }
 
+  const refreshFn = options.tokenRefreshFn || defaultRefreshFirebaseIdToken;
   const nowMs = (options.now || new Date()).getTime();
+  const filterSet =
+    Array.isArray(options.hotelIds) && options.hotelIds.length > 0
+      ? new Set(options.hotelIds.filter((id) => isSafeIdentifier(id)))
+      : null;
+
   const activeEntries: Array<[string, RegisteredDailyOpsSession]> = [];
   for (const [hid, entry] of registeredHotelSessions.entries()) {
-    if (entry.expiresAt <= nowMs) {
+    if (filterSet && !filterSet.has(hid)) continue;
+    if (entry.expiresAt <= nowMs && !entry.refreshToken) {
       registeredHotelSessions.delete(hid);
     } else {
       activeEntries.push([hid, entry]);
@@ -1601,14 +1682,70 @@ export async function runDailyOpsBackgroundSchedulerPass(options: {
   const details: Array<{ hotelId: string; reportDate?: string; status: string; reason?: string }> = [];
 
   for (const [hotelId, entry] of activeEntries) {
-    try {
-      const sub = await runScheduledDailyOpsTick({
+    let activeBearer = entry.bearerToken;
+
+    // Proactively mint a fresh Firebase ID token if current token is expired or within 5 min of expiry
+    if (entry.expiresAt <= nowMs + SESSION_REFRESH_LEAD_MS) {
+      if (!entry.refreshToken) {
+        registeredHotelSessions.delete(hotelId);
+        continue;
+      }
+      const refreshed = await refreshFn(entry.refreshToken);
+      if (!refreshed?.idToken) {
+        registeredHotelSessions.delete(hotelId);
+        continue;
+      }
+      activeBearer = refreshed.idToken;
+      const ttlMs = Math.max(
+        5 * 60 * 1000,
+        Math.min(SESSION_TOKEN_TTL_MS, ((refreshed.expiresInSec || 3600) - 600) * 1000)
+      );
+      const updatedSession: RegisteredDailyOpsSession = {
+        bearerToken: refreshed.idToken,
+        refreshToken: refreshed.refreshToken || entry.refreshToken,
+        registeredAt: nowMs,
+        expiresAt: nowMs + ttlMs,
+      };
+      registeredHotelSessions.set(hotelId, updatedSession);
+      entry.bearerToken = updatedSession.bearerToken;
+      entry.refreshToken = updatedSession.refreshToken;
+      entry.expiresAt = updatedSession.expiresAt;
+    }
+
+    const executeForHotel = async (bearer: string) =>
+      runScheduledDailyOpsTick({
         now: options.now,
         dryRun: options.dryRun,
         hotelIds: [hotelId],
-        bearerToken: entry.bearerToken,
+        bearerToken: bearer,
         sendEmailFn: options.sendEmailFn,
       });
+
+    try {
+      let sub = await executeForHotel(activeBearer);
+
+      // If Firestore rejected with 401/403 and a volatile refresh token is available, refresh once and retry
+      const hadAuthFailure = sub.details.some(
+        (d) =>
+          d.status === "failed" &&
+          typeof d.reason === "string" &&
+          (d.reason.includes("(401)") || d.reason.includes("(403)"))
+      );
+
+      if (hadAuthFailure && entry.refreshToken) {
+        const refreshed = await refreshFn(entry.refreshToken);
+        if (refreshed?.idToken) {
+          activeBearer = refreshed.idToken;
+          registeredHotelSessions.set(hotelId, {
+            bearerToken: refreshed.idToken,
+            refreshToken: refreshed.refreshToken || entry.refreshToken,
+            registeredAt: nowMs,
+            expiresAt: nowMs + SESSION_TOKEN_TTL_MS,
+          });
+          sub = await executeForHotel(activeBearer);
+        }
+      }
+
       checkedHotels += sub.checkedHotels;
       dueHotels += sub.dueHotels;
       sent += sub.sent;
@@ -1617,7 +1754,7 @@ export async function runDailyOpsBackgroundSchedulerPass(options: {
       skipped += sub.skipped;
       details.push(...sub.details);
 
-      // Evict expired/revoked bearer tokens cleanly if Firestore rejects with 401/403
+      // Evict revoked/unauthorized sessions cleanly if Firestore still rejects with 401/403
       if (
         sub.details.some(
           (d) =>

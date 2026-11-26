@@ -66,6 +66,8 @@ import {
   manualResendDailyOpsRun,
   registerHotelDailyOpsSessionToken,
   retryFailedDailyOpsRun,
+  revokeHotelDailyOpsSession,
+  runDailyOpsBackgroundSchedulerPass,
   runDailyOpsDryRunDiagnostic,
   runScheduledDailyOpsTick,
   saveDailyOpsConfig,
@@ -888,7 +890,8 @@ export function mountEmailCustomizationRoutes(
         return res.status(429).json({ error: "Too many save requests. Please wait a moment." });
       }
 
-      registerHotelDailyOpsSessionToken(ctx.hotelId, ctx.bearerToken);
+      const sessionRefreshToken =
+        typeof req.body?.sessionRefreshToken === "string" ? req.body.sessionRefreshToken.trim() : undefined;
 
       const hotelDoc = await fsReadDoc(`hotels/${ctx.hotelId}`, ctx.bearerToken).catch(() => null);
       const actor = ctx.caller.email || ctx.caller.uid;
@@ -906,6 +909,12 @@ export function mountEmailCustomizationRoutes(
           error: result.errors?.[0] || "Invalid Daily Operations Report configuration.",
           errors: result.errors || [],
         });
+      }
+
+      if (result.config?.enabled === false) {
+        revokeHotelDailyOpsSession(ctx.hotelId);
+      } else {
+        registerHotelDailyOpsSessionToken(ctx.hotelId, ctx.bearerToken, sessionRefreshToken);
       }
 
       return res.json({
@@ -979,7 +988,10 @@ export function mountEmailCustomizationRoutes(
         return res.status(200).json({ ok: true, skipped: true, reason: "rate_limited" });
       }
 
-      registerHotelDailyOpsSessionToken(check.resolvedHotelId, bearerToken);
+      const sessionRefreshToken =
+        typeof req.body?.sessionRefreshToken === "string" ? req.body.sessionRefreshToken.trim() : undefined;
+
+      registerHotelDailyOpsSessionToken(check.resolvedHotelId, bearerToken, sessionRefreshToken);
 
       const summary = await runScheduledDailyOpsTick({
         hotelIds: [check.resolvedHotelId],
@@ -991,6 +1003,10 @@ export function mountEmailCustomizationRoutes(
         undefined,
         bearerToken
       ).catch(() => null);
+
+      if (latestCfg?.config?.enabled === false) {
+        revokeHotelDailyOpsSession(check.resolvedHotelId);
+      }
 
       return res.json({
         ok: true,
@@ -1265,7 +1281,7 @@ export function mountEmailCustomizationRoutes(
         ? req.body.hotelIds.filter((id: any) => typeof id === "string" && isSafeIdentifier(id))
         : undefined;
 
-      const summary = await runScheduledDailyOpsTick({ dryRun, hotelIds });
+      const summary = await runDailyOpsBackgroundSchedulerPass({ dryRun, hotelIds });
       return res.json({ ok: true, ...summary });
     } catch (err) {
       return res
