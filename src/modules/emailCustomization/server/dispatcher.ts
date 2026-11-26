@@ -216,10 +216,13 @@ function buildRenderContextFromRecords(params: {
       (typeof guest?.name === "string" && guest.name.trim()) ||
       (typeof reservation?.guestName === "string" && reservation.guestName.trim()) ||
       "Guest",
-    guestEmail:
-      (typeof guest?.email === "string" && guest.email.trim()) ||
-      (typeof reservation?.guestEmail === "string" && reservation.guestEmail.trim()) ||
-      undefined,
+    guestEmail: (() => {
+      const guestCand = typeof guest?.email === "string" ? guest.email.trim() : "";
+      const resCand = typeof reservation?.guestEmail === "string" ? reservation.guestEmail.trim() : "";
+      if (guestCand && isValidEmail(guestCand)) return guestCand;
+      if (resCand && isValidEmail(resCand)) return resCand;
+      return guestCand || resCand || undefined;
+    })(),
     guestLanguage:
       (typeof guest?.language === "string" && guest.language.trim()) ||
       (typeof reservation?.guestLanguage === "string" && reservation.guestLanguage.trim()) ||

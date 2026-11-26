@@ -9,9 +9,14 @@ import { calculateReservationAccount, cleanLedgerDescription, calculateCorporate
 import { parseTimestampToDate, safeFormatDate } from '../utils/dateUtils';
 import { calculateBookedRoomTotal, getNightlyRateForStayIndex } from '../utils/rateSnapshot';
 import { isPostedPenaltyLedgerEntry } from '../utils/policyUtils';
-import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
+import { collection, doc, query, where, onSnapshot, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { printDocument } from '../utils/printUtils';
+import {
+  computeReceiptUnpostedRoomBase,
+  isRoomApplicableTax,
+  shouldUseStoredReservationTax,
+} from '../utils/receiptStayReconciliation';
 
 const getSafeStr = (val: any, fallback: string = ''): string => {
   if (typeof val === 'string') return val;
@@ -248,9 +253,25 @@ interface ReceiptProps {
   corporateReservations?: Reservation[];
 }
 
-export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntries = [], folioType = 'all', corporateReservations }: ReceiptProps) {
+export function ReceiptGenerator({ hotel, reservation: initialReservation, account, type, ledgerEntries = [], folioType = 'all', corporateReservations }: ReceiptProps) {
   const { currency, exchangeRate } = useAuth();
   const branding = hotel.branding || {};
+
+  // Live reservation listener so receipt always reflects latest stay extensions, nights, and updated stay total
+  const [liveReservation, setLiveReservation] = useState<Reservation | null>(null);
+  useEffect(() => {
+    setLiveReservation(null);
+    if (!hotel?.id || !initialReservation?.id) return;
+    const resDocRef = doc(db, 'hotels', hotel.id, 'reservations', initialReservation.id);
+    const unsub = onSnapshot(resDocRef, (snap) => {
+      if (snap.exists()) {
+        setLiveReservation({ id: snap.id, ...snap.data() } as Reservation);
+      }
+    }, () => {});
+    return () => unsub();
+  }, [hotel?.id, initialReservation?.id]);
+
+  const reservation = liveReservation || initialReservation;
 
   // Auto-fetch ledger entries if not passed
   const [fetchedLedger, setFetchedLedger] = useState<LedgerEntry[]>([]);
@@ -387,26 +408,21 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
 
   let unpostedRoomBase = 0;
   if (reservation && type !== 'restaurant' && !isNoShowOrCancelledRes) {
-    const resAccount = calculateReservationAccount(reservation, hotel, reconciledEntries);
-    const totalNights = resAccount.totalNights || reservation.nights || 1;
-    const bookedNightsCount = resAccount.bookingNights || reservation.nights || 1;
     // Reconstruct gross room charges (with any inclusive taxes merged back onto room entries)
     // so comparing against tax-inclusive expectedTotalRoom never double-counts posted inclusive taxes.
     const reconstructedEntries = BillingEngine.reconstructInclusiveTaxes(reconciledEntries);
     const reconstructedRoomDebits = reconstructedEntries.filter(
       e => e.type === 'debit' && (getSafeStr(e.category).toLowerCase() === 'room' || e.chargeType === 'room_rate' || e.chargeType === 'overstay')
     );
-    const postedRoomAmount = reconstructedRoomDebits.length > 0
-      ? reconstructedRoomDebits.reduce((sum, e) => sum + (e.amount || 0), 0)
-      : roomDebits.reduce((sum, e) => sum + (e.amount || 0), 0);
-
-    if (reservation.status !== 'checked_out' && totalNights > postedNightsCount) {
-      const expectedTotalRoom = calculateBookedRoomTotal(reservation, bookedNightsCount, hotel, reconciledEntries) + (resAccount.totalOverstayCharges || 0);
-      unpostedRoomBase = Math.max(0, Number((expectedTotalRoom - postedRoomAmount).toFixed(2)));
-    } else if (postedNightsCount === 0 && (reservation.totalAmount || 0) > 0) {
-      const stayTaxTotal = reservation.taxAmount || 0;
-      unpostedRoomBase = Math.max(0, (reservation.totalAmount || 0) - stayTaxTotal);
-    }
+    const stayRecon = computeReceiptUnpostedRoomBase({
+      reservation,
+      hotel,
+      reconciledEntries,
+      roomDebits,
+      reconstructedRoomDebits,
+      folioType,
+    });
+    unpostedRoomBase = stayRecon.unpostedRoomBase;
   } else if (type === 'corporate' && activeCorpReservations.length > 0) {
     unpostedRoomBase = Number(
       activeCorpReservations
@@ -457,10 +473,9 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
         .filter(e => e.category === 'tax' && e.type === 'debit' && e.description.toLowerCase().includes(tax.name.toLowerCase()))
         .reduce((acc, e) => acc + e.amount, 0);
 
-      // Include projected exclusive tax on unposted corporate stay/extension nights
-      if (type === 'corporate' && unpostedRoomBase > 0 && !tax.isInclusive) {
-        const taxCat = (tax.category || '').toLowerCase().trim();
-        if (taxCat !== 'restaurant' && taxCat !== 'f & b' && taxCat !== 'food') {
+      // Include projected exclusive room tax on unposted stay/extension nights for both guest and corporate receipts
+      if ((type === 'corporate' || type === 'comprehensive') && unpostedRoomBase > 0 && !tax.isInclusive) {
+        if (isRoomApplicableTax(tax)) {
           amount += Number((unpostedRoomBase * (tax.percentage / 100)).toFixed(2));
         }
       }
@@ -475,10 +490,18 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
         exclusiveTaxTotal += amount;
       }
     } else {
-      // Fallback to calculation if ledger is empty (e.g. preview before posting)
-      // Use reservation details if available
+      // Fallback to calculation if ledger has no tax debits (e.g. pending booking or pre-audit preview)
+      // Only reuse reservation.taxDetails when it still aligns with the current stay subtotal (not stale post-extension)
       const storedTax = reservation?.taxDetails?.find(t => t.name === tax.name);
-      if (storedTax) {
+      if (
+        storedTax &&
+        shouldUseStoredReservationTax({
+          reservation,
+          tax,
+          subtotal,
+          storedTaxAmount: Number(storedTax.amount) || 0,
+        })
+      ) {
         const baseTaxAmount = storedTax.amount;
         const overstayCharge = reservation ? calculateReservationAccount(reservation, hotel, filteredEntries).totalOverstayCharges : 0;
         const overstayTaxAmount = tax.isInclusive
@@ -509,8 +532,15 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
   }
 
   let grandTotal = subtotal + exclusiveTaxTotal;
-  if (reservation && type !== 'corporate' && type !== 'restaurant' && !isNoShowOrCancelledRes && totalDebits === 0 && (reservation.totalAmount || 0) > grandTotal) {
-    grandTotal = reservation.totalAmount;
+  if (
+    reservation &&
+    type !== 'corporate' &&
+    type !== 'restaurant' &&
+    folioType !== 'company' &&
+    !isNoShowOrCancelledRes &&
+    (reservation.totalAmount || 0) > grandTotal + 0.01
+  ) {
+    grandTotal = Number((reservation.totalAmount || 0).toFixed(2));
   }
 
   const hasPaymentInLedger = activeLedger.some(e => e.category?.toLowerCase() === 'payment' && e.type === 'credit');
@@ -525,10 +555,10 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
       // Strictly mirror authoritative No-Show / Cancelled liability (0 unless a penalty was posted)
       grandTotal = Math.max(0, Number(totalChargeDebits.toFixed(2)));
       balance = Number((grandTotal - netPaid).toFixed(2));
-    } else if (balance <= 0.005 && liveBal > 0.005) {
+    } else if (liveBal > balance + 0.01) {
       balance = liveBal;
       if (grandTotal < netPaid + liveBal) {
-        grandTotal = netPaid + liveBal;
+        grandTotal = Number((netPaid + liveBal).toFixed(2));
       }
     }
   }
@@ -726,13 +756,14 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                     );
                   });
 
-                  // Generate unposted/projected room charges chronologically (including overstays) for active/pre-checkout stays
+                  // Generate unposted/projected room charges chronologically (including overstays & extensions) for active/pre-checkout stays
                   if (reservation && (reservation.status !== 'checked_out' || roomDebits.length === 0)) {
                     const resAccount = calculateReservationAccount(reservation, hotel, filteredEntries);
                     const postedNightsCount = roomDebits.length;
                     const totalNights = resAccount.totalNights;
                     const bookedNightsCount = resAccount.bookingNights || reservation.nights || 1;
                     const nightlyRate = reservation.originalNightlyRate || reservation.nightlyRate || (reservation.nights ? reservation.totalAmount / reservation.nights : 0);
+                    let projectedNightsSum = 0;
                     
                     if (totalNights > postedNightsCount && (nightlyRate > 0 || reservation.rateSnapshot)) {
                       const unpostedNights = totalNights - postedNightsCount;
@@ -761,6 +792,7 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                           continue;
                         }
 
+                        projectedNightsSum += rateForThisNight;
                         renderedNights.push(
                           <div key={`projected-room-${nightIndex}-${i}`} className="flex justify-between items-start gap-4 py-0.5 text-zinc-600">
                             <div className="flex-1 min-w-0">
@@ -774,6 +806,24 @@ export function ReceiptGenerator({ hotel, reservation, account, type, ledgerEntr
                           </div>
                         );
                       }
+                    }
+
+                    // If stay extension or rate adjustment adds unposted room value beyond projected per-night rows,
+                    // display the exact reconciliation line so Accommodation items match the updated stay subtotal.
+                    const unpostedDelta = Number((unpostedRoomBase - projectedNightsSum).toFixed(2));
+                    if (unpostedDelta > 0.5 && !(reservation.corporateId && folioType === 'company')) {
+                      renderedNights.push(
+                        <div key="projected-room-extension-adjustment" className="flex justify-between items-start gap-4 py-0.5 text-zinc-600">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold flex items-center gap-1.5 flex-wrap">
+                              Stay Extension / Rate Adjustment (Room {reservation.roomNumber || 'N/A'})
+                              <span className="px-1.5 py-0.5 bg-zinc-100 text-[8px] text-zinc-500 font-bold uppercase rounded leading-none">Unposted</span>
+                            </p>
+                            <p className="text-[10px] text-zinc-400">Updated stay accommodation balance</p>
+                          </div>
+                          <span className="font-bold text-sm text-right shrink-0 whitespace-nowrap">{formatCurrency(unpostedDelta, currency, exchangeRate)}</span>
+                        </div>
+                      );
                     }
                   } else if (type === 'corporate' && activeCorpReservations.length > 0) {
                     activeCorpReservations.forEach((corpRes) => {

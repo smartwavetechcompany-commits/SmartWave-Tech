@@ -1810,11 +1810,14 @@ export function FrontDesk() {
         );
       }
 
-      // Additive: Trigger transactional booking confirmation email if guest has an email address
-      if (newBooking.guestEmail?.trim() && createdStays.length > 0) {
+      // Additive: Trigger transactional booking confirmation email for every created stay
+      // (server authoritatively resolves email from either the returning guest profile or reservation record)
+      if (createdStays.length > 0) {
         try {
           for (const stay of createdStays) {
-            void notifyReservationEmailEvent(hotel.id, stay.resId, 'confirmation');
+            if (newBooking.guestEmail?.trim() || stay.guestId) {
+              void notifyReservationEmailEvent(hotel.id, stay.resId, 'confirmation');
+            }
           }
         } catch (emailErr) {
           console.warn('[FrontDesk] Booking confirmation email trigger skipped:', emailErr);
@@ -4238,9 +4241,9 @@ export function FrontDesk() {
                       setNewBooking({
                         ...newBooking,
                         guestId: guest.id,
-                        guestName: guest.name,
-                        guestEmail: guest.email,
-                        guestPhone: guest.phone,
+                        guestName: guest.name || '',
+                        guestEmail: guest.email || '',
+                        guestPhone: guest.phone || '',
                         idType: guest.idType || '',
                         idNumber: guest.idNumber || '',
                         address: guest.address || '',
@@ -6882,7 +6885,7 @@ export function FrontDesk() {
             <div className="bg-white rounded-2xl overflow-hidden print:rounded-none print:shadow-none print:border-0 print:overflow-visible print:w-full">
               <ReceiptGenerator 
                 hotel={hotel} 
-                reservation={showReceipt.res} 
+                reservation={reservations.find(r => r.id === showReceipt.res.id) || showReceipt.res} 
                 type={showReceipt.type} 
                 ledgerEntries={[]} // Ledger entries are now fetched from collection, this path is legacy
               />

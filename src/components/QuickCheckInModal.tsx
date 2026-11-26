@@ -816,7 +816,8 @@ export function QuickCheckInModal({
       );
 
       // Additive: Walk-in is created already checked_in -> send single check-in email (skip separate confirmation)
-      if (trimmedEmail) {
+      // Server authoritatively resolves email from either the returning guest profile or reservation record.
+      if (trimmedEmail || linkedGuestId) {
         try {
           void notifyReservationEmailEvent(hotel.id, reservationId, 'checked_in');
         } catch (emailErr) {

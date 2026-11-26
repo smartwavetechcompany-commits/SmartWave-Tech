@@ -3039,7 +3039,7 @@ export function GuestManagement() {
             <div className="bg-white rounded-2xl overflow-hidden print:rounded-none print:shadow-none print:border-0 print:overflow-visible print:w-full">
               <ReceiptGenerator 
                 hotel={hotel} 
-                reservation={showReceipt.res} 
+                reservation={reservations.find(r => r.id === showReceipt.res.id) || showReceipt.res} 
                 type={showReceipt.type}
                 ledgerEntries={[]} // Ledger entries should be fetched from collection, this is legacy path
               />

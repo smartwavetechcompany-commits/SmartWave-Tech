@@ -430,15 +430,23 @@ export async function sendEmail(
     );
   };
 
+  const isRateLimitError = (errObj: any, message: string): boolean => {
+    const status = Number(errObj?.statusCode || errObj?.status || 0);
+    if (status === 429) return true;
+    const lower = message.toLowerCase();
+    return lower.includes("rate limit") || lower.includes("too many requests") || lower.includes("429");
+  };
+
   const sendOptions =
     typeof params.idempotencyKey === "string" && params.idempotencyKey.trim()
       ? { idempotencyKey: params.idempotencyKey.trim().slice(0, 128) }
       : undefined;
 
+  const effectiveMaxRetries = Math.max(maxRetries, 3);
   let lastError = "Unexpected error while sending email via Resend.";
   let attempts = 0;
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  for (let attempt = 0; attempt <= effectiveMaxRetries; attempt++) {
     attempts = attempt + 1;
     try {
       const response = await client.emails.send(payload, sendOptions);
@@ -449,8 +457,10 @@ export async function sendEmail(
         const safeErr = redactSecrets(rawErrMsg);
         lastError = safeErr;
 
-        if (attempt < maxRetries && isTransientResendError(response.error, rawErrMsg)) {
-          const delayMs = 250 * Math.pow(2, attempt);
+        const rateLimited = isRateLimitError(response.error, rawErrMsg);
+        const allowedRetries = rateLimited ? effectiveMaxRetries : maxRetries;
+        if (attempt < allowedRetries && isTransientResendError(response.error, rawErrMsg)) {
+          const delayMs = rateLimited ? 1100 * (attempt + 1) : 250 * Math.pow(2, attempt);
           await new Promise((resolve) => setTimeout(resolve, delayMs));
           continue;
         }
@@ -501,8 +511,10 @@ export async function sendEmail(
       const safeErr = redactSecrets(rawMsg);
       lastError = safeErr;
 
-      if (attempt < maxRetries && isTransientResendError(err, rawMsg)) {
-        const delayMs = 250 * Math.pow(2, attempt);
+      const rateLimited = isRateLimitError(err, rawMsg);
+      const allowedRetries = rateLimited ? effectiveMaxRetries : maxRetries;
+      if (attempt < allowedRetries && isTransientResendError(err, rawMsg)) {
+        const delayMs = rateLimited ? 1100 * (attempt + 1) : 250 * Math.pow(2, attempt);
         await new Promise((resolve) => setTimeout(resolve, delayMs));
         continue;
       }

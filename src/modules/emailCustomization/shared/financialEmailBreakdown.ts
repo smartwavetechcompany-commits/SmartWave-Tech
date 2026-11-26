@@ -24,6 +24,17 @@ export interface EmailFinancialBreakdownInput {
   fallbackDiscountAmount?: number;
   fallbackAmountPaid?: number;
   fallbackOutstandingBalance?: number;
+  /**
+   * Optional authoritative updated stay total (e.g. `meta.newTotalAmount` right after a stay
+   * extension or room transfer) so email remaining balance reflects the updated stay even if
+   * future extension nights are not yet posted to the ledger or Firestore reads lag.
+   */
+  effectiveStayTotal?: number;
+  /**
+   * When true (stay extension / room transfer), do not clamp remainingBalance down to a stale
+   * pre-extension `reservation.ledgerBalance` or pre-extension `paymentStatus === "paid"`.
+   */
+  ignoreStaleReservationBalance?: boolean;
 }
 
 export interface EmailFinancialBreakdown {
@@ -104,6 +115,8 @@ export function computeEmailFinancialBreakdown(
   // 1. If authoritative ledger entries are supplied, aggregate directly without mutating ledger
   if (entries.length > 0) {
     let grossDebits = 0;
+    let roomAndStayTaxDebits = 0;
+    let ancillaryDebits = 0;
     let penaltyDebits = 0;
     let discountCredits = 0;
     let discountDebits = 0;
@@ -115,6 +128,8 @@ export function computeEmailFinancialBreakdown(
       if (amt <= 0) continue;
       const type = String(e.type || "").toLowerCase();
       const cat = String(e.category || "").toLowerCase();
+      const desc = String(e.description || "").toLowerCase();
+      const chargeType = String(e.chargeType || "").toLowerCase();
 
       if (type === "debit") {
         if (cat === "refund") {
@@ -123,6 +138,27 @@ export function computeEmailFinancialBreakdown(
           discountDebits += amt;
         } else {
           grossDebits += amt;
+          const isRoomOrOverstay =
+            cat === "room" ||
+            chargeType === "room_rate" ||
+            chargeType === "overstay";
+          const isAncillaryTax =
+            cat === "tax" &&
+            (desc.includes("restaurant") ||
+              desc.includes("f&b") ||
+              desc.includes("f & b") ||
+              desc.includes("bar") ||
+              desc.includes("kitchen") ||
+              desc.includes("food") ||
+              desc.includes("pos") ||
+              desc.includes("bill #"));
+          const isStayTax = cat === "tax" && !isAncillaryTax;
+
+          if (isRoomOrOverstay || isStayTax) {
+            roomAndStayTaxDebits += amt;
+          } else {
+            ancillaryDebits += amt;
+          }
           if (isLedgerPenaltyEntry(e)) {
             penaltyDebits += amt;
           }
@@ -144,26 +180,36 @@ export function computeEmailFinancialBreakdown(
     }
 
     const resTotal = toFiniteNumber(res?.totalAmount) ?? 0;
+    const overrideStayTotal = toFiniteNumber(input.effectiveStayTotal);
+    const effectiveStayTotal =
+      overrideStayTotal !== undefined && overrideStayTotal > 0
+        ? input.ignoreStaleReservationBalance
+          ? overrideStayTotal
+          : Math.max(resTotal, overrideStayTotal)
+        : resTotal;
     const isNoShowOrCancelled = resStatus === "no_show" || resStatus === "cancelled";
 
     // Preserve No-Show / Cancelled classification: only posted penalties create liability
     if (isNoShowOrCancelled && penaltyDebits <= 0.01) {
       const netPaid = round2(Math.max(0, paymentCredits - refundDebits));
       return {
-        originalAmount: round2(resTotal > 0 ? resTotal : grossDebits),
+        originalAmount: round2(effectiveStayTotal > 0 ? effectiveStayTotal : grossDebits),
         discountAmount: round2(Math.max(0, discountCredits - discountDebits)),
         netPayableAmount: 0,
         amountPaid: netPaid,
         remainingBalance: 0,
         paymentStatus: "No Balance Due",
-        hasFinancialData: resTotal > 0 || grossDebits > 0 || netPaid > 0,
+        hasFinancialData: effectiveStayTotal > 0 || grossDebits > 0 || netPaid > 0,
       };
     }
 
+    // Reconcile posted room/stay taxes against the updated stay total while preserving posted ancillary (F&B/service) debits
+    const combinedStayAndAncillary =
+      Math.max(roomAndStayTaxDebits, effectiveStayTotal) + ancillaryDebits;
     const originalAmount = round2(
       isNoShowOrCancelled
         ? penaltyDebits
-        : Math.max(grossDebits, resTotal)
+        : Math.max(grossDebits, combinedStayAndAncillary)
     );
     const ledgerNetDiscount = round2(Math.max(0, discountCredits - discountDebits));
     const discountAmount =
@@ -197,7 +243,14 @@ export function computeEmailFinancialBreakdown(
   }
 
   // 2. Reservation-record path (server dispatcher & module notifications without full ledger scan)
-  const rawTotal = toFiniteNumber(res?.totalAmount) ?? toFiniteNumber(input.fallbackOriginalAmount);
+  const rawTotalBase = toFiniteNumber(res?.totalAmount) ?? toFiniteNumber(input.fallbackOriginalAmount);
+  const overrideStayTotal = toFiniteNumber(input.effectiveStayTotal);
+  const rawTotal =
+    overrideStayTotal !== undefined && overrideStayTotal > 0
+      ? input.ignoreStaleReservationBalance
+        ? overrideStayTotal
+        : Math.max(rawTotalBase ?? 0, overrideStayTotal)
+      : rawTotalBase;
   const rawPaid = toFiniteNumber(res?.paidAmount) ?? toFiniteNumber(input.fallbackAmountPaid);
   const triggerPayment = toFiniteNumber(input.paymentAmount);
 
@@ -258,8 +311,11 @@ export function computeEmailFinancialBreakdown(
 
   // If reservation has an explicit ledgerBalance reconciled by ledgerService that is smaller
   // (e.g., city ledger / additional credit applied), respect it, while NEVER exceeding netPayable - paid.
+  // Skip this clamp when the stay was just extended or transferred (where ledgerBalance/paymentStatus
+  // may still reflect the pre-extension settlement state).
   const ledgerBalance = toFiniteNumber(res?.ledgerBalance);
   if (
+    !input.ignoreStaleReservationBalance &&
     ledgerBalance !== undefined &&
     ledgerBalance >= 0 &&
     ledgerBalance < remainingBalance &&
@@ -357,6 +413,12 @@ export function resolveNotificationEventFinancials(params: {
   const isPaymentEvent = PAYMENT_TRIGGER_EVENTS.has(eventType);
   const isTransactionEvent = TRANSACTION_AMOUNT_EVENTS.has(eventType);
   const isCorporateEvent = eventType.startsWith("corporate.");
+  const isStayTotalMutationEvent =
+    eventType === "reservation.stay_extended" || eventType === "reservation.room_transferred";
+  const effectiveStayTotalOverride =
+    isStayTotalMutationEvent && metaNewTotalAmount !== undefined && metaNewTotalAmount > 0
+      ? metaNewTotalAmount
+      : undefined;
 
   const financialBreakdown = computeEmailFinancialBreakdown({
     reservation,
@@ -364,6 +426,8 @@ export function resolveNotificationEventFinancials(params: {
     paymentAmount: isPaymentEvent ? metaAmount : undefined,
     fallbackOutstandingBalance: metaOutstanding,
     fallbackDiscountAmount: metaDiscount,
+    effectiveStayTotal: effectiveStayTotalOverride,
+    ignoreStaleReservationBalance: isStayTotalMutationEvent,
   });
 
   // Base reservation/folio figures
