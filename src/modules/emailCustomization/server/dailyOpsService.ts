@@ -575,6 +575,8 @@ async function logEmailNotificationAudit(params: {
   subject: string;
   status: string;
   error?: string;
+  dispatchMethod?: "Automatic" | "Manual";
+  reportDate?: string;
   bearerToken?: string;
 }): Promise<void> {
   try {
@@ -590,6 +592,8 @@ async function logEmailNotificationAudit(params: {
         subject: params.subject,
         status: params.status,
         error: params.error || "",
+        ...(params.dispatchMethod ? { dispatchMethod: params.dispatchMethod } : {}),
+        ...(params.reportDate ? { reportDate: params.reportDate } : {}),
         provider: "resend",
         createdAt: new Date().toISOString(),
       },
@@ -601,6 +605,7 @@ async function logEmailNotificationAudit(params: {
 }
 
 const inFlightDailyOpsHotels = new Set<string>();
+const inFlightManualDailyOpsHotels = new Set<string>();
 const RECENTLY_DELIVERED_TTL_MS = 12 * 60 * 60 * 1000; // 12h volatile in-memory duplicate guard
 const recentlyDeliveredDailyOps = new Map<string, number>();
 const AUTO_RETRY_BACKOFF_MS = 15 * 60 * 1000;
@@ -766,6 +771,7 @@ export async function executeScheduledDailyOpsRun(params: {
     reportDate,
     periodLabel,
     triggerType: "scheduled",
+    dispatchMethod: "Automatic",
     scheduledTime: config.scheduledTime,
     timezone: config.timezone,
     recipients: activeRecipients,
@@ -820,6 +826,8 @@ export async function executeScheduledDailyOpsRun(params: {
     subject: rendered.subject,
     status: delivery.deliveryStatus,
     error: delivery.errorMessage,
+    dispatchMethod: "Automatic",
+    reportDate,
     bearerToken,
   });
 
@@ -1125,6 +1133,220 @@ export async function sendDailyOpsTestReport(params: {
     reportDate: generated.report.reportDate,
     messageId: sendRes.messageId,
   };
+}
+
+/**
+ * Manually generates and immediately dispatches the real Daily Operations Report
+ * for a single hotel to its configured active recipients.
+ *
+ * Strictly separate from Test Email, Preview, Dry-Run Diagnostic, and Automatic Scheduler:
+ * - Uses existing report generation (`generateDailyOpsReportForHotel`) and delivery (`deliverToRecipientList`).
+ * - Works independently of the automatic scheduler (even if automation is disabled or a scheduled run failed).
+ * - NEVER modifies `dailyOpsReportConfig/default` (schedule, timezone, recipients, sections, or lastReportDate).
+ * - Persists a distinct audit run record with `triggerType: "manual"` and `dispatchMethod: "Manual"`.
+ * - Prevents accidental duplicate concurrent manual submissions per hotel.
+ */
+export async function executeManualDailyOpsDispatch(params: {
+  hotelId: string;
+  reportDate?: string;
+  actor: string;
+  idempotencyKey?: string;
+  bearerToken?: string;
+  sendEmailFn?: DailyOpsEmailSender;
+}): Promise<{
+  ok: boolean;
+  inProgress?: boolean;
+  validationError?: boolean;
+  reportDate?: string;
+  recipientsCount?: number;
+  dispatchMethod: "Manual";
+  error?: string;
+  run?: DailyOpsReportRun;
+}> {
+  const { hotelId, actor, bearerToken, sendEmailFn } = params;
+
+  if (params.reportDate && !isValidReportDate(params.reportDate)) {
+    return {
+      ok: false,
+      validationError: true,
+      dispatchMethod: "Manual",
+      error: "reportDate must be a valid YYYY-MM-DD date.",
+    };
+  }
+
+  if (inFlightManualDailyOpsHotels.has(hotelId)) {
+    return {
+      ok: false,
+      inProgress: true,
+      dispatchMethod: "Manual",
+      error: "A manual Daily Operations Report dispatch is already in progress for this hotel. Please wait.",
+    };
+  }
+
+  inFlightManualDailyOpsHotels.add(hotelId);
+  try {
+    const { config } = await getDailyOpsConfig(hotelId, undefined, bearerToken);
+
+    const activeRecipients = Array.from(
+      new Set(
+        config.recipients
+          .filter((r) => r.enabled && validateDailyOpsEmail(r.email))
+          .map((r) => r.email.trim().toLowerCase())
+      )
+    );
+
+    if (activeRecipients.length === 0) {
+      return {
+        ok: false,
+        validationError: true,
+        dispatchMethod: "Manual",
+        error:
+          "No active enabled recipients are configured for the Daily Operations Report. Please add or enable at least one recipient first.",
+      };
+    }
+
+    const targetReportDate =
+      params.reportDate && isValidReportDate(params.reportDate)
+        ? params.reportDate
+        : computePreviousCalendarDayWindow(new Date(), config.timezone).reportDate;
+
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const runId = `manual_${targetReportDate}_${nowMs}`;
+    const manualKey =
+      params.idempotencyKey && isSafeIdentifier(params.idempotencyKey)
+        ? params.idempotencyKey
+        : `manual_now_${hotelId}_${targetReportDate}_${nowMs}_${crypto.randomBytes(3).toString("hex")}`;
+
+    let generated: Awaited<ReturnType<typeof generateDailyOpsReportForHotel>>;
+    try {
+      generated = await generateDailyOpsReportForHotel({
+        hotelId,
+        reportDate: targetReportDate,
+        defaultToCurrentDay: false,
+        bearerToken,
+      });
+    } catch (genErr: any) {
+      const errMsg = genErr?.message || "Failed to generate Daily Operations Report.";
+      const failedRun: DailyOpsReportRun = {
+        id: runId,
+        hotelId,
+        reportDate: targetReportDate,
+        periodLabel: targetReportDate,
+        triggerType: "manual",
+        dispatchMethod: "Manual",
+        triggeredBy: actor,
+        scheduledTime: config.scheduledTime,
+        timezone: config.timezone,
+        recipients: activeRecipients,
+        generationStatus: "failed",
+        deliveryStatus: "failed",
+        generatedAt: nowIso,
+        errorMessage: errMsg,
+        recipientResults: [],
+        subject: `Daily Hotel Operations Report — ${targetReportDate}`,
+        retryCount: 0,
+        manualResends: [],
+        idempotencyKey: manualKey,
+      };
+      await writeDoc(buildRunPath(hotelId, runId), failedRun, bearerToken).catch(() => {});
+      await logEmailNotificationAudit({
+        hotelId,
+        eventType: "daily_operations_report_manual",
+        recipients: activeRecipients,
+        subject: failedRun.subject,
+        status: "failed",
+        error: errMsg,
+        dispatchMethod: "Manual",
+        reportDate: targetReportDate,
+        bearerToken,
+      });
+      return {
+        ok: false,
+        reportDate: targetReportDate,
+        recipientsCount: activeRecipients.length,
+        dispatchMethod: "Manual",
+        error: errMsg,
+        run: failedRun,
+      };
+    }
+
+    const delivery = await deliverToRecipientList({
+      hotelId,
+      recipients: activeRecipients,
+      subject: generated.rendered.subject,
+      html: generated.rendered.html,
+      text: generated.rendered.text,
+      fromName: generated.rendered.fromName,
+      replyTo: generated.rendered.replyTo,
+      idempotencyPrefix: `daily_ops_manual_now_${hotelId}_${targetReportDate}_${manualKey}`,
+      eventTag: "daily_operations_report_manual",
+      sendEmailFn,
+    });
+
+    const deliveredAt =
+      delivery.deliveryStatus === "sent" || delivery.deliveryStatus === "partial"
+        ? new Date().toISOString()
+        : undefined;
+
+    const runRecord: DailyOpsReportRun = {
+      id: runId,
+      hotelId,
+      reportDate: generated.report.reportDate,
+      periodLabel: generated.report.periodLabel,
+      triggerType: "manual",
+      dispatchMethod: "Manual",
+      triggeredBy: actor,
+      scheduledTime: config.scheduledTime,
+      timezone: config.timezone,
+      recipients: activeRecipients,
+      generationStatus: "generated",
+      deliveryStatus: delivery.deliveryStatus,
+      generatedAt: nowIso,
+      ...(deliveredAt ? { deliveredAt } : {}),
+      ...(delivery.errorMessage ? { errorMessage: delivery.errorMessage } : {}),
+      recipientResults: delivery.recipientResults,
+      subject: generated.rendered.subject,
+      htmlSnapshot: generated.rendered.html,
+      summarySnapshot: generated.report.summarySnapshot,
+      retryCount: 0,
+      manualResends: [],
+      idempotencyKey: manualKey,
+    };
+
+    await writeDoc(buildRunPath(hotelId, runId), runRecord, bearerToken).catch((err: any) => {
+      console.warn(
+        `[DailyOpsManual] Could not persist manual run record for hotel=${hotelId} date=${generated.report.reportDate}:`,
+        err?.message || err
+      );
+    });
+
+    await logEmailNotificationAudit({
+      hotelId,
+      eventType: "daily_operations_report_manual",
+      recipients: activeRecipients,
+      subject: generated.rendered.subject,
+      status: delivery.deliveryStatus,
+      error: delivery.errorMessage,
+      dispatchMethod: "Manual",
+      reportDate: generated.report.reportDate,
+      bearerToken,
+    });
+
+    return {
+      ok: delivery.deliveryStatus === "sent" || delivery.deliveryStatus === "partial",
+      reportDate: generated.report.reportDate,
+      recipientsCount: activeRecipients.length,
+      dispatchMethod: "Manual",
+      error:
+        delivery.deliveryStatus === "failed"
+          ? delivery.errorMessage || "Manual Daily Operations Report delivery failed."
+          : undefined,
+      run: runRecord,
+    };
+  } finally {
+    inFlightManualDailyOpsHotels.delete(hotelId);
+  }
 }
 
 export interface DailyOpsDryRunCheckItem {

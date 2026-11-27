@@ -5066,6 +5066,7 @@ async function startServer() {
 
       const resolvedFin = resolveNotificationEventFinancials({
         eventType: typedEvent,
+        hotel: hotelDoc,
         reservation: reservationDoc,
         ledgerEntries: reservationLedgerEntries,
         meta,
@@ -5501,8 +5502,11 @@ async function startServer() {
               ...(addChargeNum !== undefined && addChargeNum > 0
                 ? [{ label: "Additional Charge", value: formatMoneyForEmail(addChargeNum, hotelBrand.currency) }]
                 : []),
-              ...(updatedTotalNum !== undefined
-                ? [{ label: "Updated Stay Total", value: formatMoneyForEmail(updatedTotalNum, hotelBrand.currency) }]
+              ...((resolvedFin.totalAmount ?? updatedTotalNum) !== undefined
+                ? [{ label: "Updated Stay Total", value: formatMoneyForEmail(resolvedFin.totalAmount ?? updatedTotalNum, hotelBrand.currency) }]
+                : []),
+              ...(financialBreakdown.amountPaid > 0
+                ? [{ label: "Amount Paid", value: formatMoneyForEmail(financialBreakdown.amountPaid, hotelBrand.currency) }]
                 : []),
               ...(reservationDoc
                 ? [

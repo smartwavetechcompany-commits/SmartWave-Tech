@@ -374,6 +374,23 @@ export const emailCustomizationApi = {
     });
   },
 
+  sendDailyOpsReportNow(
+    payload: { reportDate?: string; idempotencyKey?: string } = {},
+    hotelId?: string
+  ) {
+    return apiFetch<{
+      ok: boolean;
+      reportDate: string;
+      recipientsCount: number;
+      dispatchMethod: "Manual";
+      run: DailyOpsReportRun;
+    }>("/api/email-customization/daily-ops-report/send-now", {
+      method: "POST",
+      body: payload,
+      hotelId,
+    });
+  },
+
   retryDailyOpsRun(runId: string, hotelId?: string) {
     return apiFetch<{ ok: boolean; run: DailyOpsReportRun }>(
       `/api/email-customization/daily-ops-report/runs/${encodeURIComponent(runId)}/retry`,

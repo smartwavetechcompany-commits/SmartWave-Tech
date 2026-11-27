@@ -59,6 +59,7 @@ import {
 import { runScheduledHotelEmails } from "./dispatcher.ts";
 import { isValidEmail, validateTemplateVariant } from "../shared/validation.ts";
 import {
+  executeManualDailyOpsDispatch,
   generateDailyOpsReportForHotel,
   getDailyOpsConfig,
   getDailyOpsRun,
@@ -1178,6 +1179,78 @@ export function mountEmailCustomizationRoutes(
       return res
         .status(500)
         .json({ error: sanitizeErrorForClient(err, "Failed to send test operations report.") });
+    }
+  });
+
+  // Manual immediate dispatch of the real Daily Operations Report (strictly separate from test, preview, dry-run, and automatic scheduler)
+  app.post("/api/email-customization/daily-ops-report/send-now", async (req, res) => {
+    try {
+      const ctx = await requireEmailModuleAccess(req, res, "manage");
+      if (!ctx) return;
+
+      const rate = saveLimiter.check(`daily-ops-send-now:${ctx.caller.uid}`, 10, 60_000);
+      if (!rate.allowed) {
+        return res.status(429).json({
+          error: "Too many manual report dispatch requests. Please wait a moment.",
+        });
+      }
+
+      const reportDate =
+        typeof req.body?.reportDate === "string" && req.body.reportDate.trim()
+          ? req.body.reportDate.trim()
+          : undefined;
+      if (reportDate && !isValidReportDate(reportDate)) {
+        return res.status(400).json({ error: "reportDate must be a valid YYYY-MM-DD date." });
+      }
+
+      const idempotencyKey =
+        typeof req.body?.idempotencyKey === "string" && isSafeIdentifier(req.body.idempotencyKey.trim())
+          ? req.body.idempotencyKey.trim()
+          : undefined;
+
+      const result = await executeManualDailyOpsDispatch({
+        hotelId: ctx.hotelId,
+        reportDate,
+        actor: ctx.caller.email || ctx.caller.uid,
+        idempotencyKey,
+        bearerToken: ctx.bearerToken,
+      });
+
+      if (result.inProgress) {
+        return res.status(409).json({
+          ok: false,
+          error: result.error || "A manual Daily Operations Report dispatch is already in progress.",
+        });
+      }
+
+      if (result.validationError) {
+        return res.status(400).json({
+          ok: false,
+          error: result.error || "Invalid manual Daily Operations Report request.",
+        });
+      }
+
+      if (!result.ok) {
+        return res.status(502).json({
+          ok: false,
+          error: result.error || "Manual Daily Operations Report delivery failed.",
+          reportDate: result.reportDate,
+          dispatchMethod: "Manual",
+          run: result.run,
+        });
+      }
+
+      return res.json({
+        ok: true,
+        reportDate: result.reportDate,
+        recipientsCount: result.recipientsCount,
+        dispatchMethod: "Manual",
+        run: result.run,
+      });
+    } catch (err) {
+      return res
+        .status(500)
+        .json({ error: sanitizeErrorForClient(err, "Failed to manually send Daily Operations Report.") });
     }
   });
 

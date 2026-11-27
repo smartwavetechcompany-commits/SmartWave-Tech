@@ -1020,6 +1020,7 @@ export function buildDefaultTemplateVariant(
           { id: "row_nights", label: isDe ? "Gesamtnächte" : "Updated Total Nights", valueTemplate: "{{nights}}" },
           { id: "row_add_charge", label: isDe ? "Zusätzlicher Betrag" : "Additional Charge", valueTemplate: "{{charge_amount}}" },
           { id: "row_total", label: isDe ? "Aktualisierter Gesamtbetrag" : "Updated Stay Total", valueTemplate: "{{total_amount}}" },
+          { id: "row_paid", label: isDe ? "Bezahlter Betrag" : "Amount Paid", valueTemplate: "{{amount_paid}}" },
           { id: "row_balance", label: isDe ? "Restbetrag" : "Remaining Balance", valueTemplate: "{{remaining_balance}}" },
         ],
       });

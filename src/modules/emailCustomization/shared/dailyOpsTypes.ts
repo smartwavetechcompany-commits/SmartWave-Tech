@@ -226,7 +226,9 @@ export interface DailyOpsReportRun {
   hotelId: string;
   reportDate: string; // YYYY-MM-DD
   periodLabel: string;
-  triggerType: "scheduled" | "manual_resend" | "test";
+  triggerType: "scheduled" | "manual" | "manual_resend" | "test";
+  dispatchMethod?: "Automatic" | "Manual";
+  triggeredBy?: string;
   scheduledTime: string;
   timezone: string;
   recipients: string[];

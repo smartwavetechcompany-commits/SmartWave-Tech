@@ -2315,28 +2315,78 @@ export function FrontDesk() {
 
       toast.success('Stay postponed successfully');
 
-      // Additive: Notify guest that their stay has been extended / postponed
-      try {
-        void notifyPlatformEvent({
-          hotelId: hotel.id,
-          eventType: 'reservation.stay_extended',
-          reservationId: res.id,
-          guestId: res.guestId || undefined,
-          idempotencyKey: `stay_ext_${res.id}_${newCheckOutDate}_${Math.round(newTotalAmount * 100)}`,
-          metadata: {
-            previousCheckOut: res.checkOut,
-            newCheckOut: newCheckOutDate,
-            extraNights,
-            totalNights: newBookedNights,
-            extensionNightlyRate,
-            additionalCharge: Number((baseExtraAmount + extraExclusiveTaxTotal).toFixed(2)),
-            newTotalAmount,
-            roomNumber: res.roomNumber || undefined,
-          },
-        });
-      } catch {
-        // Non-blocking
-      }
+      // Additive: Notify guest that their stay has been extended / postponed using freshly committed PMS records
+      void (async () => {
+        try {
+          const fallbackUpdatedRes: Reservation = {
+            ...res,
+            checkOut: newCheckOutDate,
+            nights: newBookedNights,
+            totalAmount: newTotalAmount,
+            originalNightlyRate: preservedOriginalRate,
+            nightlyRate: res.nightlyRate ?? preservedOriginalRate,
+            rateSnapshot: updatedRateSnapshot,
+          };
+          const [freshResSnap, freshLedgerSnap] = await Promise.all([
+            getDoc(doc(db, 'hotels', hotel.id, 'reservations', res.id)).catch(() => null),
+            getDocs(
+              query(
+                collection(db, 'hotels', hotel.id, 'ledger'),
+                where('reservationId', '==', res.id)
+              )
+            ).catch(() => null),
+          ]);
+          const freshRes: Reservation =
+            freshResSnap && freshResSnap.exists()
+              ? ({ id: freshResSnap.id, ...(freshResSnap.data() as any) } as Reservation)
+              : fallbackUpdatedRes;
+          const freshLedger: LedgerEntry[] = freshLedgerSnap
+            ? freshLedgerSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as LedgerEntry))
+            : resLedger;
+          const authoritativeAccount = calculateReservationAccount(freshRes, hotel, freshLedger);
+          const authoritativeTotal = Number(
+            Math.max(authoritativeAccount.totalCharges, newTotalAmount).toFixed(2)
+          );
+          const authoritativePaid = Number(
+            Math.max(0, authoritativeAccount.totalPayments - authoritativeAccount.totalRefunds).toFixed(2)
+          );
+          const authoritativeBalance = Number(
+            Math.max(
+              0,
+              authoritativeTotal -
+                authoritativeAccount.totalDiscounts -
+                Math.max(
+                  0,
+                  authoritativeAccount.totalCredits -
+                    authoritativeAccount.totalDiscounts -
+                    authoritativeAccount.totalRefunds
+                )
+            ).toFixed(2)
+          );
+
+          await notifyPlatformEvent({
+            hotelId: hotel.id,
+            eventType: 'reservation.stay_extended',
+            reservationId: res.id,
+            guestId: res.guestId || undefined,
+            idempotencyKey: `stay_ext_${res.id}_${newCheckOutDate}_${Math.round(authoritativeTotal * 100)}`,
+            metadata: {
+              previousCheckOut: res.checkOut,
+              newCheckOut: newCheckOutDate,
+              extraNights,
+              totalNights: newBookedNights,
+              extensionNightlyRate,
+              additionalCharge: Number((baseExtraAmount + extraExclusiveTaxTotal).toFixed(2)),
+              newTotalAmount: authoritativeTotal,
+              amountPaid: authoritativePaid,
+              outstandingBalance: authoritativeBalance,
+              roomNumber: res.roomNumber || undefined,
+            },
+          });
+        } catch {
+          // Non-blocking
+        }
+      })();
 
       setShowPostponeModal(null);
     } catch (err) {

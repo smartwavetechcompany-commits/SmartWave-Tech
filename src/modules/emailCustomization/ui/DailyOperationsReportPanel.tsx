@@ -29,6 +29,7 @@ import {
   DEFAULT_DAILY_OPS_SECTIONS,
   DEFAULT_DAILY_OPS_TIME,
   DEFAULT_DAILY_OPS_TIMEZONE,
+  computePreviousCalendarDayWindow,
   isValidScheduledTime,
   validateDailyOpsEmail,
   type DailyOpsRecipient,
@@ -144,6 +145,8 @@ export function DailyOperationsReportPanel({
   } | null>(null);
   const [testEmail, setTestEmail] = useState(callerEmail || "");
   const [sendingTest, setSendingTest] = useState(false);
+  const [sendingManualReport, setSendingManualReport] = useState(false);
+  const manualDispatchLockRef = useRef(false);
   const [runningDryRun, setRunningDryRun] = useState(false);
   const [dryRunResult, setDryRunResult] = useState<
     Awaited<ReturnType<typeof emailCustomizationApi.dryRunDailyOpsReport>>["diagnostic"] | null
@@ -630,6 +633,38 @@ export function DailyOperationsReportPanel({
       toast.error(err?.message || "Failed to run dry-run diagnostic.");
     } finally {
       setRunningDryRun(false);
+    }
+  };
+
+  const handleSendDailyReportNow = async () => {
+    if (!canManage || sendingManualReport || manualDispatchLockRef.current) return;
+    manualDispatchLockRef.current = true;
+    setSendingManualReport(true);
+    try {
+      const idempotencyKey = `manual_daily_${hotelId}_${Date.now()}`;
+      const res = await emailCustomizationApi.sendDailyOpsReportNow(
+        {
+          reportDate: previewDate || undefined,
+          idempotencyKey,
+        },
+        hotelId
+      );
+      if (res.run?.deliveryStatus === "partial") {
+        toast.warning(
+          `Daily Operations Report for ${res.reportDate} was partially delivered (${res.run.recipientResults.filter((r) => r.status === "sent").length}/${res.recipientsCount} recipients). Check delivery history for details.`
+        );
+      } else {
+        toast.success(
+          `Daily Operations Report for ${res.reportDate} sent manually to ${res.recipientsCount} active recipient${res.recipientsCount === 1 ? "" : "s"}.`
+        );
+      }
+      await refreshRuns();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to manually send Daily Operations Report.");
+      await refreshRuns();
+    } finally {
+      setSendingManualReport(false);
+      manualDispatchLockRef.current = false;
     }
   };
 
@@ -1218,6 +1253,55 @@ export function DailyOperationsReportPanel({
               </div>
             </div>
           </div>
+
+          {/* Manual Real Report Dispatch (Strictly Separate from Test, Preview, Dry-Run & Automatic Scheduler) */}
+          {canManage && (
+            <div className="rounded-xl bg-zinc-900 border border-emerald-500/30 p-5 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                    <Send size={14} className="text-emerald-400" />
+                    Manual Report Dispatch
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Immediately generate and send the actual Daily Operations Report for{" "}
+                    <span className="text-zinc-200 font-semibold">{hotelName}</span> to all{" "}
+                    <span className="text-zinc-200 font-semibold">
+                      {activeRecipientsCount} active configured recipient{activeRecipientsCount === 1 ? "" : "s"}
+                    </span>
+                    . Works independently without altering the automated schedule, recipients, or email settings.
+                  </p>
+                  <p className="text-[11px] text-zinc-500 mt-1">
+                    Reporting date:{" "}
+                    <span className="text-zinc-300 font-mono">
+                      {previewDate || computePreviousCalendarDayWindow(new Date(), config.timezone).reportDate}
+                    </span>{" "}
+                    · Logged as <span className="text-emerald-400 font-semibold">Manual</span> dispatch
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={sendingManualReport || activeRecipientsCount === 0}
+                  onClick={() => void handleSendDailyReportNow()}
+                  className="px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white inline-flex items-center justify-center gap-2 transition-colors disabled:opacity-50 shrink-0"
+                  title="Send the real Daily Operations Report now to all active configured recipients"
+                >
+                  {sendingManualReport ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Send size={14} />
+                  )}
+                  {sendingManualReport ? "Sending Report..." : "Send Daily Report Now"}
+                </button>
+              </div>
+              {activeRecipientsCount === 0 && (
+                <div className="text-[11px] text-amber-300 flex items-center gap-1.5">
+                  <AlertCircle size={12} className="shrink-0" />
+                  Add or enable at least one recipient above before using manual dispatch.
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1254,6 +1338,7 @@ export function DailyOperationsReportPanel({
               <thead>
                 <tr className="border-b border-zinc-800 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
                   <th className="py-2.5 px-3">Reporting Date</th>
+                  <th className="py-2.5 px-3">Method</th>
                   <th className="py-2.5 px-3">Recipients</th>
                   <th className="py-2.5 px-3">Scheduled / Delivered</th>
                   <th className="py-2.5 px-3">Generation</th>
@@ -1264,6 +1349,9 @@ export function DailyOperationsReportPanel({
               </thead>
               <tbody className="divide-y divide-zinc-800/70">
                 {runs.map((run) => {
+                  const isManualRun =
+                    run.dispatchMethod === "Manual" || run.triggerType === "manual";
+                  const dispatchMethodLabel = isManualRun ? "Manual" : "Automatic";
                   const canRetry =
                     canManage &&
                     (run.deliveryStatus === "failed" ||
@@ -1279,6 +1367,25 @@ export function DailyOperationsReportPanel({
                             : run.timezone}
                         </div>
                       </td>
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${
+                            isManualRun
+                              ? "bg-blue-500/15 text-blue-300 border-blue-500/30"
+                              : "bg-zinc-800 text-zinc-300 border-zinc-700"
+                          }`}
+                        >
+                          {dispatchMethodLabel}
+                        </span>
+                        {isManualRun && run.triggeredBy && (
+                          <div
+                            className="text-[10px] text-zinc-500 mt-0.5 max-w-[140px] truncate"
+                            title={run.triggeredBy}
+                          >
+                            {run.triggeredBy}
+                          </div>
+                        )}
+                      </td>
                       <td className="py-3 px-3">
                         <div className="text-zinc-200 font-medium">
                           {run.recipients.length} recipient{run.recipients.length === 1 ? "" : "s"}
@@ -1291,7 +1398,11 @@ export function DailyOperationsReportPanel({
                         </div>
                       </td>
                       <td className="py-3 px-3 whitespace-nowrap text-[11px] text-zinc-400">
-                        <div>Sched: {run.scheduledTime} ({run.timezone})</div>
+                        <div>
+                          {isManualRun
+                            ? `Manual (${run.timezone})`
+                            : `Sched: ${run.scheduledTime} (${run.timezone})`}
+                        </div>
                         <div className="text-zinc-300">
                           Sent: {run.deliveredAt ? formatDateTimeSafe(run.deliveredAt, run.timezone) : "—"}
                         </div>

@@ -8,6 +8,8 @@
  *   as an outstanding balance due in guest emails.
  */
 
+import { calculateReservationAccount } from "../../../utils/financialUtils.ts";
+
 export type EmailPaymentStatusLabel =
   | "Fully Settled"
   | "Partially Paid"
@@ -15,6 +17,7 @@ export type EmailPaymentStatusLabel =
   | "No Balance Due";
 
 export interface EmailFinancialBreakdownInput {
+  hotel?: Record<string, any> | null;
   reservation?: Record<string, any> | null;
   ledgerEntries?: Array<Record<string, any>>;
   /** Optional payment amount from the triggering transaction (e.g. payment_receipt / payment.received) */
@@ -89,19 +92,16 @@ function isLedgerPenaltyEntry(entry: Record<string, any>): boolean {
 }
 
 /**
- * Computes accurate, read-only financial breakdown figures for outgoing emails.
+ * Computes accurate, read-only financial breakdown figures for outgoing emails
+ * by delegating directly to the authoritative PMS `calculateReservationAccount` engine.
  *
- * Example verified scenario:
- * - Original Room Charge: 100,000
- * - Discount Granted: 20,000
- * - Amount Paid / Settled: 80,000
- * => netPayableAmount = 80,000, remainingBalance = 0, paymentStatus = "Fully Settled"
- *
- * Partial payment scenario:
- * - Original Room Charge: 100,000
- * - Discount Granted: 20,000
- * - Amount Paid / Settled: 50,000
- * => netPayableAmount = 80,000, remainingBalance = 30,000, paymentStatus = "Partially Paid"
+ * Example verified scenarios:
+ * - Stay extension / postponement:
+ *   Updated Total Stay Charges: 288,000, Paid from Guest Account: 35,900
+ *   => netPayableAmount = 288,000, amountPaid = 35,900, remainingBalance = 252,100
+ * - Discount settled:
+ *   Original Room Charge: 100,000, Discount Granted: 20,000, Amount Paid: 80,000
+ *   => netPayableAmount = 80,000, remainingBalance = 0, paymentStatus = "Fully Settled"
  */
 export function computeEmailFinancialBreakdown(
   input: EmailFinancialBreakdownInput
@@ -111,12 +111,116 @@ export function computeEmailFinancialBreakdown(
   const entries = Array.isArray(input.ledgerEntries)
     ? input.ledgerEntries.filter((e) => e && e.voided !== true && e.status !== "voided")
     : [];
+  const overrideStayTotal = toFiniteNumber(input.effectiveStayTotal);
+  const triggerPayment = toFiniteNumber(input.paymentAmount);
 
-  // 1. If authoritative ledger entries are supplied, aggregate directly without mutating ledger
+  // 1. Authoritative PMS delegation path: whenever a reservation record exists and is NOT
+  //    no_show/cancelled, retrieve the exact financial summary from calculateReservationAccount
+  //    so emails ALWAYS match the PMS interface, Guest Account, Folio, and Receipt.
+  if (res && resStatus !== "no_show" && resStatus !== "cancelled") {
+    const resId = String(res.id || entries[0]?.reservationId || "email_res");
+    const normalizedEntries = entries.map((e) =>
+      e.reservationId ? e : { ...e, reservationId: resId }
+    );
+
+    // Prepare a read-only shallow view of the reservation without mutating caller objects.
+    // For stay extensions/transfers when no ledger entries are loaded yet, avoid allowing a
+    // stale pre-extension `paymentStatus: "paid"` or `ledgerBalance: 0` to mask new charges.
+    const effectiveRes: Record<string, any> =
+      normalizedEntries.length === 0 && input.ignoreStaleReservationBalance
+        ? {
+            ...res,
+            id: resId,
+            totalAmount: Math.max(
+              toFiniteNumber(res.totalAmount) ?? 0,
+              overrideStayTotal ?? 0
+            ),
+            paymentStatus: undefined,
+            ledgerBalance: undefined,
+          }
+        : res.id
+          ? res
+          : { ...res, id: resId };
+
+    const pmsAccount = calculateReservationAccount(
+      effectiveRes as any,
+      (input.hotel || null) as any,
+      normalizedEntries as any
+    );
+
+    // Authoritative total stay & service charges from PMS (preserving any higher post-extension
+    // total such as unposted exclusive taxes when explicitly supplied by the postponement flow).
+    const originalAmount = round2(
+      Math.max(
+        pmsAccount.totalCharges,
+        overrideStayTotal !== undefined && overrideStayTotal > 0 ? overrideStayTotal : 0
+      )
+    );
+
+    const explicitFallbackDiscount = toFiniteNumber(input.fallbackDiscountAmount);
+    const discountAmount = round2(
+      pmsAccount.totalDiscounts > 0
+        ? pmsAccount.totalDiscounts
+        : explicitFallbackDiscount !== undefined && explicitFallbackDiscount > 0
+          ? explicitFallbackDiscount
+          : resolveReservationDiscount(res, originalAmount)
+    );
+
+    const netPayableAmount = round2(Math.max(0, originalAmount - discountAmount));
+
+    // Verified net payments (and never drop the triggering payment if Firestore doc read lagged)
+    const recordedNetPaid = round2(Math.max(0, pmsAccount.totalPayments - pmsAccount.totalRefunds));
+    const amountPaid =
+      triggerPayment !== undefined && triggerPayment > 0 && recordedNetPaid === 0
+        ? round2(triggerPayment)
+        : recordedNetPaid;
+
+    // All non-discount settled credits (direct payments + transfers/city ledger minus refunds)
+    const settledNonDiscountCredits = round2(
+      Math.max(0, pmsAccount.totalCredits - pmsAccount.totalDiscounts - pmsAccount.totalRefunds)
+    );
+    const effectiveNonDiscountCredits =
+      triggerPayment !== undefined && triggerPayment > 0 && settledNonDiscountCredits === 0
+        ? round2(triggerPayment)
+        : settledNonDiscountCredits;
+
+    // Use authoritative PMS netAmountDue directly whenever no external override/lag adjustment applied
+    const usesDirectPmsBalance =
+      Math.abs(originalAmount - pmsAccount.totalCharges) <= 0.01 &&
+      Math.abs(discountAmount - pmsAccount.totalDiscounts) <= 0.01 &&
+      Math.abs(effectiveNonDiscountCredits - settledNonDiscountCredits) <= 0.01;
+
+    let remainingBalance = usesDirectPmsBalance
+      ? round2(pmsAccount.netAmountDue)
+      : round2(Math.max(0, netPayableAmount - effectiveNonDiscountCredits));
+
+    if (remainingBalance <= 0.01) {
+      remainingBalance = 0;
+    }
+
+    const paymentStatus: EmailPaymentStatusLabel =
+      netPayableAmount <= 0.01 && originalAmount <= 0.01
+        ? "No Balance Due"
+        : remainingBalance <= 0.01
+          ? "Fully Settled"
+          : amountPaid > 0.01 || effectiveNonDiscountCredits > 0.01
+            ? "Partially Paid"
+            : "Unpaid";
+
+    return {
+      originalAmount,
+      discountAmount,
+      netPayableAmount,
+      amountPaid,
+      remainingBalance,
+      paymentStatus,
+      hasFinancialData: originalAmount > 0 || amountPaid > 0 || discountAmount > 0,
+    };
+  }
+
+  // 2. No-Show / Cancelled reservations or standalone ledger-only entries (preserve penalty-only rules)
   if (entries.length > 0) {
     let grossDebits = 0;
-    let roomAndStayTaxDebits = 0;
-    let ancillaryDebits = 0;
     let penaltyDebits = 0;
     let discountCredits = 0;
     let discountDebits = 0;
@@ -128,8 +232,6 @@ export function computeEmailFinancialBreakdown(
       if (amt <= 0) continue;
       const type = String(e.type || "").toLowerCase();
       const cat = String(e.category || "").toLowerCase();
-      const desc = String(e.description || "").toLowerCase();
-      const chargeType = String(e.chargeType || "").toLowerCase();
 
       if (type === "debit") {
         if (cat === "refund") {
@@ -138,27 +240,6 @@ export function computeEmailFinancialBreakdown(
           discountDebits += amt;
         } else {
           grossDebits += amt;
-          const isRoomOrOverstay =
-            cat === "room" ||
-            chargeType === "room_rate" ||
-            chargeType === "overstay";
-          const isAncillaryTax =
-            cat === "tax" &&
-            (desc.includes("restaurant") ||
-              desc.includes("f&b") ||
-              desc.includes("f & b") ||
-              desc.includes("bar") ||
-              desc.includes("kitchen") ||
-              desc.includes("food") ||
-              desc.includes("pos") ||
-              desc.includes("bill #"));
-          const isStayTax = cat === "tax" && !isAncillaryTax;
-
-          if (isRoomOrOverstay || isStayTax) {
-            roomAndStayTaxDebits += amt;
-          } else {
-            ancillaryDebits += amt;
-          }
           if (isLedgerPenaltyEntry(e)) {
             penaltyDebits += amt;
           }
@@ -180,12 +261,9 @@ export function computeEmailFinancialBreakdown(
     }
 
     const resTotal = toFiniteNumber(res?.totalAmount) ?? 0;
-    const overrideStayTotal = toFiniteNumber(input.effectiveStayTotal);
     const effectiveStayTotal =
       overrideStayTotal !== undefined && overrideStayTotal > 0
-        ? input.ignoreStaleReservationBalance
-          ? overrideStayTotal
-          : Math.max(resTotal, overrideStayTotal)
+        ? Math.max(resTotal, overrideStayTotal)
         : resTotal;
     const isNoShowOrCancelled = resStatus === "no_show" || resStatus === "cancelled";
 
@@ -203,13 +281,8 @@ export function computeEmailFinancialBreakdown(
       };
     }
 
-    // Reconcile posted room/stay taxes against the updated stay total while preserving posted ancillary (F&B/service) debits
-    const combinedStayAndAncillary =
-      Math.max(roomAndStayTaxDebits, effectiveStayTotal) + ancillaryDebits;
     const originalAmount = round2(
-      isNoShowOrCancelled
-        ? penaltyDebits
-        : Math.max(grossDebits, combinedStayAndAncillary)
+      isNoShowOrCancelled ? penaltyDebits : Math.max(grossDebits, effectiveStayTotal)
     );
     const ledgerNetDiscount = round2(Math.max(0, discountCredits - discountDebits));
     const discountAmount =
@@ -242,9 +315,8 @@ export function computeEmailFinancialBreakdown(
     };
   }
 
-  // 2. Reservation-record path (server dispatcher & module notifications without full ledger scan)
+  // 3. Fallback path (no reservation doc loaded, or no_show/cancelled without ledger entries)
   const rawTotalBase = toFiniteNumber(res?.totalAmount) ?? toFiniteNumber(input.fallbackOriginalAmount);
-  const overrideStayTotal = toFiniteNumber(input.effectiveStayTotal);
   const rawTotal =
     overrideStayTotal !== undefined && overrideStayTotal > 0
       ? input.ignoreStaleReservationBalance
@@ -252,7 +324,6 @@ export function computeEmailFinancialBreakdown(
         : Math.max(rawTotalBase ?? 0, overrideStayTotal)
       : rawTotalBase;
   const rawPaid = toFiniteNumber(res?.paidAmount) ?? toFiniteNumber(input.fallbackAmountPaid);
-  const triggerPayment = toFiniteNumber(input.paymentAmount);
 
   if (rawTotal === undefined && rawPaid === undefined && triggerPayment === undefined) {
     const fbBal = toFiniteNumber(input.fallbackOutstandingBalance);
@@ -298,32 +369,13 @@ export function computeEmailFinancialBreakdown(
   const effectiveGross = isNoShowOrCancelled ? round2(postedPenalty) : originalAmount;
   const netPayableAmount = round2(Math.max(0, effectiveGross - discountAmount));
 
-  // Paid amount must reflect verified payments (and never lose the triggering payment if reservation doc lags)
   const recordedPaid = round2(Math.max(0, rawPaid ?? 0));
   const amountPaid =
     triggerPayment !== undefined && triggerPayment > 0 && recordedPaid === 0
       ? round2(triggerPayment)
       : recordedPaid;
 
-  // Authoritative remaining balance: net payable (after discount) minus actual amount paid.
-  // Crucially, a granted discount NEVER appears as an outstanding balance.
   let remainingBalance = round2(Math.max(0, netPayableAmount - amountPaid));
-
-  // If reservation has an explicit ledgerBalance reconciled by ledgerService that is smaller
-  // (e.g., city ledger / additional credit applied), respect it, while NEVER exceeding netPayable - paid.
-  // Skip this clamp when the stay was just extended or transferred (where ledgerBalance/paymentStatus
-  // may still reflect the pre-extension settlement state).
-  const ledgerBalance = toFiniteNumber(res?.ledgerBalance);
-  if (
-    !input.ignoreStaleReservationBalance &&
-    ledgerBalance !== undefined &&
-    ledgerBalance >= 0 &&
-    ledgerBalance < remainingBalance &&
-    (res?.paymentStatus === "paid" || res?.paymentStatus === "settled" || ledgerBalance <= 0.01)
-  ) {
-    remainingBalance = round2(Math.max(0, ledgerBalance));
-  }
-
   if (remainingBalance <= 0.01) {
     remainingBalance = 0;
   }
@@ -393,12 +445,13 @@ export interface NotificationEventFinancialResolution {
  */
 export function resolveNotificationEventFinancials(params: {
   eventType: string;
+  hotel?: Record<string, any> | null;
   reservation?: Record<string, any> | null;
   ledgerEntries?: Array<Record<string, any>>;
   meta?: Record<string, any> | null;
   corporateCurrentBalance?: number | null;
 }): NotificationEventFinancialResolution {
-  const { eventType, reservation, ledgerEntries, corporateCurrentBalance } = params;
+  const { eventType, hotel, reservation, ledgerEntries, corporateCurrentBalance } = params;
   const meta = params.meta && typeof params.meta === "object" ? params.meta : {};
 
   const metaAmount = toFiniteNumber(meta.amount);
@@ -421,6 +474,7 @@ export function resolveNotificationEventFinancials(params: {
       : undefined;
 
   const financialBreakdown = computeEmailFinancialBreakdown({
+    hotel,
     reservation,
     ledgerEntries,
     paymentAmount: isPaymentEvent ? metaAmount : undefined,
@@ -481,19 +535,19 @@ export function resolveNotificationEventFinancials(params: {
     chargeAmount =
       metaAdditionalCharge !== undefined ? round2(Math.max(0, metaAdditionalCharge)) : undefined;
     totalAmount =
-      metaNewTotalAmount !== undefined
-        ? round2(Math.max(0, metaNewTotalAmount))
-        : financialBreakdown.netPayableAmount > 0
-          ? financialBreakdown.netPayableAmount
+      financialBreakdown.netPayableAmount > 0
+        ? financialBreakdown.netPayableAmount
+        : metaNewTotalAmount !== undefined
+          ? round2(Math.max(0, metaNewTotalAmount))
           : undefined;
   } else if (eventType === "reservation.room_transferred") {
     chargeAmount =
       metaPriceDifference !== undefined ? round2(Math.abs(metaPriceDifference)) : undefined;
     totalAmount =
-      metaNewTotalAmount !== undefined
-        ? round2(Math.max(0, metaNewTotalAmount))
-        : financialBreakdown.netPayableAmount > 0
-          ? financialBreakdown.netPayableAmount
+      financialBreakdown.netPayableAmount > 0
+        ? financialBreakdown.netPayableAmount
+        : metaNewTotalAmount !== undefined
+          ? round2(Math.max(0, metaNewTotalAmount))
           : undefined;
   } else if (eventType === "payment.received" || eventType === "receipt.sent") {
     chargeAmount = metaAmount !== undefined ? round2(Math.max(0, metaAmount)) : undefined;

@@ -150,6 +150,7 @@ function buildRenderContextFromRecords(params: {
 
   const bookingReference = String(reservation?.id || "").slice(0, 8).toUpperCase();
   const financial = computeEmailFinancialBreakdown({
+    hotel,
     reservation,
     ledgerEntries,
     paymentAmount,
