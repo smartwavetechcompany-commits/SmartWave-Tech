@@ -50,6 +50,9 @@ import { printDocument } from '../utils/printUtils';
 import { format, isToday, isValid } from 'date-fns';
 import { toast } from 'sonner';
 import { GlobalErrorBoundary } from './GlobalErrorBoundary';
+import { DateFilterControl, DateFilterValue, getDefaultDateFilter } from './DateFilterControl';
+import { computeOccupancyAnalytics } from '../utils/occupancyAnalytics';
+import { DashboardOccupancyPanel } from './DashboardOccupancyPanel';
 
 const getRecordDateString = (ts: any): string => {
   if (!ts) return '';
@@ -212,6 +215,7 @@ export function Dashboard() {
 
   const [loading, setLoading] = useState(() => !cachedData);
   const [refreshing, setRefreshing] = useState(false);
+  const [occupancyFilter, setOccupancyFilter] = useState<DateFilterValue>(() => getDefaultDateFilter());
 
   const validLedgerEntries = useMemo(() => {
     return reconcileLedgerEntries(ledgerEntries, reservations, resLoaded);
@@ -412,6 +416,20 @@ export function Dashboard() {
 
   const occupancyRate = rooms.length > 0 ? Math.round((occupiedRoomsCount / rooms.length) * 100) : 0;
 
+  // Read-only date-range occupancy analytics (Daily, Monthly, Yearly, Custom Range)
+  const occupancyAnalytics = useMemo(
+    () => computeOccupancyAnalytics(rooms, reservations, occupancyFilter),
+    [rooms, reservations, occupancyFilter]
+  );
+
+  const isOccupancyFiltered = occupancyFilter.mode !== 'all';
+  const displayedOccupancyRate = isOccupancyFiltered ? occupancyAnalytics.occupancyRate : occupancyRate;
+  const displayedOccupancySubtitle = isOccupancyFiltered
+    ? occupancyFilter.mode === 'day'
+      ? `${occupancyAnalytics.occupiedRoomNights} of ${rooms.length} rooms • ${occupancyAnalytics.periodLabel}`
+      : `Avg ${occupancyAnalytics.avgOccupiedRooms} of ${rooms.length}/day • ${occupancyAnalytics.periodLabel}`
+    : `${occupiedRoomsCount} of ${rooms.length} rooms occupied`;
+
   // Dirty rooms: vacant rooms that need cleaning
   const dirtyRoomsCount = useMemo(() => {
     return rooms.filter(r => {
@@ -609,9 +627,9 @@ export function Dashboard() {
       ? [
           // Finance & Hotel Admin Visibility: Complete Financial Summary
           { 
-            label: 'Occupancy', 
-            subtitle: `${occupiedRoomsCount} of ${rooms.length} rooms occupied`,
-            value: `${occupancyRate}%`, 
+            label: isOccupancyFiltered ? 'Occupancy (Filtered)' : 'Occupancy', 
+            subtitle: displayedOccupancySubtitle,
+            value: `${displayedOccupancyRate}%`, 
             icon: BedDouble, 
             color: 'text-blue-500' 
           },
@@ -682,9 +700,9 @@ export function Dashboard() {
             color: 'text-emerald-400'
           }] : []),
           { 
-            label: 'Occupancy', 
-            subtitle: `${occupiedRoomsCount} of ${rooms.length} rooms occupied`,
-            value: `${occupancyRate}%`, 
+            label: isOccupancyFiltered ? 'Occupancy (Filtered)' : 'Occupancy', 
+            subtitle: displayedOccupancySubtitle,
+            value: `${displayedOccupancyRate}%`, 
             icon: BedDouble, 
             color: 'text-blue-500' 
           },
@@ -913,6 +931,26 @@ export function Dashboard() {
         </div>
       </header>
 
+      {/* Occupancy Date Range Selector (Day, Month, Year, Custom Range) */}
+      {!(profile?.role === 'superAdmin' && !hotel?.id) && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3 print:hidden">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 shrink-0">
+              <Calendar size={15} />
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-zinc-100">Occupancy Date Range</div>
+              <div className="text-[11px] text-zinc-400 truncate">
+                {isOccupancyFiltered
+                  ? `Showing occupancy for ${occupancyAnalytics.periodLabel}`
+                  : 'Showing live occupancy • select Day, Month, Year, or Range'}
+              </div>
+            </div>
+          </div>
+          <DateFilterControl value={occupancyFilter} onChange={setOccupancyFilter} />
+        </div>
+      )}
+
       {/* Proactive Daily Revenue Threshold Deficit Alert */}
       {hasRevenueShortfall && (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-lg backdrop-blur-sm">
@@ -985,6 +1023,17 @@ export function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
         <div className="lg:col-span-2 space-y-6 sm:space-y-8">
+          {/* Occupancy Overview (Daily, Monthly, Yearly & Custom Date Range) */}
+          {!(profile?.role === 'superAdmin' && !hotel?.id) && (
+            <DashboardOccupancyPanel
+              summary={occupancyAnalytics}
+              filter={occupancyFilter}
+              onFilterChange={setOccupancyFilter}
+              reservations={reservations}
+              isLight={isLight}
+            />
+          )}
+
           {/* Revenue Chart - Strictly restricted to Finance and Hotel Admin */}
           {(profile?.role === 'superAdmin' || (canViewFinances && isModuleEnabled(hotel, 'finance'))) && (
             <div className="bg-zinc-900 border border-zinc-800 p-4 sm:p-6 rounded-2xl">
