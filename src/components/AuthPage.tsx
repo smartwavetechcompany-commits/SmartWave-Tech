@@ -964,29 +964,6 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
               Sign out and try another account
             </button>
           )}
-          {isLogin && !user && (
-            <div className="pt-2 border-t border-zinc-800/80 text-[11px] text-zinc-500 space-y-1.5">
-              <p>Need a tracking code to register your hotel? Contact our administrator on demand:</p>
-              <div className="flex flex-wrap items-center justify-center gap-3">
-                <a
-                  href={`mailto:${(settings.supportEmail || 'support@tyyltech.com').trim()}?subject=${encodeURIComponent('Tracking Code Inquiry for Hotel Registration')}`}
-                  className="inline-flex items-center gap-1 text-emerald-400/90 hover:text-emerald-300 font-medium transition-colors"
-                >
-                  <Mail size={12} />
-                  <span>{(settings.supportEmail || 'support@tyyltech.com').trim()}</span>
-                </a>
-                {settings.supportPhone?.trim() && (
-                  <a
-                    href={`tel:${settings.supportPhone.trim().replace(/[^\d+]/g, '')}`}
-                    className="inline-flex items-center gap-1 text-zinc-300 hover:text-white font-medium transition-colors"
-                  >
-                    <Phone size={12} />
-                    <span>{settings.supportPhone.trim()}</span>
-                  </a>
-                )}
-              </div>
-            </div>
-          )}
         </div>
       </>
     )}
