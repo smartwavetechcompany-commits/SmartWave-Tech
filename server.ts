@@ -85,10 +85,23 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, ".env") });
 dotenv.config();
 
+// Process-level resilience guards so transient network/API rejections or unexpected async errors
+// never terminate the live Node.js worker and trigger reverse-proxy 503 Service Unavailable responses.
+if (!(globalThis as any).__tyylServerProcessGuardsRegistered) {
+  (globalThis as any).__tyylServerProcessGuardsRegistered = true;
+  process.on("unhandledRejection", (reason) => {
+    console.error("[SERVER] Unhandled promise rejection (kept alive):", reason);
+  });
+  process.on("uncaughtException", (err) => {
+    console.error("[SERVER] Uncaught exception (kept alive):", err);
+  });
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
   app.disable("x-powered-by");
+  app.set("trust proxy", 1);
 
   // Security Headers Middleware (iFrame compatible for AI Studio preview)
   app.use((req, res, next) => {
@@ -6954,31 +6967,78 @@ async function startServer() {
     });
   }
 
+  // Express global error middleware so malformed payloads or unexpected route throws return clean JSON/HTTP responses
+  app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error(`[SERVER] Express route error on ${req.method} ${req.path}:`, err?.message || err);
+    if (res.headersSent) return;
+    const status =
+      typeof err?.status === "number" && err.status >= 400 && err.status < 600
+        ? err.status
+        : typeof err?.statusCode === "number" && err.statusCode >= 400 && err.statusCode < 600
+          ? err.statusCode
+          : 500;
+    if (req.path.startsWith("/api/")) {
+      return res.status(status).json({
+        error: status < 500 ? sanitizeErrorForClient(err, "Invalid request.") : "Internal server error.",
+      });
+    }
+    return res.status(status).type("text/plain").send(status < 500 ? "Bad request" : "Internal server error");
+  });
+
+  // Reverse-proxy compatible timeouts (LiteSpeed / Nginx / Cloud Run) to prevent half-closed keep-alive 503s
+  httpServer.keepAliveTimeout = 65_000;
+  httpServer.headersTimeout = 66_000;
+  httpServer.requestTimeout = 120_000;
+
+  httpServer.on("error", (err: NodeJS.ErrnoException) => {
+    console.error("[SERVER] HTTP server error:", err?.message || err);
+  });
+
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
-    // Start non-blocking Daily Hotel Operations Report scheduler strictly AFTER HTTP server is live
-    try {
-      startDailyOpsBackgroundScheduler();
-    } catch (schedErr) {
-      console.error("[DAILY OPS SCHEDULER] Failed to initialize background scheduler (non-fatal):", schedErr);
-    }
-    // Start non-blocking automated Loyalty Points Expiry scheduler (independent of admin login)
-    try {
-      startLoyaltyExpiryBackgroundJob(async (p) => {
-        await dispatchServerLoyaltyNotification({
-          hotelId: p.hotelId,
-          eventType: "loyalty.points_expired",
-          guestId: p.guestId,
-          guestName: p.guestName,
-          guestEmail: p.guestEmail,
-          transaction: p.transaction,
-          account: p.account,
+    // Defer background schedulers briefly after HTTP bind so startup & reverse-proxy health checks respond instantly
+    const schedulerBootTimer = setTimeout(() => {
+      try {
+        startDailyOpsBackgroundScheduler();
+      } catch (schedErr) {
+        console.error("[DAILY OPS SCHEDULER] Failed to initialize background scheduler (non-fatal):", schedErr);
+      }
+      try {
+        startLoyaltyExpiryBackgroundJob(async (p) => {
+          await dispatchServerLoyaltyNotification({
+            hotelId: p.hotelId,
+            eventType: "loyalty.points_expired",
+            guestId: p.guestId,
+            guestName: p.guestName,
+            guestEmail: p.guestEmail,
+            transaction: p.transaction,
+            account: p.account,
+          });
         });
-      });
-    } catch (loyaltySchedErr) {
-      console.error("[LOYALTY EXPIRY SCHEDULER] Failed to initialize background expiry job (non-fatal):", loyaltySchedErr);
+      } catch (loyaltySchedErr) {
+        console.error("[LOYALTY EXPIRY SCHEDULER] Failed to initialize background expiry job (non-fatal):", loyaltySchedErr);
+      }
+    }, 10_000);
+    if (typeof (schedulerBootTimer as any).unref === "function") {
+      (schedulerBootTimer as any).unref();
     }
   });
+
+  const gracefulShutdown = (signal: string) => {
+    console.log(`[SERVER] Received ${signal}; draining HTTP connections cleanly...`);
+    httpServer.close(() => {
+      process.exit(0);
+    });
+    const forceTimer = setTimeout(() => process.exit(0), 8_000);
+    if (typeof (forceTimer as any).unref === "function") {
+      (forceTimer as any).unref();
+    }
+  };
+  process.once("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.once("SIGINT", () => gracefulShutdown("SIGINT"));
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error("[SERVER] Fatal startup error:", err);
+  process.exit(1);
+});

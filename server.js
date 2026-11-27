@@ -30,17 +30,20 @@ async function start() {
   try {
     await import("./server.ts");
   } catch (err) {
+    const code = err && typeof err === "object" && "code" in err ? String(err.code) : "";
     if (
-      err &&
-      typeof err === "object" &&
-      "code" in err &&
-      (err.code === "ERR_UNKNOWN_FILE_EXTENSION" ||
-        err.code === "ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING")
+      code === "ERR_UNKNOWN_FILE_EXTENSION" ||
+      code === "ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING" ||
+      code === "ERR_MODULE_NOT_FOUND"
     ) {
-      const { register } = await import("tsx/esm/api");
-      register();
-      await import("./server.ts");
-      return;
+      try {
+        const { register } = await import("tsx/esm/api");
+        register();
+        await import("./server.ts");
+        return;
+      } catch (fallbackErr) {
+        console.error("Failed to start server via tsx fallback:", fallbackErr);
+      }
     }
     throw err;
   }

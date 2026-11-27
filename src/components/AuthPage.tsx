@@ -7,7 +7,7 @@ import { motion } from 'motion/react';
 import { Hotel, TrackingCode, UserProfile, OperationType, PlanType, HotelSettings } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { DEFAULT_SETTINGS } from '../constants';
-import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle, Mail, ShieldAlert, Building2 } from 'lucide-react';
+import { ExternalLink, CreditCard, Info, Eye, EyeOff, ArrowLeft, CheckCircle2, XCircle, Mail, Phone, ShieldAlert, Building2 } from 'lucide-react';
 import { cn } from '../utils';
 import { playNotificationSound } from '../utils/notificationSound';
 import { notifyTrackingCodeRequestAlert, notifyPlatformEvent } from '../services/transactionalEmailClient';
@@ -30,6 +30,7 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
   const [settings, setSettings] = useState({
     paymentInstructions: '',
     supportEmail: '',
+    supportPhone: '',
     bankName: '',
     accountNumber: '',
     accountName: '',
@@ -845,6 +846,29 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
                   value={formData.trackingCode}
                   onChange={(e) => setFormData({ ...formData, trackingCode: e.target.value })}
                 />
+                <div className="mt-2 p-3 rounded-lg bg-zinc-950/70 border border-zinc-800 space-y-2">
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    Tracking codes are issued on demand by our administrator. Need a code to register? Reach out via email or phone:
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <a
+                      href={`mailto:${(settings.supportEmail || 'support@tyyltech.com').trim()}?subject=${encodeURIComponent('Tracking Code Inquiry for Hotel Registration')}`}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/25 text-[11px] font-semibold text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                    >
+                      <Mail size={12} />
+                      <span>{(settings.supportEmail || 'support@tyyltech.com').trim()}</span>
+                    </a>
+                    {settings.supportPhone?.trim() && (
+                      <a
+                        href={`tel:${settings.supportPhone.trim().replace(/[^\d+]/g, '')}`}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-700 transition-colors"
+                      >
+                        <Phone size={12} />
+                        <span>{settings.supportPhone.trim()}</span>
+                      </a>
+                    )}
+                  </div>
+                </div>
               </div>
             </>
           )}
@@ -941,13 +965,27 @@ export function AuthPage({ initialEmail, initialSuccessMessage }: AuthPageProps 
             </button>
           )}
           {isLogin && !user && (
-            <button
-              type="button"
-              onClick={() => setIsRequesting(true)}
-              className="block w-full text-emerald-500/80 text-xs font-bold uppercase tracking-widest hover:text-emerald-400 transition-all active:opacity-70"
-            >
-              Request Tracking Code
-            </button>
+            <div className="pt-2 border-t border-zinc-800/80 text-[11px] text-zinc-500 space-y-1.5">
+              <p>Need a tracking code to register your hotel? Contact our administrator on demand:</p>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <a
+                  href={`mailto:${(settings.supportEmail || 'support@tyyltech.com').trim()}?subject=${encodeURIComponent('Tracking Code Inquiry for Hotel Registration')}`}
+                  className="inline-flex items-center gap-1 text-emerald-400/90 hover:text-emerald-300 font-medium transition-colors"
+                >
+                  <Mail size={12} />
+                  <span>{(settings.supportEmail || 'support@tyyltech.com').trim()}</span>
+                </a>
+                {settings.supportPhone?.trim() && (
+                  <a
+                    href={`tel:${settings.supportPhone.trim().replace(/[^\d+]/g, '')}`}
+                    className="inline-flex items-center gap-1 text-zinc-300 hover:text-white font-medium transition-colors"
+                  >
+                    <Phone size={12} />
+                    <span>{settings.supportPhone.trim()}</span>
+                  </a>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </>

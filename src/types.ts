@@ -489,6 +489,7 @@ export interface SystemSettings {
   accountName: string;
   paymentInstructions: string;
   supportEmail: string;
+  supportPhone?: string;
   exchangeRate: number;
 }
 

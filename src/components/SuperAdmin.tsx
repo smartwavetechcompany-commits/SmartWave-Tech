@@ -57,6 +57,7 @@ export function SuperAdmin() {
     accountName: '',
     paymentInstructions: '',
     supportEmail: '',
+    supportPhone: '',
     exchangeRate: 1500,
   });
   const [isAddingCode, setIsAddingCode] = useState(false);
@@ -167,6 +168,7 @@ export function SuperAdmin() {
 
   const updateSettings = async () => {
     const trimmedSupportEmail = (settings.supportEmail || '').trim();
+    const trimmedSupportPhone = (settings.supportPhone || '').trim();
     if (trimmedSupportEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedSupportEmail)) {
       toast.error('Please enter a valid Support Email address.');
       return;
@@ -176,13 +178,14 @@ export function SuperAdmin() {
       const payload = {
         ...settings,
         supportEmail: trimmedSupportEmail,
+        supportPhone: trimmedSupportPhone,
       };
       await database.safeSet(doc(db, 'system', 'settings'), payload, {
         hotelId: 'system',
         module: 'SuperAdmin',
         action: 'UPDATE_SYSTEM_SETTINGS',
         details: trimmedSupportEmail
-          ? `Updated global system settings (Support Email: ${trimmedSupportEmail})`
+          ? `Updated global system settings (Support Email: ${trimmedSupportEmail}${trimmedSupportPhone ? `, Support Phone: ${trimmedSupportPhone}` : ''})`
           : 'Updated global system settings'
       });
       setSettings(payload);
@@ -2103,6 +2106,22 @@ export function SuperAdmin() {
                   />
                   <p className="text-[11px] text-zinc-500 mt-1">
                     Updates live in Help &amp; Support, Sidebar, Login, and Renewal pages for every hotel account registered under you.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1 flex items-center gap-1">
+                    <Phone size={12} />
+                    Support Phone (For Tracking Code Inquiries)
+                  </label>
+                  <input 
+                    type="tel" 
+                    placeholder="+234 800 000 0000"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2 text-zinc-50 text-sm focus:border-emerald-500 outline-none"
+                    value={settings.supportPhone || ''}
+                    onChange={(e) => setSettings({ ...settings, supportPhone: e.target.value })}
+                  />
+                  <p className="text-[11px] text-zinc-500 mt-1">
+                    Displayed alongside your Support Email on the registration screen so new hotels can call or email you to request a tracking code on demand.
                   </p>
                 </div>
                 <div>
